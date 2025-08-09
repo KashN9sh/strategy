@@ -10,6 +10,7 @@ use std::thread;
 use std::fs;
 use std::path::Path;
 use serde::{Serialize, Deserialize};
+// use image::GenericImageView; // не нужен
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -55,12 +56,32 @@ struct TileAtlas {
     half_h: i32,
     grass: Vec<u8>,
     forest: Vec<u8>,
-    water: Vec<u8>,
+    water_frames: Vec<Vec<u8>>, // анимированная вода
+    // исходные тайлы из атласа (базовый размер без масштабирования)
+    base_loaded: bool,
+    base_w: i32,
+    base_h: i32,
+    base_grass: Vec<u8>,
+    base_forest: Vec<u8>,
+    base_water: Vec<u8>,
 }
 
 impl TileAtlas {
     fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water: Vec::new() }
+        Self {
+            zoom_px: -1,
+            half_w: 0,
+            half_h: 0,
+            grass: Vec::new(),
+            forest: Vec::new(),
+            water_frames: Vec::new(),
+            base_loaded: false,
+            base_w: 0,
+            base_h: 0,
+            base_grass: Vec::new(),
+            base_forest: Vec::new(),
+            base_water: Vec::new(),
+        }
     }
 
     fn ensure_zoom(&mut self, zoom: f32) {
@@ -71,9 +92,23 @@ impl TileAtlas {
         self.zoom_px = zoom_px;
         self.half_w = half_w.max(1);
         self.half_h = half_h.max(1);
-        self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
-        self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
-        self.water = Self::build_tile(self.half_w, self.half_h, [28, 64, 120, 255]);
+        if self.base_loaded {
+            // масштабируем из атласа
+            self.grass = Self::scale_and_mask(&self.base_grass, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.forest = Self::scale_and_mask(&self.base_forest, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.water_frames.clear();
+            self.water_frames.push(Self::scale_and_mask(&self.base_water, self.base_w, self.base_h, self.half_w, self.half_h));
+        } else {
+            // процедурные тайлы
+            self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
+            self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
+            // построим несколько кадров воды с мерцанием
+            self.water_frames.clear();
+            let frames = 8;
+            for phase in 0..frames {
+                self.water_frames.push(Self::build_water_tile(self.half_w, self.half_h, phase, frames));
+            }
+        }
     }
 
     fn build_tile(half_w: i32, half_h: i32, color: [u8; 4]) -> Vec<u8> {
@@ -95,8 +130,67 @@ impl TileAtlas {
         buf
     }
 
-    fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind) {
-        let src = match kind { TileKind::Grass => &self.grass, TileKind::Forest => &self.forest, TileKind::Water => &self.water };
+    fn build_water_tile(half_w: i32, half_h: i32, phase: i32, frames: i32) -> Vec<u8> {
+        let w = half_w * 2 + 1;
+        let h = half_h * 2 + 1;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        for dy in -half_h..=half_h {
+            let t = dy.abs() as f32 / half_h.max(1) as f32;
+            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
+            let y = dy + half_h;
+            let x0 = half_w - row_half;
+            let x1 = half_w + row_half;
+            let base = (y as usize) * (w as usize) * 4;
+            for x in x0..=x1 {
+                // мерцание по синусу вдоль X с фазой
+                let fx = (x - half_w) as f32 / half_w.max(1) as f32;
+                let ph = (phase as f32) / frames as f32;
+                let wave = (fx * std::f32::consts::PI + ph * 2.0 * std::f32::consts::PI).sin();
+                let mut r = 28.0 + wave * 4.0;
+                let mut g = 64.0 + wave * 10.0;
+                let mut b = 120.0 + wave * 16.0;
+                r = r.clamp(0.0, 255.0);
+                g = g.clamp(0.0, 255.0);
+                b = b.clamp(0.0, 255.0);
+                let idx = base + (x as usize) * 4;
+                buf[idx] = r as u8;
+                buf[idx + 1] = g as u8;
+                buf[idx + 2] = b as u8;
+                buf[idx + 3] = 255;
+            }
+        }
+        buf
+    }
+
+    fn scale_and_mask(base: &Vec<u8>, bw: i32, bh: i32, half_w: i32, half_h: i32) -> Vec<u8> {
+        let w = half_w * 2 + 1;
+        let h = half_h * 2 + 1;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        for dy in -half_h..=half_h {
+            let t = dy.abs() as f32 / half_h.max(1) as f32;
+            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
+            let y = dy + half_h;
+            let x0 = half_w - row_half;
+            let x1 = half_w + row_half;
+            for x in x0..=x1 {
+                let gx = x; // 0..w-1
+                let gy = y; // 0..h-1
+                let src_x = ((gx as f32) * (bw as f32 - 1.0) / (w as f32 - 1.0)).round() as i32;
+                let src_y = ((gy as f32) * (bh as f32 - 1.0) / (h as f32 - 1.0)).round() as i32;
+                let sidx = ((src_y as usize) * (bw as usize) + (src_x as usize)) * 4;
+                let didx = ((gy as usize) * (w as usize) + (gx as usize)) * 4;
+                buf[didx..didx + 4].copy_from_slice(&base[sidx..sidx + 4]);
+            }
+        }
+        buf
+    }
+
+    fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind, water_frame: usize) {
+        let src = match kind {
+            TileKind::Grass => &self.grass,
+            TileKind::Forest => &self.forest,
+            TileKind::Water => &self.water_frames[water_frame % self.water_frames.len().max(1)],
+        };
         let w = self.half_w * 2 + 1;
         let h = self.half_h * 2 + 1;
         let x0 = cx - self.half_w;
@@ -136,6 +230,13 @@ impl TileAtlas {
             dst_slice.copy_from_slice(src_slice);
         }
     }
+}
+
+// Атлас спрайтов зданий (PNG с колонками одинаковой ширины)
+struct BuildingAtlas {
+    sprites: Vec<Vec<u8>>, // RGBA
+    w: i32,
+    h: i32,
 }
 
 #[derive(Clone)]
@@ -488,6 +589,53 @@ fn run() -> Result<()> {
     let mut buildings: Vec<Building> = Vec::new();
     let mut resources = Resources { wood: 20, gold: 100 };
     let mut atlas = TileAtlas::new();
+    let mut building_atlas: Option<BuildingAtlas> = None;
+    // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 3 тайла в строку: grass, forest, water)
+    if let Ok(img) = image::open("assets/tiles.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        // делим по 3 спрайта по ширине
+        let tile_w = (iw / 3) as i32;
+        let tile_h = ih as i32;
+        let slice_rgba = |index: u32| -> Vec<u8> {
+            let x0 = (index * tile_w as u32) as usize;
+            let mut out = vec![0u8; (tile_w * tile_h * 4) as usize];
+            for y in 0..tile_h as usize {
+                let src = ((y as u32) * iw as u32 + x0 as u32) as usize * 4;
+                let dst = y * tile_w as usize * 4;
+                out[dst..dst + tile_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + tile_w as usize * 4]);
+            }
+            out
+        };
+        atlas.base_loaded = true;
+        atlas.base_w = tile_w;
+        atlas.base_h = tile_h;
+        atlas.base_grass = slice_rgba(0);
+        atlas.base_forest = slice_rgba(1);
+        atlas.base_water = slice_rgba(2);
+    }
+    // buildings.png: N спрайтов по горизонтали, ширина = base_w (или 64), высота любая
+    if let Ok(img) = image::open("assets/buildings.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let base_w = if atlas.base_loaded { atlas.base_w } else { 64 } as u32;
+        let cols = (iw / base_w).max(1);
+        let mut sprites = Vec::new();
+        for i in 0..cols {
+            let x0 = (i * base_w) as usize;
+            let mut out = vec![0u8; base_w as usize * ih as usize * 4];
+            for y in 0..ih as usize {
+                let src = (y * iw as usize + x0) * 4;
+                let dst = y * base_w as usize * 4;
+                out[dst..dst + base_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + base_w as usize * 4]);
+            }
+            sprites.push(out);
+        }
+        building_atlas = Some(BuildingAtlas { sprites, w: base_w as i32, h: ih as i32 });
+    }
+    let mut water_anim_time: f32 = 0.0;
+    let mut show_grid = false;
+    let mut show_forest_overlay = false;
 
     let mut width_i32 = size.width as i32;
     let mut height_i32 = size.height as i32;
@@ -513,6 +661,8 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.speed_1x) { speed_mult = 1.0; }
                         if key == PhysicalKey::Code(input.speed_2x) { speed_mult = 2.0; }
                         if key == PhysicalKey::Code(input.speed_3x) { speed_mult = 3.0; }
+                        if key == PhysicalKey::Code(KeyCode::KeyG) { show_grid = !show_grid; }
+                        if key == PhysicalKey::Code(KeyCode::KeyH) { show_forest_overlay = !show_forest_overlay; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
                         if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
@@ -536,12 +686,15 @@ fn run() -> Result<()> {
                 WindowEvent::CursorMoved { position, .. } => {
                     let mx = position.x as i32;
                     let my = position.y as i32;
-                    hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h);
+                    let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
+                    hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h);
                 }
                 WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } => {
                     // ЛКМ — попытка построить
                     if button == winit::event::MouseButton::Left {
                         if let Some(tp) = hovered_tile {
+                            // кликаем по тайлу под курсором, но убедимся, что используем те же snapped-пиксели камеры,
+                            // чтобы не было рассинхрона между рендером и хитом
                             let tile_kind = world.get_tile(tp.x, tp.y);
                             if !world.is_occupied(tp.x, tp.y) && tile_kind != TileKind::Water {
                                 let cost = building_cost(selected_building);
@@ -587,20 +740,34 @@ fn run() -> Result<()> {
                     world.integrate_ready_chunks();
 
                     // Рисуем тайлы быстрым блитом
+                    let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
+                    let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
                     for my in min_ty..=max_ty {
                         for mx in min_tx..=max_tx {
                             let kind = world.get_tile(mx, my);
-                            let world_x = (mx - my) * atlas.half_w - cam_px.x.round() as i32;
-                            let world_y = (mx + my) * atlas.half_h - cam_px.y.round() as i32;
+                            let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
+                            let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
                             let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                            atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind);
+                            atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
+
+                            // сетка
+                            if show_grid {
+                                draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]);
+                            }
+
+                            // оверлей плотности леса (простая функция от шума)
+                            if show_forest_overlay {
+                                let n = world.fbm.get([mx as f64, my as f64]) as f32; // [-1..1]
+                                let v = ((n + 1.0) * 0.5 * 255.0) as u8;
+                                draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v, 50, 50, 255]);
+                            }
                         }
                     }
 
                     // Подсветка ховера
                     if let Some(tp) = hovered_tile {
-                        let world_x = (tp.x - tp.y) * atlas.half_w - cam_px.x.round() as i32;
-                        let world_y = (tp.x + tp.y) * atlas.half_h - cam_px.y.round() as i32;
+                        let world_x = (tp.x - tp.y) * atlas.half_w - cam_snap.x as i32;
+                        let world_y = (tp.x + tp.y) * atlas.half_h - cam_snap.y as i32;
                         let screen_pos = screen_center + IVec2::new(world_x, world_y);
                         draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
                     }
@@ -611,9 +778,25 @@ fn run() -> Result<()> {
                         let mx = b.pos.x;
                         let my = b.pos.y;
                         if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
-                        let world_x = (mx - my) * atlas.half_w - cam_px.x.round() as i32;
-                        let world_y = (mx + my) * atlas.half_h - cam_px.y.round() as i32;
+                        let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
+                        let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
                         let screen_pos = screen_center + IVec2::new(world_x, world_y);
+                        if let Some(ba) = &building_atlas {
+                            if let Some(idx) = building_sprite_index(b.kind) {
+                                if idx < ba.sprites.len() {
+                                    // Масштаб спрайта по текущей ширине тайла
+                                    let tile_w_px = atlas.half_w * 2 + 1;
+                                    let scale = tile_w_px as f32 / ba.w as f32;
+                                    let draw_w = (ba.w as f32 * scale).round() as i32;
+                                    let draw_h = (ba.h as f32 * scale).round() as i32;
+                                    let top_left_x = screen_pos.x - draw_w / 2;
+                                    // Привязываем нижний центр спрайта к нижней вершине ромба тайла
+                                    let top_left_y = screen_pos.y + atlas.half_h - draw_h;
+                                    blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
+                                    continue;
+                                }
+                            }
+                        }
                         let color = match b.kind { BuildingKind::Lumberjack => [140, 90, 40, 255], BuildingKind::House => [180, 180, 180, 255] };
                         draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
                     }
@@ -633,6 +816,7 @@ fn run() -> Result<()> {
                 // ограничим, чтобы не накапливалось слишком много
                 let frame_ms = frame_ms.min(250.0);
                 accumulator_ms += frame_ms;
+                water_anim_time += frame_ms;
 
                 let base_step_ms = config.base_step_ms;
                 let step_ms = (base_step_ms / speed_mult.max(0.0001)).max(1.0);
@@ -689,19 +873,34 @@ fn draw_iso_tile(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, zo
 }
 
 fn draw_iso_outline(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32, color: [u8; 4]) {
+    // Вершины ромба
+    let top = (cx, cy - half_h);
+    let right = (cx + half_w, cy);
+    let bottom = (cx, cy + half_h);
+    let left = (cx - half_w, cy);
 
-    let mut plot = |x: i32, y: i32| {
-        if x < 0 || y < 0 || x >= width || y >= height { return; }
-        let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
-        frame[idx..idx + 4].copy_from_slice(&color);
-    };
+    draw_line(frame, width, height, top.0, top.1, right.0, right.1, color);
+    draw_line(frame, width, height, right.0, right.1, bottom.0, bottom.1, color);
+    draw_line(frame, width, height, bottom.0, bottom.1, left.0, left.1, color);
+    draw_line(frame, width, height, left.0, left.1, top.0, top.1, color);
+}
 
-    // диагональные стороны ромба
-    for i in -half_w..=half_w {
-        let y1 = cy + (half_h as f32 * (1.0 - (i as f32 / half_w as f32))).round() as i32;
-        let y2 = cy - (half_h as f32 * (1.0 - (i as f32 / half_w as f32))).round() as i32;
-        plot(cx + i, y1);
-        plot(cx + i, y2);
+fn draw_line(frame: &mut [u8], width: i32, height: i32, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    loop {
+        if x0 >= 0 && y0 >= 0 && x0 < width && y0 < height {
+            let idx = ((y0 as usize) * (width as usize) + (x0 as usize)) * 4;
+            frame[idx..idx + 4].copy_from_slice(&color);
+        }
+        if x0 == x1 && y0 == y1 { break; }
+        let e2 = 2 * err;
+        if e2 >= dy { err += dy; x0 += sx; }
+        if e2 <= dx { err += dx; y0 += sy; }
     }
 }
 
@@ -717,6 +916,78 @@ fn draw_building(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, ha
         for x in x0..=x1 {
             let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
             frame[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
+    match kind {
+        BuildingKind::Lumberjack => Some(0),
+        BuildingKind::House => Some(1),
+    }
+}
+
+fn blit_sprite_alpha(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32) {
+    let dst_x0 = x.max(0);
+    let dst_y0 = y.max(0);
+    let dst_x1 = (x + sw).min(fw);
+    let dst_y1 = (y + sh).min(fh);
+    if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }
+    for dy in dst_y0..dst_y1 {
+        let sy = dy - y;
+        let src_row = (sy as usize) * (sw as usize) * 4;
+        let dst_row = (dy as usize) * (fw as usize) * 4;
+        for dx in dst_x0..dst_x1 {
+            let sx = dx - x;
+            let sidx = src_row + (sx as usize) * 4;
+            let didx = dst_row + (dx as usize) * 4;
+            let sa = src[sidx + 3] as u32;
+            if sa == 0 { continue; }
+            let sr = src[sidx] as u32;
+            let sg = src[sidx + 1] as u32;
+            let sb = src[sidx + 2] as u32;
+            let dr = frame[didx] as u32;
+            let dg = frame[didx + 1] as u32;
+            let db = frame[didx + 2] as u32;
+            // alpha blend: out = src.a * src + (1 - src.a) * dst
+            let a = sa;
+            let na = 255 - a;
+            frame[didx] = ((a * sr + na * dr) / 255) as u8;
+            frame[didx + 1] = ((a * sg + na * dg) / 255) as u8;
+            frame[didx + 2] = ((a * sb + na * db) / 255) as u8;
+            frame[didx + 3] = 255;
+        }
+    }
+}
+
+fn blit_sprite_alpha_scaled(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32, dw: i32, dh: i32) {
+    let dst_x0 = x.max(0);
+    let dst_y0 = y.max(0);
+    let dst_x1 = (x + dw).min(fw);
+    let dst_y1 = (y + dh).min(fh);
+    if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }
+    for dy in dst_y0..dst_y1 {
+        let sy = ((dy - y) as f32 * (sh as f32 - 1.0) / (dh as f32 - 1.0)).round() as i32;
+        let src_row = (sy as usize) * (sw as usize) * 4;
+        let dst_row = (dy as usize) * (fw as usize) * 4;
+        for dx in dst_x0..dst_x1 {
+            let sx = ((dx - x) as f32 * (sw as f32 - 1.0) / (dw as f32 - 1.0)).round() as i32;
+            let sidx = src_row + (sx as usize) * 4;
+            let didx = dst_row + (dx as usize) * 4;
+            let sa = src[sidx + 3] as u32;
+            if sa == 0 { continue; }
+            let sr = src[sidx] as u32;
+            let sg = src[sidx + 1] as u32;
+            let sb = src[sidx + 2] as u32;
+            let dr = frame[didx] as u32;
+            let dg = frame[didx + 1] as u32;
+            let db = frame[didx + 2] as u32;
+            let a = sa;
+            let na = 255 - a;
+            frame[didx] = ((a * sr + na * dr) / 255) as u8;
+            frame[didx + 1] = ((a * sg + na * dg) / 255) as u8;
+            frame[didx + 2] = ((a * sb + na * db) / 255) as u8;
+            frame[didx + 3] = 255;
         }
     }
 }
