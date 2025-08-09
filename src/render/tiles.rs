@@ -89,3 +89,23 @@ pub fn blit_sprite_alpha_scaled(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i
     }
 }
 
+pub fn draw_tree(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32, stage: u8) {
+    let trunk_color = [90, 60, 40, 255];
+    let leaf_color = [40, 120, 60, 255];
+    let scale = match stage { 0 => 0.5, 1 => 0.8, _ => 1.0 } as f32;
+    let trunk_h = ((half_h as f32 * 0.5) * scale).max(2.0) as i32;
+    for y in -trunk_h..=0 { set_px(frame, width, height, cx, cy + y, trunk_color); }
+    let rw = ((half_w as f32 * 0.4) * scale).max(2.0) as i32;
+    let rh = ((half_h as f32 * 0.6) * scale).max(3.0) as i32;
+    for yy in -rh..=rh {
+        let span = rw - (rw * yy.abs() / rh);
+        for xx in -span..=span { set_px(frame, width, height, cx + xx, cy + yy - rh, leaf_color); }
+    }
+}
+
+fn set_px(frame: &mut [u8], w: i32, h: i32, x: i32, y: i32, rgba: [u8; 4]) {
+    if x < 0 || y < 0 || x >= w || y >= h { return; }
+    let i = ((y * w + x) * 4) as usize;
+    frame[i..i+4].copy_from_slice(&rgba);
+}
+

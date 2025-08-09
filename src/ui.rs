@@ -23,6 +23,7 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, depot_
     draw_button(frame, fw, fh, pad, by, btn_w, btn_h, selected == BuildingKind::Lumberjack, b"Lumberjack [Z]", [200,200,200,255], s);
     draw_button(frame, fw, fh, pad + btn_w + 6 * s, by, btn_w, btn_h, selected == BuildingKind::House, b"House [X]", [200,200,200,255], s);
     draw_button(frame, fw, fh, pad + (btn_w + 6 * s) * 2, by, btn_w, btn_h, selected == BuildingKind::Warehouse, b"Warehouse", [200,200,200,255], s);
+    draw_button(frame, fw, fh, pad + (btn_w + 6 * s) * 3, by, btn_w, btn_h, selected == BuildingKind::Forester, b"Forester", [200,200,200,255], s);
 
     let info_x = fw - 160 * s; let info_y = 8 * s;
     draw_text_mini(frame, fw, fh, info_x, info_y, b"FPS:", [200,200,200,255], s);
