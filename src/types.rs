@@ -14,6 +14,13 @@ pub enum BuildingKind {
     House,
     Warehouse,
     Forester,
+    StoneQuarry,
+    ClayPit,
+    Kiln,
+    WheatField,
+    Mill,
+    Bakery,
+    Fishery,
 }
 
 #[derive(Clone, Debug)]
@@ -24,9 +31,17 @@ pub struct Building {
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Resources {
     pub wood: i32,
     pub gold: i32,
+    pub stone: i32,
+    pub clay: i32,
+    pub bricks: i32,
+    pub wheat: i32,
+    pub flour: i32,
+    pub bread: i32,
+    pub fish: i32,
 }
 
 #[derive(Clone, Debug)]

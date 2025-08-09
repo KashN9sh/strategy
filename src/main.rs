@@ -168,12 +168,13 @@ fn run() -> Result<()> {
     // Состояние игры
     let mut hovered_tile: Option<IVec2> = None;
     let mut selected_building: BuildingKind = BuildingKind::Lumberjack;
+    let mut ui_category: ui::UICategory = ui::UICategory::Forestry;
     let mut buildings: Vec<Building> = Vec::new();
     let mut citizens: Vec<Citizen> = Vec::new();
     let mut jobs: Vec<Job> = Vec::new();
     let mut next_job_id: u64 = 1;
     let mut logs_on_ground: Vec<LogItem> = Vec::new();
-    let mut resources = Resources { wood: 20, gold: 100 };
+    let mut resources = Resources { wood: 20, gold: 100, ..Default::default() };
     let mut warehouses: Vec<WarehouseStore> = Vec::new();
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
@@ -260,8 +261,8 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
-                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100 }; }
-                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
+                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
                         if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom, &world)); }
                         if key == PhysicalKey::Code(input.load_game) {
                             if let Ok(save) = load_game() {
@@ -295,12 +296,52 @@ fn run() -> Result<()> {
                         if show_ui {
                             let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
                             let bar_h = ui::ui_bar_height(height_i32, ui_s);
-                            if cursor_xy.y >= 0 && cursor_xy.y < bar_h {
-                                let pad = 8 * ui_s; let icon_size = 10 * ui_s; let by = pad + icon_size + 8 * ui_s; let btn_w = 90 * ui_s; let btn_h = 18 * ui_s;
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad, by, btn_w, btn_h) { selected_building = BuildingKind::Lumberjack; return; }
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + btn_w + 6 * ui_s, by, btn_w, btn_h) { selected_building = BuildingKind::House; return; }
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + (btn_w + 6 * ui_s) * 2, by, btn_w, btn_h) { selected_building = BuildingKind::Warehouse; return; }
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + (btn_w + 6 * ui_s) * 3, by, btn_w, btn_h) { selected_building = BuildingKind::Forester; return; }
+                            // нижняя панель UI
+                            let bottom_bar_h = ui::bottom_panel_height(ui_s);
+                            let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;
+                            // клик по категориям
+                            let mut cx = padb; let cy = by0 + padb;
+                            let cats = [
+                                (ui::UICategory::Housing, b"Housing".as_ref()),
+                                (ui::UICategory::Storage, b"Storage".as_ref()),
+                                (ui::UICategory::Forestry, b"Forestry".as_ref()),
+                                (ui::UICategory::Mining, b"Mining".as_ref()),
+                                (ui::UICategory::Food, b"Food".as_ref()),
+                                (ui::UICategory::Logistics, b"Logistics".as_ref()),
+                            ];
+                            for (cat, label) in cats.iter() {
+                                let bw = ui::button_w_for(label, ui_s);
+                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, cy, bw, btn_h) { ui_category = *cat; return; }
+                                cx += bw + 6 * ui_s;
+                            }
+                            // клик по зданиям выбранной категории
+                            let mut bx = padb; let by2 = cy + btn_h + 6 * ui_s;
+                            let buildings_for_cat: &[BuildingKind] = match ui_category {
+                                ui::UICategory::Housing => &[BuildingKind::House],
+                                ui::UICategory::Storage => &[BuildingKind::Warehouse],
+                                ui::UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
+                                ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::Kiln],
+                                ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
+                                ui::UICategory::Logistics => &[],
+                            };
+                            for &bk in buildings_for_cat.iter() {
+                                let label = match bk {
+                                    BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
+                                    BuildingKind::House => b"House".as_ref(),
+                                    BuildingKind::Warehouse => b"Warehouse".as_ref(),
+                                    BuildingKind::Forester => b"Forester".as_ref(),
+                                    BuildingKind::StoneQuarry => b"Quarry".as_ref(),
+                                    BuildingKind::ClayPit => b"Clay Pit".as_ref(),
+                                    BuildingKind::Kiln => b"Kiln".as_ref(),
+                                    BuildingKind::WheatField => b"Wheat Field".as_ref(),
+                                    BuildingKind::Mill => b"Mill".as_ref(),
+                                    BuildingKind::Bakery => b"Bakery".as_ref(),
+                                    BuildingKind::Fishery => b"Fishery".as_ref(),
+                                };
+                                let bw = ui::button_w_for(label, ui_s);
+                                if bx + bw > width_i32 - padb { break; }
+                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { selected_building = bk; return; }
+                                bx += bw + 6 * ui_s;
                             }
                         }
                         if let Some(tp) = hovered_tile {
@@ -313,7 +354,22 @@ fn run() -> Result<()> {
                             // кликаем по тайлу под курсором, но убедимся, что используем те же snapped-пиксели камеры,
                             // чтобы не было рассинхрона между рендером и хитом
                             let tile_kind = world.get_tile(tp.x, tp.y);
-                            if !world.is_occupied(tp) && tile_kind != TileKind::Water {
+                            // дополнительные валидаторы по типу здания
+                            let mut allowed = !world.is_occupied(tp) && tile_kind != TileKind::Water;
+                            if allowed {
+                                match selected_building {
+                                    BuildingKind::Fishery => {
+                                        // должен быть рядом с водой
+                                        const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
+                                        allowed = NB.iter().any(|(dx,dy)| world.get_tile(tp.x+dx, tp.y+dy) == TileKind::Water);
+                                    }
+                                    BuildingKind::WheatField => {
+                                        allowed = tile_kind == TileKind::Grass;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if allowed {
                                 let cost = building_cost(selected_building);
                                 if resources.wood >= cost.wood && resources.gold >= cost.gold {
                                     resources.wood -= cost.wood;
@@ -442,6 +498,13 @@ fn run() -> Result<()> {
                             BuildingKind::House => [180, 180, 180, 255],
                             BuildingKind::Warehouse => [150, 120, 80, 255],
                             BuildingKind::Forester => [90, 140, 90, 255],
+                            BuildingKind::StoneQuarry => [120, 120, 120, 255],
+                            BuildingKind::ClayPit => [150, 90, 70, 255],
+                            BuildingKind::Kiln => [160, 60, 40, 255],
+                            BuildingKind::WheatField => [200, 180, 80, 255],
+                            BuildingKind::Mill => [210, 210, 180, 255],
+                            BuildingKind::Bakery => [200, 160, 120, 255],
+                            BuildingKind::Fishery => [100, 140, 200, 255],
                         };
                         render::tiles::draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
                     }
@@ -463,7 +526,14 @@ fn run() -> Result<()> {
                     // UI наложение
                     if show_ui {
                         let depot_total: i32 = warehouses.iter().map(|w| w.wood).sum();
-                        ui::draw_ui(frame, width_i32, height_i32, &resources, depot_total, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base);
+                        let total_wood = depot_total + resources.wood;
+                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category);
+                        // простая подсказка по наведению на ресурсы: дерево=общая сумма
+                        let s = ui::ui_scale(height_i32, config.ui_scale_base);
+                        let pad = 8 * s; let icon = 10 * s; let x0 = pad; let y0 = pad; let w = icon + 4 + 50; let h = icon;
+                        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x0, y0, w, h) {
+                            ui::draw_tooltip(frame, width_i32, height_i32, x0, y0 + h + 4, b"Wood = on hand + in warehouses", s);
+                        }
                     }
 
                     if let Err(err) = pixels.render() {
@@ -575,6 +645,13 @@ fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
         BuildingKind::House => Some(1),
         BuildingKind::Warehouse => Some(2),
         BuildingKind::Forester => Some(3),
+        BuildingKind::StoneQuarry => Some(4),
+        BuildingKind::ClayPit => Some(5),
+        BuildingKind::Kiln => Some(6),
+        BuildingKind::WheatField => Some(7),
+        BuildingKind::Mill => Some(8),
+        BuildingKind::Bakery => Some(9),
+        BuildingKind::Fishery => Some(10),
     }
 }
 
@@ -639,10 +716,17 @@ fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i
 
 fn building_cost(kind: BuildingKind) -> Resources {
     match kind {
-        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10 },
-        BuildingKind::House => Resources { wood: 10, gold: 15 },
-        BuildingKind::Warehouse => Resources { wood: 20, gold: 30 },
-        BuildingKind::Forester => Resources { wood: 15, gold: 20 },
+        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10, ..Default::default() },
+        BuildingKind::House => Resources { wood: 10, gold: 15, ..Default::default() },
+        BuildingKind::Warehouse => Resources { wood: 20, gold: 30, ..Default::default() },
+        BuildingKind::Forester => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::StoneQuarry => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::ClayPit => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::Kiln => Resources { wood: 15, gold: 15, ..Default::default() },
+        BuildingKind::WheatField => Resources { wood: 5, gold: 5, ..Default::default() },
+        BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
+        BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
+        BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
     }
 }
 
@@ -660,10 +744,11 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
                 }
             }
             BuildingKind::House => {
-                // каждые 5с -1 дерево, +1 золото
+                // каждые 5с: потребляет еду (хлеб или рыбу) и даёт золото
                 if b.timer_ms >= 5000 {
                     b.timer_ms = 0;
-                    if resources.wood > 0 { resources.wood -= 1; resources.gold += 1; }
+                    if resources.bread > 0 { resources.bread -= 1; resources.gold += 1; }
+                    else if resources.fish > 0 { resources.fish -= 1; resources.gold += 1; }
                 }
             }
             BuildingKind::Warehouse => { /* пока пассивный */ }
@@ -682,6 +767,40 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
                         }
                     }}
                     if let Some((_, p)) = best { world.plant_tree(p); }
+                }
+            }
+            BuildingKind::StoneQuarry => {
+                // каждые 4с +1 камень
+                if b.timer_ms >= 4000 { b.timer_ms = 0; resources.stone += 1; }
+            }
+            BuildingKind::ClayPit => {
+                // каждые 4с +1 глина
+                if b.timer_ms >= 4000 { b.timer_ms = 0; resources.clay += 1; }
+            }
+            BuildingKind::Kiln => {
+                // каждые 5с: 1 глина + 1 дерево -> 1 кирпич
+                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.clay > 0 && resources.wood > 0 { resources.clay -= 1; resources.wood -= 1; resources.bricks += 1; } }
+            }
+            BuildingKind::WheatField => {
+                // каждые 6с +1 пшеница
+                if b.timer_ms >= 6000 { b.timer_ms = 0; resources.wheat += 1; }
+            }
+            BuildingKind::Mill => {
+                // каждые 5с: 1 пшеница -> 1 мука
+                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.wheat > 0 { resources.wheat -= 1; resources.flour += 1; } }
+            }
+            BuildingKind::Bakery => {
+                // каждые 5с: 1 мука + 1 дерево -> 1 хлеб
+                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.flour > 0 && resources.wood > 0 { resources.flour -= 1; resources.wood -= 1; resources.bread += 1; } }
+            }
+            BuildingKind::Fishery => {
+                // каждые 5с: если рядом вода, +1 рыба
+                if b.timer_ms >= 5000 {
+                    b.timer_ms = 0;
+                    const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
+                    if NB.iter().any(|(dx,dy)| world.get_tile(b.pos.x+dx, b.pos.y+dy) == TileKind::Water) {
+                        resources.fish += 1;
+                    }
                 }
             }
         }
