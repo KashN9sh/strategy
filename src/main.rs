@@ -595,7 +595,7 @@ fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
     match kind {
         BuildingKind::Lumberjack => Some(0),
         BuildingKind::House => Some(1),
-        BuildingKind::Warehouse => None,
+        BuildingKind::Warehouse => Some(2),
     }
 }
 
