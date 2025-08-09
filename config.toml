@@ -1,5 +1,6 @@
 [config]
 base_step_ms = 33.0
+ui_scale_base = 1.6
 
 [input]
 move_up = "W"
@@ -15,7 +16,8 @@ speed_2x = "DIGIT3"
 speed_3x = "DIGIT4"
 build_lumberjack = "Z"
 build_house = "X"
-reset_new_seed = "R"
+toggle_road_mode = "R"
+reset_new_seed = "T"
 reset_same_seed = "N"
 save_game = "F5"
 load_game = "F9"

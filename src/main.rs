@@ -1,5 +1,11 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2};
+mod types; use types::{TileKind, BuildingKind, Building, Resources};
+mod world; use world::{World, CHUNK_W, CHUNK_H};
+mod atlas; use atlas::{TileAtlas, BuildingAtlas};
+mod render { pub mod tiles; }
+mod ui;
+mod input;
 use pixels::{Pixels, SurfaceTexture};
 use std::time::Instant;
 use noise::{NoiseFn, Fbm, Seedable, MultiFractal};
@@ -17,416 +23,25 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::WindowBuilder;
 
-const TILE_W: i32 = 32; // ширина ромба в пикселях
-const TILE_H: i32 = 16; // высота ромба в пикселях
+// размеры базового тайла перенесены в atlas::TILE_W/H
 // Размер тайла в пикселях задаётся через атлас (half_w/half_h)
 // Размер чанка в тайлах
-const CHUNK_W: i32 = 32;
-const CHUNK_H: i32 = 32;
+// use world::{World, CHUNK_W, CHUNK_H};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TileKind {
-    Grass,
-    Forest,
-    Water,
-}
+// Перенесено в crate::types
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-enum BuildingKind {
-    Lumberjack,
-    House,
-}
 
-#[derive(Clone, Debug)]
-struct Building {
-    kind: BuildingKind,
-    pos: IVec2, // координаты тайла
-    timer_ms: i32,
-}
+// методы World вынесены в модуль world
 
-#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
-struct Resources {
-    wood: i32,
-    gold: i32,
-}
-
-struct TileAtlas {
-    zoom_px: i32,
-    half_w: i32,
-    half_h: i32,
-    grass: Vec<u8>,
-    forest: Vec<u8>,
-    water_frames: Vec<Vec<u8>>, // анимированная вода
-    // исходные тайлы из атласа (базовый размер без масштабирования)
-    base_loaded: bool,
-    base_w: i32,
-    base_h: i32,
-    base_grass: Vec<u8>,
-    base_forest: Vec<u8>,
-    base_water: Vec<u8>,
-}
-
-impl TileAtlas {
-    fn new() -> Self {
-        Self {
-            zoom_px: -1,
-            half_w: 0,
-            half_h: 0,
-            grass: Vec::new(),
-            forest: Vec::new(),
-            water_frames: Vec::new(),
-            base_loaded: false,
-            base_w: 0,
-            base_h: 0,
-            base_grass: Vec::new(),
-            base_forest: Vec::new(),
-            base_water: Vec::new(),
-        }
-    }
-
-    fn ensure_zoom(&mut self, zoom: f32) {
-        let half_w = ((TILE_W as f32 / 2.0) * zoom).round() as i32;
-        let half_h = ((TILE_H as f32 / 2.0) * zoom).round() as i32;
-        let zoom_px = half_w.max(1) * 2 + 1; // используем ширину как признак
-        if zoom_px == self.zoom_px && self.half_w == half_w && self.half_h == half_h { return; }
-        self.zoom_px = zoom_px;
-        self.half_w = half_w.max(1);
-        self.half_h = half_h.max(1);
-        if self.base_loaded {
-            // масштабируем из атласа
-            self.grass = Self::scale_and_mask(&self.base_grass, self.base_w, self.base_h, self.half_w, self.half_h);
-            self.forest = Self::scale_and_mask(&self.base_forest, self.base_w, self.base_h, self.half_w, self.half_h);
-            self.water_frames.clear();
-            self.water_frames.push(Self::scale_and_mask(&self.base_water, self.base_w, self.base_h, self.half_w, self.half_h));
-        } else {
-            // процедурные тайлы
-            self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
-            self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
-            // построим несколько кадров воды с мерцанием
-            self.water_frames.clear();
-            let frames = 8;
-            for phase in 0..frames {
-                self.water_frames.push(Self::build_water_tile(self.half_w, self.half_h, phase, frames));
-            }
-        }
-    }
-
-    fn build_tile(half_w: i32, half_h: i32, color: [u8; 4]) -> Vec<u8> {
-        let w = half_w * 2 + 1;
-        let h = half_h * 2 + 1;
-        let mut buf = vec![0u8; (w * h * 4) as usize];
-        for dy in -half_h..=half_h {
-            let t = dy.abs() as f32 / half_h.max(1) as f32;
-            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
-            let y = dy + half_h;
-            let x0 = half_w - row_half;
-            let x1 = half_w + row_half;
-            let base = (y as usize) * (w as usize) * 4;
-            for x in x0..=x1 {
-                let idx = base + (x as usize) * 4;
-                buf[idx..idx + 4].copy_from_slice(&color);
-            }
-        }
-        buf
-    }
-
-    fn build_water_tile(half_w: i32, half_h: i32, phase: i32, frames: i32) -> Vec<u8> {
-        let w = half_w * 2 + 1;
-        let h = half_h * 2 + 1;
-        let mut buf = vec![0u8; (w * h * 4) as usize];
-        for dy in -half_h..=half_h {
-            let t = dy.abs() as f32 / half_h.max(1) as f32;
-            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
-            let y = dy + half_h;
-            let x0 = half_w - row_half;
-            let x1 = half_w + row_half;
-            let base = (y as usize) * (w as usize) * 4;
-            for x in x0..=x1 {
-                // мерцание по синусу вдоль X с фазой
-                let fx = (x - half_w) as f32 / half_w.max(1) as f32;
-                let ph = (phase as f32) / frames as f32;
-                let wave = (fx * std::f32::consts::PI + ph * 2.0 * std::f32::consts::PI).sin();
-                let mut r = 28.0 + wave * 4.0;
-                let mut g = 64.0 + wave * 10.0;
-                let mut b = 120.0 + wave * 16.0;
-                r = r.clamp(0.0, 255.0);
-                g = g.clamp(0.0, 255.0);
-                b = b.clamp(0.0, 255.0);
-                let idx = base + (x as usize) * 4;
-                buf[idx] = r as u8;
-                buf[idx + 1] = g as u8;
-                buf[idx + 2] = b as u8;
-                buf[idx + 3] = 255;
-            }
-        }
-        buf
-    }
-
-    fn scale_and_mask(base: &Vec<u8>, bw: i32, bh: i32, half_w: i32, half_h: i32) -> Vec<u8> {
-        let w = half_w * 2 + 1;
-        let h = half_h * 2 + 1;
-        let mut buf = vec![0u8; (w * h * 4) as usize];
-        for dy in -half_h..=half_h {
-            let t = dy.abs() as f32 / half_h.max(1) as f32;
-            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
-            let y = dy + half_h;
-            let x0 = half_w - row_half;
-            let x1 = half_w + row_half;
-            for x in x0..=x1 {
-                let gx = x; // 0..w-1
-                let gy = y; // 0..h-1
-                let src_x = ((gx as f32) * (bw as f32 - 1.0) / (w as f32 - 1.0)).round() as i32;
-                let src_y = ((gy as f32) * (bh as f32 - 1.0) / (h as f32 - 1.0)).round() as i32;
-                let sidx = ((src_y as usize) * (bw as usize) + (src_x as usize)) * 4;
-                let didx = ((gy as usize) * (w as usize) + (gx as usize)) * 4;
-                buf[didx..didx + 4].copy_from_slice(&base[sidx..sidx + 4]);
-            }
-        }
-        buf
-    }
-
-    fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind, water_frame: usize) {
-        let src = match kind {
-            TileKind::Grass => &self.grass,
-            TileKind::Forest => &self.forest,
-            TileKind::Water => &self.water_frames[water_frame % self.water_frames.len().max(1)],
-        };
-        let w = self.half_w * 2 + 1;
-        let h = self.half_h * 2 + 1;
-        let x0 = cx - self.half_w;
-        let y0 = cy - self.half_h;
-
-        // вычислим пересечение с экраном (по строкам)
-        let dst_y_start = y0.max(0);
-        let dst_y_end = (y0 + h).min(fh);
-        if dst_y_start >= dst_y_end { return; }
-
-        for dy in dst_y_start..dst_y_end {
-            let sy = dy - y0; // строка в источнике [0..h)
-            let from_center = sy - self.half_h;
-            let t = (from_center.unsigned_abs() as f32) / (self.half_h.max(1) as f32);
-            let row_half = ((1.0 - t) * self.half_w as f32).round() as i32;
-            let src_x0 = self.half_w - row_half; // включительно
-            let src_x1 = self.half_w + row_half + 1; // эксклюзивно
-
-            // соответствующие x в целевом буфере
-            let row_dst_x0 = x0 + src_x0;
-            let row_dst_x1 = x0 + src_x1;
-
-            // пересечение с экраном
-            let dst_x0 = row_dst_x0.max(0);
-            let dst_x1 = row_dst_x1.min(fw);
-            if dst_x0 >= dst_x1 { continue; }
-
-            // смещение в источнике с учётом обрезки
-            let cut_left = dst_x0 - row_dst_x0;
-            let src_copy_x0 = src_x0 + cut_left;
-            let src_row = (sy as usize) * (w as usize) * 4;
-            let src_slice = &src[(src_row + (src_copy_x0 as usize) * 4)..(src_row + ((src_copy_x0 + (dst_x1 - dst_x0)) as usize) * 4)];
-
-            // копирование
-            let dst_row = (dy as usize) * (fw as usize) * 4;
-            let dst_slice = &mut frame[(dst_row + (dst_x0 as usize) * 4)..(dst_row + (dst_x1 as usize) * 4)];
-            dst_slice.copy_from_slice(src_slice);
-        }
-    }
-}
-
-// Атлас спрайтов зданий (PNG с колонками одинаковой ширины)
-struct BuildingAtlas {
-    sprites: Vec<Vec<u8>>, // RGBA
-    w: i32,
-    h: i32,
-}
-
-#[derive(Clone)]
-struct Chunk {
-    tiles: Vec<TileKind>, // размер CHUNK_W * CHUNK_H
-}
-
-struct World {
-    seed: u64,
-    fbm: Fbm<noise::OpenSimplex>,
-    chunks: HashMap<(i32, i32), Chunk>,
-    occupied: HashSet<(i32, i32)>,
-    tx: Sender<(i32, i32)>,
-    rx: Receiver<ChunkResult>,
-    pending: HashSet<(i32, i32)>,
-    max_chunks: usize,
-}
-
-impl World {
-    fn new(seed: u64) -> Self {
-        let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
-        fbm = fbm
-            .set_seed(seed as u32)
-            .set_octaves(5)
-            .set_frequency(0.03)
-            .set_lacunarity(2.0)
-            .set_persistence(0.5);
-        let (tx, rx) = spawn_chunk_worker(seed);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), tx, rx, pending: HashSet::new(), max_chunks: 512 }
-    }
-
-    fn reset(&mut self, seed: u64) {
-        self.seed = seed;
-        let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
-        fbm = fbm
-            .set_seed(seed as u32)
-            .set_octaves(5)
-            .set_frequency(0.03)
-            .set_lacunarity(2.0)
-            .set_persistence(0.5);
-        self.fbm = fbm;
-        self.chunks.clear();
-        self.occupied.clear();
-        let (tx, rx) = spawn_chunk_worker(seed);
-        self.tx = tx;
-        self.rx = rx;
-        self.pending.clear();
-    }
-
-    fn get_tile(&mut self, tx: i32, ty: i32) -> TileKind {
-        let cx = tx.div_euclid(CHUNK_W);
-        let cy = ty.div_euclid(CHUNK_H);
-        let lx = tx.rem_euclid(CHUNK_W);
-        let ly = ty.rem_euclid(CHUNK_H);
-        if !self.chunks.contains_key(&(cx, cy)) && !self.pending.contains(&(cx, cy)) {
-            let _ = self.tx.send((cx, cy));
-            self.pending.insert((cx, cy));
-        }
-        if let Some(chunk) = self.chunks.get(&(cx, cy)) {
-            return chunk.tiles[(ly * CHUNK_W + lx) as usize];
-        }
-        // быстрый прогноз по шуму (без ожидания чанка)
-        self.tile_by_noise(tx, ty)
-    }
-
-    fn is_occupied(&self, tx: i32, ty: i32) -> bool { self.occupied.contains(&(tx, ty)) }
-    fn occupy(&mut self, tx: i32, ty: i32) { self.occupied.insert((tx, ty)); }
-
-    fn tile_by_noise(&self, tx: i32, ty: i32) -> TileKind {
-        let n = self.fbm.get([tx as f64, ty as f64]) as f32;
-        let h = n;
-        if h < -0.2 { TileKind::Water } else if h < 0.2 { TileKind::Grass } else { TileKind::Forest }
-    }
-
-    fn integrate_ready_chunks(&mut self) {
-        for res in self.rx.try_iter() {
-            self.chunks.insert((res.cx, res.cy), Chunk { tiles: res.tiles });
-            self.pending.remove(&(res.cx, res.cy));
-        }
-        // примитивная выгрузка LRU по расстоянию (ограничим общее кол-во)
-        if self.chunks.len() > self.max_chunks {
-            // без позиции камеры здесь оставим на будущее; пока просто ограничим, удаляя произвольно
-            while self.chunks.len() > self.max_chunks {
-                if let Some((&key, _)) = self.chunks.iter().next() {
-                    self.chunks.remove(&key);
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-
-    fn schedule_ring(&mut self, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32) {
-        // диапазон тайлов -> диапазон чанков + 1 в запас
-        let cmin_x = (min_tx.div_euclid(CHUNK_W)) - 1;
-        let cmin_y = (min_ty.div_euclid(CHUNK_H)) - 1;
-        let cmax_x = (max_tx.div_euclid(CHUNK_W)) + 1;
-        let cmax_y = (max_ty.div_euclid(CHUNK_H)) + 1;
-        for cy in cmin_y..=cmax_y {
-            for cx in cmin_x..=cmax_x {
-                if !self.chunks.contains_key(&(cx, cy)) && !self.pending.contains(&(cx, cy)) {
-                    let _ = self.tx.send((cx, cy));
-                    self.pending.insert((cx, cy));
-                }
-            }
-        }
-    }
-}
-
-struct ChunkResult { cx: i32, cy: i32, tiles: Vec<TileKind> }
-
-fn spawn_chunk_worker(seed: u64) -> (Sender<(i32, i32)>, Receiver<ChunkResult>) {
-    let (tx, rx_req) = channel::<(i32, i32)>();
-    let (tx_res, rx_res) = channel::<ChunkResult>();
-    thread::spawn(move || {
-        let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
-        fbm = fbm
-            .set_seed(seed as u32)
-            .set_octaves(5)
-            .set_frequency(0.03)
-            .set_lacunarity(2.0)
-            .set_persistence(0.5);
-        while let Ok((cx, cy)) = rx_req.recv() {
-            let mut tiles = vec![TileKind::Water; (CHUNK_W * CHUNK_H) as usize];
-            for ly in 0..CHUNK_H {
-                for lx in 0..CHUNK_W {
-                    let tx = cx * CHUNK_W + lx;
-                    let ty = cy * CHUNK_H + ly;
-                    let n = fbm.get([tx as f64, ty as f64]) as f32;
-                    let h = n;
-                    tiles[(ly * CHUNK_W + lx) as usize] = if h < -0.2 { TileKind::Water } else if h < 0.2 { TileKind::Grass } else { TileKind::Forest };
-                }
-            }
-            let _ = tx_res.send(ChunkResult { cx, cy, tiles });
-        }
-    });
-    (tx, rx_res)
-}
+// генерация чанков вынесена в модуль world
 
 // --------------- Config / Save ---------------
 
-#[derive(Serialize, Deserialize, Clone)]
-struct Config {
-    base_step_ms: f32,
-}
+type Config = input::Config;
 
-#[derive(Serialize, Deserialize, Clone)]
-struct InputConfig {
-    move_up: String,
-    move_down: String,
-    move_left: String,
-    move_right: String,
-    zoom_in: String,
-    zoom_out: String,
-    toggle_pause: String,
-    speed_0_5x: String,
-    speed_1x: String,
-    speed_2x: String,
-    speed_3x: String,
-    build_lumberjack: String,
-    build_house: String,
-    reset_new_seed: String,
-    reset_same_seed: String,
-    save_game: String,
-    load_game: String,
-}
+type InputConfig = input::InputConfig;
 
-fn code_from_str(s: &str) -> KeyCode {
-    use KeyCode::*;
-    match s.to_uppercase().as_str() {
-        "W" => KeyW,
-        "A" => KeyA,
-        "S" => KeyS,
-        "D" => KeyD,
-        "Q" => KeyQ,
-        "E" => KeyE,
-        "SPACE" => Space,
-        "DIGIT1" | "1" => Digit1,
-        "DIGIT2" | "2" => Digit2,
-        "DIGIT3" | "3" => Digit3,
-        "DIGIT4" | "4" => Digit4,
-        "Z" => KeyZ,
-        "X" => KeyX,
-        "R" => KeyR,
-        "N" => KeyN,
-        "F5" => F5,
-        "F9" => F9,
-        _ => KeyCode::Escape,
-    }
-}
+// code_from_str перенесён в модуль input
 
 fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
     if Path::new(path).exists() {
@@ -436,7 +51,7 @@ fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
         let parsed: FileCfg = toml::from_str(&data)?;
         Ok((parsed.config, parsed.input))
     } else {
-        let config = Config { base_step_ms: 33.0 };
+        let config = Config { base_step_ms: 33.0, ui_scale_base: 1.6 };
         let input = InputConfig {
             move_up: "W".into(),
             move_down: "S".into(),
@@ -451,7 +66,8 @@ fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
             speed_3x: "DIGIT4".into(),
             build_lumberjack: "Z".into(),
             build_house: "X".into(),
-            reset_new_seed: "R".into(),
+            toggle_road_mode: "R".into(),
+            reset_new_seed: "T".into(),
             reset_same_seed: "N".into(),
             save_game: "F5".into(),
             load_game: "F9".into(),
@@ -464,49 +80,9 @@ fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
     }
 }
 
-struct ResolvedInput {
-    move_up: KeyCode,
-    move_down: KeyCode,
-    move_left: KeyCode,
-    move_right: KeyCode,
-    zoom_in: KeyCode,
-    zoom_out: KeyCode,
-    toggle_pause: KeyCode,
-    speed_0_5x: KeyCode,
-    speed_1x: KeyCode,
-    speed_2x: KeyCode,
-    speed_3x: KeyCode,
-    build_lumberjack: KeyCode,
-    build_house: KeyCode,
-    reset_new_seed: KeyCode,
-    reset_same_seed: KeyCode,
-    save_game: KeyCode,
-    load_game: KeyCode,
-}
+type ResolvedInput = input::ResolvedInput;
 
-impl ResolvedInput {
-    fn from(cfg: &InputConfig) -> Self {
-        Self {
-            move_up: code_from_str(&cfg.move_up),
-            move_down: code_from_str(&cfg.move_down),
-            move_left: code_from_str(&cfg.move_left),
-            move_right: code_from_str(&cfg.move_right),
-            zoom_in: code_from_str(&cfg.zoom_in),
-            zoom_out: code_from_str(&cfg.zoom_out),
-            toggle_pause: code_from_str(&cfg.toggle_pause),
-            speed_0_5x: code_from_str(&cfg.speed_0_5x),
-            speed_1x: code_from_str(&cfg.speed_1x),
-            speed_2x: code_from_str(&cfg.speed_2x),
-            speed_3x: code_from_str(&cfg.speed_3x),
-            build_lumberjack: code_from_str(&cfg.build_lumberjack),
-            build_house: code_from_str(&cfg.build_house),
-            reset_new_seed: code_from_str(&cfg.reset_new_seed),
-            reset_same_seed: code_from_str(&cfg.reset_same_seed),
-            save_game: code_from_str(&cfg.save_game),
-            load_game: code_from_str(&cfg.load_game),
-        }
-    }
-}
+// ResolvedInput::from реализован в модуле input
 
 #[derive(Serialize, Deserialize)]
 struct SaveData {
@@ -589,6 +165,7 @@ fn run() -> Result<()> {
     let mut buildings: Vec<Building> = Vec::new();
     let mut resources = Resources { wood: 20, gold: 100 };
     let mut atlas = TileAtlas::new();
+    let mut road_mode = false;
     let mut building_atlas: Option<BuildingAtlas> = None;
     // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 3 тайла в строку: grass, forest, water)
     if let Ok(img) = image::open("assets/tiles.png") {
@@ -668,22 +245,23 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(KeyCode::KeyG) { show_grid = !show_grid; }
                         if key == PhysicalKey::Code(KeyCode::KeyH) { show_forest_overlay = !show_forest_overlay; }
                         if key == PhysicalKey::Code(KeyCode::KeyU) { show_ui = !show_ui; }
+                        if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
-                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
-                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
                         if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom)); }
                         if key == PhysicalKey::Code(input.load_game) {
                             if let Ok(save) = load_game() {
                                 seed = save.seed;
-                                world.reset(seed);
+                                world.reset_noise(seed);
                                 buildings = save.to_buildings();
                                 resources = save.resources;
                                 cam_px = Vec2::new(save.cam_x, save.cam_y);
                                 zoom = save.zoom;
                                 // восстановим отметку occupied
                                 world.occupied.clear();
-                                for b in &buildings { world.occupy(b.pos.x, b.pos.y); }
+                                for b in &buildings { world.occupy(b.pos); }
                             }
                         }
                     }
@@ -699,24 +277,30 @@ fn run() -> Result<()> {
                     // ЛКМ — попытка построить
                     if button == winit::event::MouseButton::Left {
                         if show_ui {
-                            let ui_s = ui_scale(height_i32, 1.6);
-                            let bar_h = ui_bar_height(height_i32, ui_s);
+                            let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
+                            let bar_h = ui::ui_bar_height(height_i32, ui_s);
                             if cursor_xy.y >= 0 && cursor_xy.y < bar_h {
                                 let pad = 8 * ui_s; let icon_size = 10 * ui_s; let by = pad + icon_size + 8 * ui_s; let btn_w = 90 * ui_s; let btn_h = 18 * ui_s;
-                                if point_in_rect(cursor_xy.x, cursor_xy.y, pad, by, btn_w, btn_h) { selected_building = BuildingKind::Lumberjack; return; }
-                                if point_in_rect(cursor_xy.x, cursor_xy.y, pad + btn_w + 6 * ui_s, by, btn_w, btn_h) { selected_building = BuildingKind::House; return; }
+                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad, by, btn_w, btn_h) { selected_building = BuildingKind::Lumberjack; return; }
+                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + btn_w + 6 * ui_s, by, btn_w, btn_h) { selected_building = BuildingKind::House; return; }
                             }
                         }
                         if let Some(tp) = hovered_tile {
+                            if road_mode {
+                                // Переключение дороги по клику
+                                let on = !world.is_road(tp);
+                                world.set_road(tp, on);
+                                return;
+                            }
                             // кликаем по тайлу под курсором, но убедимся, что используем те же snapped-пиксели камеры,
                             // чтобы не было рассинхрона между рендером и хитом
                             let tile_kind = world.get_tile(tp.x, tp.y);
-                            if !world.is_occupied(tp.x, tp.y) && tile_kind != TileKind::Water {
+                            if !world.is_occupied(tp) && tile_kind != TileKind::Water {
                                 let cost = building_cost(selected_building);
                                 if resources.wood >= cost.wood && resources.gold >= cost.gold {
                                     resources.wood -= cost.wood;
                                     resources.gold -= cost.gold;
-                                    world.occupy(tp.x, tp.y);
+                                    world.occupy(tp);
                                     buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
                                     println!("Построено {:?} на {:?}. Ресурсы: wood={}, gold={}", selected_building, tp, resources.wood, resources.gold);
                                 }
@@ -766,16 +350,13 @@ fn run() -> Result<()> {
                             atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
 
                             // сетка
-                            if show_grid {
-                                draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]);
-                            }
+                            if show_grid { render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]); }
+
+                            // дороги (простая заливка поверх тайла)
+                            if world.is_road(IVec2::new(mx, my)) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [120, 110, 90, 200]); }
 
                             // оверлей плотности леса (простая функция от шума)
-                            if show_forest_overlay {
-                                let n = world.fbm.get([mx as f64, my as f64]) as f32; // [-1..1]
-                                let v = ((n + 1.0) * 0.5 * 255.0) as u8;
-                                draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v, 50, 50, 255]);
-                            }
+                            if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v, 50, 50, 255]); }
                         }
                     }
 
@@ -784,7 +365,7 @@ fn run() -> Result<()> {
                         let world_x = (tp.x - tp.y) * atlas.half_w - cam_snap.x as i32;
                         let world_y = (tp.x + tp.y) * atlas.half_h - cam_snap.y as i32;
                         let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                        draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
+                        render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
                     }
 
                     // Отрисуем здания по глубине
@@ -807,19 +388,17 @@ fn run() -> Result<()> {
                                     let top_left_x = screen_pos.x - draw_w / 2;
                                     // Привязываем нижний центр спрайта к нижней вершине ромба тайла
                                     let top_left_y = screen_pos.y + atlas.half_h - draw_h;
-                                    blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
+                                    render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
                                     continue;
                                 }
                             }
                         }
                         let color = match b.kind { BuildingKind::Lumberjack => [140, 90, 40, 255], BuildingKind::House => [180, 180, 180, 255] };
-                        draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
+                        render::tiles::draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
                     }
 
                     // UI наложение
-                    if show_ui {
-                        draw_ui(frame, width_i32, height_i32, &resources, selected_building, fps_ema, speed_mult, paused);
-                    }
+                    if show_ui { ui::draw_ui(frame, width_i32, height_i32, &resources, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base); }
 
                     if let Err(err) = pixels.render() {
                         eprintln!("pixels.render() failed: {err}");
@@ -871,75 +450,15 @@ fn clear(frame: &mut [u8], rgba: [u8; 4]) {
     }
 }
 
-fn draw_iso_tile(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, zoom: f32, color: [u8; 4]) {
-    // Рисуем ромб TILE_W x TILE_H, масштабированный zoom-ом, с центром в (cx, cy)
-    let half_w = ((TILE_W as f32 / 2.0) * zoom).round() as i32;
-    let half_h = ((TILE_H as f32 / 2.0) * zoom).round() as i32;
+// удалено: draw_iso_tile (перенесено в модуль render)
 
-    // Проходим строками от вершины к вершине; ширина строки растёт до середины и сужается
-    for dy in -half_h..=half_h {
-        let t = dy.abs() as f32 / half_h.max(1) as f32;
-        let row_half = ((1.0 - t) * half_w as f32).round() as i32;
-        let y = cy + dy;
-        if y < 0 || y >= height { continue; }
-        let x0 = cx - row_half;
-        let x1 = cx + row_half;
-        let x0 = x0.clamp(0, width - 1);
-        let x1 = x1.clamp(0, width - 1);
-        for x in x0..=x1 {
-            let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
-            frame[idx..idx + 4].copy_from_slice(&color);
-        }
-    }
-}
+// удалено: draw_iso_tile_tinted (перенесено в модуль render)
 
-fn draw_iso_outline(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32, color: [u8; 4]) {
-    // Вершины ромба
-    let top = (cx, cy - half_h);
-    let right = (cx + half_w, cy);
-    let bottom = (cx, cy + half_h);
-    let left = (cx - half_w, cy);
+// удалено: draw_iso_outline (перенесено в модуль render)
 
-    draw_line(frame, width, height, top.0, top.1, right.0, right.1, color);
-    draw_line(frame, width, height, right.0, right.1, bottom.0, bottom.1, color);
-    draw_line(frame, width, height, bottom.0, bottom.1, left.0, left.1, color);
-    draw_line(frame, width, height, left.0, left.1, top.0, top.1, color);
-}
+// удалено: draw_line (перенесено в модуль render)
 
-fn draw_line(frame: &mut [u8], width: i32, height: i32, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
-    let dx = (x1 - x0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let dy = -(y1 - y0).abs();
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-
-    loop {
-        if x0 >= 0 && y0 >= 0 && x0 < width && y0 < height {
-            let idx = ((y0 as usize) * (width as usize) + (x0 as usize)) * 4;
-            frame[idx..idx + 4].copy_from_slice(&color);
-        }
-        if x0 == x1 && y0 == y1 { break; }
-        let e2 = 2 * err;
-        if e2 >= dy { err += dy; x0 += sx; }
-        if e2 <= dx { err += dx; y0 += sy; }
-    }
-}
-
-fn draw_building(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32, color: [u8; 4]) {
-    // прямоугольник поверх тайла
-    let bw = (half_w as f32 * 1.2) as i32;
-    let bh = (half_h as f32 * 1.8) as i32;
-    let x0 = (cx - bw / 2).clamp(0, width - 1);
-    let x1 = (cx + bw / 2).clamp(0, width - 1);
-    let y0 = (cy - bh).clamp(0, height - 1);
-    let y1 = (cy - bh / 2).clamp(0, height - 1);
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
-            frame[idx..idx + 4].copy_from_slice(&color);
-        }
-    }
-}
+// удалено: draw_building (перенесено в модуль render)
 
 fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
     match kind {
@@ -948,70 +467,9 @@ fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
     }
 }
 
-fn blit_sprite_alpha(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32) {
-    let dst_x0 = x.max(0);
-    let dst_y0 = y.max(0);
-    let dst_x1 = (x + sw).min(fw);
-    let dst_y1 = (y + sh).min(fh);
-    if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }
-    for dy in dst_y0..dst_y1 {
-        let sy = dy - y;
-        let src_row = (sy as usize) * (sw as usize) * 4;
-        let dst_row = (dy as usize) * (fw as usize) * 4;
-        for dx in dst_x0..dst_x1 {
-            let sx = dx - x;
-            let sidx = src_row + (sx as usize) * 4;
-            let didx = dst_row + (dx as usize) * 4;
-            let sa = src[sidx + 3] as u32;
-            if sa == 0 { continue; }
-            let sr = src[sidx] as u32;
-            let sg = src[sidx + 1] as u32;
-            let sb = src[sidx + 2] as u32;
-            let dr = frame[didx] as u32;
-            let dg = frame[didx + 1] as u32;
-            let db = frame[didx + 2] as u32;
-            // alpha blend: out = src.a * src + (1 - src.a) * dst
-            let a = sa;
-            let na = 255 - a;
-            frame[didx] = ((a * sr + na * dr) / 255) as u8;
-            frame[didx + 1] = ((a * sg + na * dg) / 255) as u8;
-            frame[didx + 2] = ((a * sb + na * db) / 255) as u8;
-            frame[didx + 3] = 255;
-        }
-    }
-}
+// удалено: blit_sprite_alpha (перенесено в модуль render)
 
-fn blit_sprite_alpha_scaled(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32, dw: i32, dh: i32) {
-    let dst_x0 = x.max(0);
-    let dst_y0 = y.max(0);
-    let dst_x1 = (x + dw).min(fw);
-    let dst_y1 = (y + dh).min(fh);
-    if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }
-    for dy in dst_y0..dst_y1 {
-        let sy = ((dy - y) as f32 * (sh as f32 - 1.0) / (dh as f32 - 1.0)).round() as i32;
-        let src_row = (sy as usize) * (sw as usize) * 4;
-        let dst_row = (dy as usize) * (fw as usize) * 4;
-        for dx in dst_x0..dst_x1 {
-            let sx = ((dx - x) as f32 * (sw as f32 - 1.0) / (dw as f32 - 1.0)).round() as i32;
-            let sidx = src_row + (sx as usize) * 4;
-            let didx = dst_row + (dx as usize) * 4;
-            let sa = src[sidx + 3] as u32;
-            if sa == 0 { continue; }
-            let sr = src[sidx] as u32;
-            let sg = src[sidx + 1] as u32;
-            let sb = src[sidx + 2] as u32;
-            let dr = frame[didx] as u32;
-            let dg = frame[didx + 1] as u32;
-            let db = frame[didx + 2] as u32;
-            let a = sa;
-            let na = 255 - a;
-            frame[didx] = ((a * sr + na * dr) / 255) as u8;
-            frame[didx + 1] = ((a * sg + na * dg) / 255) as u8;
-            frame[didx + 2] = ((a * sb + na * db) / 255) as u8;
-            frame[didx + 3] = 255;
-        }
-    }
-}
+// удалено: blit_sprite_alpha_scaled (перенесено в модуль render)
 
 fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as i32) * s }
