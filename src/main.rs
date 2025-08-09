@@ -1,10 +1,15 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2};
 use pixels::{Pixels, SurfaceTexture};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use noise::{NoiseFn, Fbm, Seedable, MultiFractal};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{channel, Sender, Receiver};
+use std::thread;
+use std::fs;
+use std::path::Path;
+use serde::{Serialize, Deserialize};
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -25,7 +30,7 @@ enum TileKind {
     Water,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum BuildingKind {
     Lumberjack,
     House,
@@ -38,7 +43,7 @@ struct Building {
     timer_ms: i32,
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 struct Resources {
     wood: i32,
     gold: i32,
@@ -143,6 +148,10 @@ struct World {
     fbm: Fbm<noise::OpenSimplex>,
     chunks: HashMap<(i32, i32), Chunk>,
     occupied: HashSet<(i32, i32)>,
+    tx: Sender<(i32, i32)>,
+    rx: Receiver<ChunkResult>,
+    pending: HashSet<(i32, i32)>,
+    max_chunks: usize,
 }
 
 impl World {
@@ -154,7 +163,8 @@ impl World {
             .set_frequency(0.03)
             .set_lacunarity(2.0)
             .set_persistence(0.5);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new() }
+        let (tx, rx) = spawn_chunk_worker(seed);
+        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), tx, rx, pending: HashSet::new(), max_chunks: 512 }
     }
 
     fn reset(&mut self, seed: u64) {
@@ -169,21 +179,10 @@ impl World {
         self.fbm = fbm;
         self.chunks.clear();
         self.occupied.clear();
-    }
-
-    fn ensure_chunk(&mut self, cx: i32, cy: i32) {
-        if self.chunks.contains_key(&(cx, cy)) { return; }
-        let mut tiles = vec![TileKind::Water; (CHUNK_W * CHUNK_H) as usize];
-        for ly in 0..CHUNK_H {
-            for lx in 0..CHUNK_W {
-                let tx = cx * CHUNK_W + lx;
-                let ty = cy * CHUNK_H + ly;
-                let n = self.fbm.get([tx as f64, ty as f64]) as f32; // [-1..1]
-                let h = n; // можно усложнить биомы позже
-                tiles[(ly * CHUNK_W + lx) as usize] = if h < -0.2 { TileKind::Water } else if h < 0.2 { TileKind::Grass } else { TileKind::Forest };
-            }
-        }
-        self.chunks.insert((cx, cy), Chunk { tiles });
+        let (tx, rx) = spawn_chunk_worker(seed);
+        self.tx = tx;
+        self.rx = rx;
+        self.pending.clear();
     }
 
     fn get_tile(&mut self, tx: i32, ty: i32) -> TileKind {
@@ -191,13 +190,263 @@ impl World {
         let cy = ty.div_euclid(CHUNK_H);
         let lx = tx.rem_euclid(CHUNK_W);
         let ly = ty.rem_euclid(CHUNK_H);
-        self.ensure_chunk(cx, cy);
-        let chunk = self.chunks.get(&(cx, cy)).expect("chunk exists");
-        chunk.tiles[(ly * CHUNK_W + lx) as usize]
+        if !self.chunks.contains_key(&(cx, cy)) && !self.pending.contains(&(cx, cy)) {
+            let _ = self.tx.send((cx, cy));
+            self.pending.insert((cx, cy));
+        }
+        if let Some(chunk) = self.chunks.get(&(cx, cy)) {
+            return chunk.tiles[(ly * CHUNK_W + lx) as usize];
+        }
+        // быстрый прогноз по шуму (без ожидания чанка)
+        self.tile_by_noise(tx, ty)
     }
 
     fn is_occupied(&self, tx: i32, ty: i32) -> bool { self.occupied.contains(&(tx, ty)) }
     fn occupy(&mut self, tx: i32, ty: i32) { self.occupied.insert((tx, ty)); }
+
+    fn tile_by_noise(&self, tx: i32, ty: i32) -> TileKind {
+        let n = self.fbm.get([tx as f64, ty as f64]) as f32;
+        let h = n;
+        if h < -0.2 { TileKind::Water } else if h < 0.2 { TileKind::Grass } else { TileKind::Forest }
+    }
+
+    fn integrate_ready_chunks(&mut self) {
+        for res in self.rx.try_iter() {
+            self.chunks.insert((res.cx, res.cy), Chunk { tiles: res.tiles });
+            self.pending.remove(&(res.cx, res.cy));
+        }
+        // примитивная выгрузка LRU по расстоянию (ограничим общее кол-во)
+        if self.chunks.len() > self.max_chunks {
+            // без позиции камеры здесь оставим на будущее; пока просто ограничим, удаляя произвольно
+            while self.chunks.len() > self.max_chunks {
+                if let Some((&key, _)) = self.chunks.iter().next() {
+                    self.chunks.remove(&key);
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn schedule_ring(&mut self, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32) {
+        // диапазон тайлов -> диапазон чанков + 1 в запас
+        let cmin_x = (min_tx.div_euclid(CHUNK_W)) - 1;
+        let cmin_y = (min_ty.div_euclid(CHUNK_H)) - 1;
+        let cmax_x = (max_tx.div_euclid(CHUNK_W)) + 1;
+        let cmax_y = (max_ty.div_euclid(CHUNK_H)) + 1;
+        for cy in cmin_y..=cmax_y {
+            for cx in cmin_x..=cmax_x {
+                if !self.chunks.contains_key(&(cx, cy)) && !self.pending.contains(&(cx, cy)) {
+                    let _ = self.tx.send((cx, cy));
+                    self.pending.insert((cx, cy));
+                }
+            }
+        }
+    }
+}
+
+struct ChunkResult { cx: i32, cy: i32, tiles: Vec<TileKind> }
+
+fn spawn_chunk_worker(seed: u64) -> (Sender<(i32, i32)>, Receiver<ChunkResult>) {
+    let (tx, rx_req) = channel::<(i32, i32)>();
+    let (tx_res, rx_res) = channel::<ChunkResult>();
+    thread::spawn(move || {
+        let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
+        fbm = fbm
+            .set_seed(seed as u32)
+            .set_octaves(5)
+            .set_frequency(0.03)
+            .set_lacunarity(2.0)
+            .set_persistence(0.5);
+        while let Ok((cx, cy)) = rx_req.recv() {
+            let mut tiles = vec![TileKind::Water; (CHUNK_W * CHUNK_H) as usize];
+            for ly in 0..CHUNK_H {
+                for lx in 0..CHUNK_W {
+                    let tx = cx * CHUNK_W + lx;
+                    let ty = cy * CHUNK_H + ly;
+                    let n = fbm.get([tx as f64, ty as f64]) as f32;
+                    let h = n;
+                    tiles[(ly * CHUNK_W + lx) as usize] = if h < -0.2 { TileKind::Water } else if h < 0.2 { TileKind::Grass } else { TileKind::Forest };
+                }
+            }
+            let _ = tx_res.send(ChunkResult { cx, cy, tiles });
+        }
+    });
+    (tx, rx_res)
+}
+
+// --------------- Config / Save ---------------
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Config {
+    base_step_ms: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct InputConfig {
+    move_up: String,
+    move_down: String,
+    move_left: String,
+    move_right: String,
+    zoom_in: String,
+    zoom_out: String,
+    toggle_pause: String,
+    speed_0_5x: String,
+    speed_1x: String,
+    speed_2x: String,
+    speed_3x: String,
+    build_lumberjack: String,
+    build_house: String,
+    reset_new_seed: String,
+    reset_same_seed: String,
+    save_game: String,
+    load_game: String,
+}
+
+fn code_from_str(s: &str) -> KeyCode {
+    use KeyCode::*;
+    match s.to_uppercase().as_str() {
+        "W" => KeyW,
+        "A" => KeyA,
+        "S" => KeyS,
+        "D" => KeyD,
+        "Q" => KeyQ,
+        "E" => KeyE,
+        "SPACE" => Space,
+        "DIGIT1" | "1" => Digit1,
+        "DIGIT2" | "2" => Digit2,
+        "DIGIT3" | "3" => Digit3,
+        "DIGIT4" | "4" => Digit4,
+        "Z" => KeyZ,
+        "X" => KeyX,
+        "R" => KeyR,
+        "N" => KeyN,
+        "F5" => F5,
+        "F9" => F9,
+        _ => KeyCode::Escape,
+    }
+}
+
+fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
+    if Path::new(path).exists() {
+        let data = fs::read_to_string(path)?;
+        #[derive(Deserialize)]
+        struct FileCfg { config: Config, input: InputConfig }
+        let parsed: FileCfg = toml::from_str(&data)?;
+        Ok((parsed.config, parsed.input))
+    } else {
+        let config = Config { base_step_ms: 33.0 };
+        let input = InputConfig {
+            move_up: "W".into(),
+            move_down: "S".into(),
+            move_left: "A".into(),
+            move_right: "D".into(),
+            zoom_in: "E".into(),
+            zoom_out: "Q".into(),
+            toggle_pause: "SPACE".into(),
+            speed_0_5x: "DIGIT1".into(),
+            speed_1x: "DIGIT2".into(),
+            speed_2x: "DIGIT3".into(),
+            speed_3x: "DIGIT4".into(),
+            build_lumberjack: "Z".into(),
+            build_house: "X".into(),
+            reset_new_seed: "R".into(),
+            reset_same_seed: "N".into(),
+            save_game: "F5".into(),
+            load_game: "F9".into(),
+        };
+        #[derive(Serialize)]
+        struct FileCfg<'a> { config: &'a Config, input: &'a InputConfig }
+        let toml_text = toml::to_string_pretty(&FileCfg { config: &config, input: &input })?;
+        fs::write(path, toml_text)?;
+        Ok((config, input))
+    }
+}
+
+struct ResolvedInput {
+    move_up: KeyCode,
+    move_down: KeyCode,
+    move_left: KeyCode,
+    move_right: KeyCode,
+    zoom_in: KeyCode,
+    zoom_out: KeyCode,
+    toggle_pause: KeyCode,
+    speed_0_5x: KeyCode,
+    speed_1x: KeyCode,
+    speed_2x: KeyCode,
+    speed_3x: KeyCode,
+    build_lumberjack: KeyCode,
+    build_house: KeyCode,
+    reset_new_seed: KeyCode,
+    reset_same_seed: KeyCode,
+    save_game: KeyCode,
+    load_game: KeyCode,
+}
+
+impl ResolvedInput {
+    fn from(cfg: &InputConfig) -> Self {
+        Self {
+            move_up: code_from_str(&cfg.move_up),
+            move_down: code_from_str(&cfg.move_down),
+            move_left: code_from_str(&cfg.move_left),
+            move_right: code_from_str(&cfg.move_right),
+            zoom_in: code_from_str(&cfg.zoom_in),
+            zoom_out: code_from_str(&cfg.zoom_out),
+            toggle_pause: code_from_str(&cfg.toggle_pause),
+            speed_0_5x: code_from_str(&cfg.speed_0_5x),
+            speed_1x: code_from_str(&cfg.speed_1x),
+            speed_2x: code_from_str(&cfg.speed_2x),
+            speed_3x: code_from_str(&cfg.speed_3x),
+            build_lumberjack: code_from_str(&cfg.build_lumberjack),
+            build_house: code_from_str(&cfg.build_house),
+            reset_new_seed: code_from_str(&cfg.reset_new_seed),
+            reset_same_seed: code_from_str(&cfg.reset_same_seed),
+            save_game: code_from_str(&cfg.save_game),
+            load_game: code_from_str(&cfg.load_game),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SaveData {
+    seed: u64,
+    resources: Resources,
+    buildings: Vec<SaveBuilding>,
+    cam_x: f32,
+    cam_y: f32,
+    zoom: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+struct SaveBuilding { kind: BuildingKind, x: i32, y: i32, timer_ms: i32 }
+
+impl SaveData {
+    fn from_runtime(seed: u64, res: &Resources, buildings: &Vec<Building>, cam_px: Vec2, zoom: f32) -> Self {
+        let buildings = buildings
+            .iter()
+            .map(|b| SaveBuilding { kind: b.kind, x: b.pos.x, y: b.pos.y, timer_ms: b.timer_ms })
+            .collect();
+        SaveData { seed, resources: *res, buildings, cam_x: cam_px.x, cam_y: cam_px.y, zoom }
+    }
+
+    fn to_buildings(&self) -> Vec<Building> {
+        self.buildings
+            .iter()
+            .map(|s| Building { kind: s.kind, pos: IVec2::new(s.x, s.y), timer_ms: s.timer_ms })
+            .collect()
+    }
+}
+
+fn save_game(data: &SaveData) -> Result<()> {
+    let txt = serde_json::to_string_pretty(data)?;
+    fs::write("save.json", txt)?;
+    Ok(())
+}
+
+fn load_game() -> Result<SaveData> {
+    let txt = fs::read_to_string("save.json")?;
+    let data: SaveData = serde_json::from_str(&txt)?;
+    Ok(data)
 }
 
 fn main() -> Result<()> {
@@ -216,10 +465,17 @@ fn run() -> Result<()> {
     let surface_texture = SurfaceTexture::new(size.width, size.height, &*window);
     let mut pixels = Pixels::new(size.width, size.height, surface_texture)?;
 
+    // Конфиг
+    let (config, input) = load_or_create_config("config.toml")?;
+    let input = ResolvedInput::from(&input);
+
     // Камера в пикселях мира (изометрических)
     let mut cam_px = Vec2::new(0.0, 0.0);
     let mut zoom: f32 = 2.0; // влияет на размеры тайла (через атлас)
     let mut last_frame = Instant::now();
+    let mut accumulator_ms: f32 = 0.0;
+    let mut paused = false;
+    let mut speed_mult: f32 = 1.0; // 0.5, 1, 2, 3
 
     // Процедурная генерация: бесконечный мир чанков
     let mut rng = StdRng::seed_from_u64(42);
@@ -243,20 +499,37 @@ fn run() -> Result<()> {
                 WindowEvent::CloseRequested => elwt.exit(),
                 WindowEvent::KeyboardInput { event, .. } => {
                     if event.state == ElementState::Pressed {
-                        match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Escape) => elwt.exit(),
-                            PhysicalKey::Code(KeyCode::KeyW) => cam_px.y -= 80.0,
-                            PhysicalKey::Code(KeyCode::KeyS) => cam_px.y += 80.0,
-                            PhysicalKey::Code(KeyCode::KeyA) => cam_px.x -= 80.0,
-                            PhysicalKey::Code(KeyCode::KeyD) => cam_px.x += 80.0,
-                            PhysicalKey::Code(KeyCode::KeyQ) => zoom = (zoom * 0.9).max(0.5),
-                            PhysicalKey::Code(KeyCode::KeyE) => zoom = (zoom * 1.1).min(8.0),
-                            PhysicalKey::Code(KeyCode::Digit1) => selected_building = BuildingKind::Lumberjack,
-                            PhysicalKey::Code(KeyCode::Digit2) => selected_building = BuildingKind::House,
-                            // R — новый сид, очистка мира. N — пересоздать мир с тем же сидом
-                            PhysicalKey::Code(KeyCode::KeyR) => { seed = rng.random(); world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; },
-                            PhysicalKey::Code(KeyCode::KeyN) => { world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; },
-                            _ => {}
+                        let key = event.physical_key;
+                        if key == PhysicalKey::Code(KeyCode::Escape) { elwt.exit(); }
+
+                        if key == PhysicalKey::Code(input.move_up) { cam_px.y -= 80.0; }
+                        if key == PhysicalKey::Code(input.move_down) { cam_px.y += 80.0; }
+                        if key == PhysicalKey::Code(input.move_left) { cam_px.x -= 80.0; }
+                        if key == PhysicalKey::Code(input.move_right) { cam_px.x += 80.0; }
+                        if key == PhysicalKey::Code(input.zoom_out) { zoom = (zoom * 0.9).max(0.5); }
+                        if key == PhysicalKey::Code(input.zoom_in) { zoom = (zoom * 1.1).min(8.0); }
+                        if key == PhysicalKey::Code(input.toggle_pause) { paused = !paused; }
+                        if key == PhysicalKey::Code(input.speed_0_5x) { speed_mult = 0.5; }
+                        if key == PhysicalKey::Code(input.speed_1x) { speed_mult = 1.0; }
+                        if key == PhysicalKey::Code(input.speed_2x) { speed_mult = 2.0; }
+                        if key == PhysicalKey::Code(input.speed_3x) { speed_mult = 3.0; }
+                        if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
+                        if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
+                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom)); }
+                        if key == PhysicalKey::Code(input.load_game) {
+                            if let Ok(save) = load_game() {
+                                seed = save.seed;
+                                world.reset(seed);
+                                buildings = save.to_buildings();
+                                resources = save.resources;
+                                cam_px = Vec2::new(save.cam_x, save.cam_y);
+                                zoom = save.zoom;
+                                // восстановим отметку occupied
+                                world.occupied.clear();
+                                for b in &buildings { world.occupy(b.pos.x, b.pos.y); }
+                            }
                         }
                     }
                 }
@@ -308,6 +581,10 @@ fn run() -> Result<()> {
 
                     // Границы видимых тайлов через инверсию проекции
                     let (min_tx, min_ty, max_tx, max_ty) = visible_tile_bounds_px(width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h);
+                    // Закажем генерацию колец чанков
+                    world.schedule_ring(min_tx, min_ty, max_tx, max_ty);
+                    // Интегрируем готовые чанки (non-blocking)
+                    world.integrate_ready_chunks();
 
                     // Рисуем тайлы быстрым блитом
                     for my in min_ty..=max_ty {
@@ -349,12 +626,30 @@ fn run() -> Result<()> {
                 _ => {}
             },
             Event::AboutToWait => {
-                // простой fps cap (~30)
+                // фиксированный тик с ускорением
                 let now = Instant::now();
-                if now - last_frame >= Duration::from_millis(33) {
-                    last_frame = now;
-                    // апдейт симуляции
-                    simulate(&mut buildings, &mut world, &mut resources, 33);
+                let frame_ms = (now - last_frame).as_secs_f32() * 1000.0;
+                last_frame = now;
+                // ограничим, чтобы не накапливалось слишком много
+                let frame_ms = frame_ms.min(250.0);
+                accumulator_ms += frame_ms;
+
+                let base_step_ms = config.base_step_ms;
+                let step_ms = (base_step_ms / speed_mult.max(0.0001)).max(1.0);
+                let mut did_step = false;
+                if !paused {
+                    while accumulator_ms >= step_ms {
+                        simulate(&mut buildings, &mut world, &mut resources, step_ms as i32);
+                        accumulator_ms -= step_ms;
+                        did_step = true;
+                        // ограничим число шагов за кадр
+                        if accumulator_ms > 10.0 * step_ms { accumulator_ms = 0.0; break; }
+                    }
+                }
+                if did_step {
+                    window.request_redraw();
+                } else {
+                    // всё равно перерисуем с периодичностью
                     window.request_redraw();
                 }
             }

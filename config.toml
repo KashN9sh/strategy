@@ -1,0 +1,21 @@
+[config]
+base_step_ms = 33.0
+
+[input]
+move_up = "W"
+move_down = "S"
+move_left = "A"
+move_right = "D"
+zoom_in = "E"
+zoom_out = "Q"
+toggle_pause = "SPACE"
+speed_0_5x = "DIGIT1"
+speed_1x = "DIGIT2"
+speed_2x = "DIGIT3"
+speed_3x = "DIGIT4"
+build_lumberjack = "Z"
+build_house = "X"
+reset_new_seed = "R"
+reset_same_seed = "N"
+save_game = "F5"
+load_game = "F9"
