@@ -1,11 +1,12 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2};
-mod types; use types::{TileKind, BuildingKind, Building, Resources};
+mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore};
 mod world; use world::World;
 mod atlas; use atlas::{TileAtlas, BuildingAtlas};
 mod render { pub mod tiles; }
 mod ui;
 mod input;
+mod path;
 use pixels::{Pixels, SurfaceTexture};
 use std::time::Instant;
 use noise::NoiseFn;
@@ -161,7 +162,12 @@ fn run() -> Result<()> {
     let mut hovered_tile: Option<IVec2> = None;
     let mut selected_building: BuildingKind = BuildingKind::Lumberjack;
     let mut buildings: Vec<Building> = Vec::new();
+    let mut citizens: Vec<Citizen> = Vec::new();
+    let mut jobs: Vec<Job> = Vec::new();
+    let mut logs_on_ground: Vec<LogItem> = Vec::new();
     let mut resources = Resources { wood: 20, gold: 100 };
+    let mut warehouses: Vec<WarehouseStore> = Vec::new();
+    let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
     let mut road_mode = false;
     let mut building_atlas: Option<BuildingAtlas> = None;
@@ -246,14 +252,15 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
-                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
-                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100 }; }
+                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100 }; }
                         if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom)); }
                         if key == PhysicalKey::Code(input.load_game) {
                             if let Ok(save) = load_game() {
                                 seed = save.seed;
                                 world.reset_noise(seed);
                                 buildings = save.to_buildings();
+                                citizens.clear(); population = 0; // пока не сохраняем жителей
                                 resources = save.resources;
                                 cam_px = Vec2::new(save.cam_x, save.cam_y);
                                 zoom = save.zoom;
@@ -281,6 +288,7 @@ fn run() -> Result<()> {
                                 let pad = 8 * ui_s; let icon_size = 10 * ui_s; let by = pad + icon_size + 8 * ui_s; let btn_w = 90 * ui_s; let btn_h = 18 * ui_s;
                                 if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad, by, btn_w, btn_h) { selected_building = BuildingKind::Lumberjack; return; }
                                 if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + btn_w + 6 * ui_s, by, btn_w, btn_h) { selected_building = BuildingKind::House; return; }
+                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, pad + (btn_w + 6 * ui_s) * 2, by, btn_w, btn_h) { selected_building = BuildingKind::Warehouse; return; }
                             }
                         }
                         if let Some(tp) = hovered_tile {
@@ -300,6 +308,13 @@ fn run() -> Result<()> {
                                     resources.gold -= cost.gold;
                                     world.occupy(tp);
                                     buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
+                                    if selected_building == BuildingKind::House {
+                                        // Простой спавн одного жителя на дом
+                                        citizens.push(Citizen { pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None, deliver_to: tp });
+                                        population += 1;
+                                    } else if selected_building == BuildingKind::Warehouse {
+                                        warehouses.push(WarehouseStore { pos: tp, wood: 0 });
+                                    }
                                     println!("Построено {:?} на {:?}. Ресурсы: wood={}, gold={}", selected_building, tp, resources.wood, resources.gold);
                                 }
                             }
@@ -358,6 +373,17 @@ fn run() -> Result<()> {
                         }
                     }
 
+                    // Поленья на земле
+                    for li in &logs_on_ground {
+                        if li.carried { continue; }
+                        let mx = li.pos.x; let my = li.pos.y;
+                        if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
+                        let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
+                        let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
+                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
+                        render::tiles::draw_log(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/4, atlas.half_w, atlas.half_h);
+                    }
+
                     // Подсветка ховера
                     if let Some(tp) = hovered_tile {
                         let world_x = (tp.x - tp.y) * atlas.half_w - cam_snap.x as i32;
@@ -391,12 +417,33 @@ fn run() -> Result<()> {
                                 }
                             }
                         }
-                        let color = match b.kind { BuildingKind::Lumberjack => [140, 90, 40, 255], BuildingKind::House => [180, 180, 180, 255] };
+                        let color = match b.kind {
+                            BuildingKind::Lumberjack => [140, 90, 40, 255],
+                            BuildingKind::House => [180, 180, 180, 255],
+                            BuildingKind::Warehouse => [150, 120, 80, 255],
+                        };
                         render::tiles::draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
                     }
 
+                    // Рендер жителей (кружок) с интерполяцией между клетками
+                    for c in &citizens {
+                        let (fx, fy) = if c.moving {
+                            let dx = (c.target.x - c.pos.x) as f32;
+                            let dy = (c.target.y - c.pos.y) as f32;
+                            (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress)
+                        } else { (c.pos.x as f32, c.pos.y as f32) };
+                        let world_x = ((fx - fy) * atlas.half_w as f32).round() as i32 - cam_snap.x as i32;
+                        let world_y = ((fx + fy) * atlas.half_h as f32).round() as i32 - cam_snap.y as i32;
+                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
+                        let r = (atlas.half_w as f32 * 0.15).round() as i32; // масштаб от тайла
+                        render::tiles::draw_citizen_marker(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), [255, 230, 120, 255]);
+                    }
+
                     // UI наложение
-                    if show_ui { ui::draw_ui(frame, width_i32, height_i32, &resources, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base); }
+                    if show_ui {
+                        let depot_total: i32 = warehouses.iter().map(|w| w.wood).sum();
+                        ui::draw_ui(frame, width_i32, height_i32, &resources, depot_total, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base);
+                    }
 
                     if let Err(err) = pixels.render() {
                         eprintln!("pixels.render() failed: {err}");
@@ -422,9 +469,90 @@ fn run() -> Result<()> {
                 if !paused {
                     while accumulator_ms >= step_ms {
                         simulate(&mut buildings, &mut world, &mut resources, step_ms as i32);
+                        // 1) генерация задач лесорубками
+                        for b in buildings.iter() {
+                            if b.kind == BuildingKind::Lumberjack && (rand::random::<u8>() % 50 == 0) {
+                                // разово с маленькой вероятностью создаём ChopWood рядом
+                                let p = b.pos;
+                                const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
+                                for (dx,dy) in NB {
+                                    let np = IVec2::new(p.x+dx, p.y+dy);
+                                    if world.get_tile(np.x, np.y) == TileKind::Forest {
+                                        jobs.push(Job { kind: JobKind::ChopWood { pos: np }, taken: false, done: false });
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // 2) назначение задач жителям
+                        for (cid, c) in citizens.iter_mut().enumerate() {
+                            if c.assigned_job.is_none() {
+                                if let Some((jid, _)) = jobs.iter().enumerate().find(|(_, j)| !j.taken && !j.done) {
+                                    jobs[jid].taken = true; c.assigned_job = Some(jid);
+                                    match jobs[jid].kind { JobKind::ChopWood { pos } => { c.target = pos; c.moving = true; c.progress = 0.0; }, JobKind::HaulWood { from, .. } => { c.target = from; c.moving = true; c.progress = 0.0; } }
+                                }
+                            }
+                        }
+                        // 3) выполнение задач
+                        for c in citizens.iter_mut() {
+                            if let Some(jid) = c.assigned_job {
+                                match jobs[jid].kind {
+                                    JobKind::ChopWood { pos } => {
+                                        if !c.moving && c.pos == pos {
+                                            // срубили: кладём полено и создаём задачу HaulWood к дому
+                                            logs_on_ground.push(LogItem { pos, carried: false });
+                                            // цель доставки — ближайший склад (если нет, ближайший дом)
+                                            let target_pos = if let Some((_,wh)) = warehouses.iter().enumerate().min_by_key(|(_,w)| (w.pos.x-pos.x).abs() + (w.pos.y-pos.y).abs()) { wh.pos } else if let Some(home) = buildings.iter().find(|b| b.kind == BuildingKind::House).map(|b| b.pos) { home } else { pos };
+                                            if target_pos != pos {
+                                                jobs[jid].done = true;
+                                                jobs.push(Job { kind: JobKind::HaulWood { from: pos, to: target_pos }, taken: false, done: false });
+                                                c.assigned_job = None;
+                                            }
+                                        }
+                                    }
+                                    JobKind::HaulWood { from, to } => {
+                                        if !c.carrying_log {
+                                            // идём к from
+                                            if !c.moving && c.pos == from {
+                                                if let Some(li) = logs_on_ground.iter_mut().find(|l| l.pos == from && !l.carried) {
+                                                    li.carried = true; c.carrying_log = true; c.target = to; c.moving = true; c.progress = 0.0;
+                                                } else { jobs[jid].done = true; c.assigned_job = None; }
+                                            }
+                                        } else {
+                                            if !c.moving && c.pos == to {
+                                                // доставили
+                                                if let Some(w) = warehouses.iter_mut().find(|w| w.pos == to) { w.wood += 1; } else { resources.wood += 1; }
+                                                jobs[jid].done = true; c.carrying_log = false; c.assigned_job = None;
+                                                // уберём полено, если ещё есть пометка carried
+                                                if let Some(idx) = logs_on_ground.iter().position(|l| l.carried && l.pos == to) { logs_on_ground.remove(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // простая симуляция жителей
+                        for c in citizens.iter_mut() {
+                            if !c.moving {
+                                let mut best: Option<(i32, IVec2)> = None;
+                                const R: i32 = 8;
+                                for dy in -R..=R { for dx in -R..=R {
+                                    let p = IVec2::new(c.pos.x + dx, c.pos.y + dy);
+                                    if world.get_tile(p.x, p.y) == TileKind::Forest {
+                                        let d = dx.abs() + dy.abs();
+                                        if best.map(|(bd,_)| d < bd).unwrap_or(true) { best = Some((d, p)); }
+                                    }
+                                }}
+                                if let Some((_, goal)) = best {
+                                    if let Some(pathv) = path::astar(&world, c.pos, goal, 500) { if pathv.len() > 1 { c.target = pathv[1]; c.moving = true; c.progress = 0.0; } }
+                                }
+                            } else {
+                                c.progress += (step_ms / 300.0) as f32; // 0..1
+                                if c.progress >= 1.0 { c.pos = c.target; c.moving = false; c.progress = 0.0; }
+                            }
+                        }
                         accumulator_ms -= step_ms;
                         did_step = true;
-                        // ограничим число шагов за кадр
                         if accumulator_ms > 10.0 * step_ms { accumulator_ms = 0.0; break; }
                     }
                 }
@@ -448,6 +576,11 @@ fn clear(frame: &mut [u8], rgba: [u8; 4]) {
     }
 }
 
+fn sat_mul_add(a: i32, b: i32, c: i32) -> i32 {
+    let v = (a as i64) * (b as i64) + (c as i64);
+    if v > i32::MAX as i64 { i32::MAX } else if v < i32::MIN as i64 { i32::MIN } else { v as i32 }
+}
+
 // удалено: draw_iso_tile (перенесено в модуль render)
 
 // удалено: draw_iso_tile_tinted (перенесено в модуль render)
@@ -462,6 +595,7 @@ fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
     match kind {
         BuildingKind::Lumberjack => Some(0),
         BuildingKind::House => Some(1),
+        BuildingKind::Warehouse => None,
     }
 }
 
@@ -528,6 +662,7 @@ fn building_cost(kind: BuildingKind) -> Resources {
     match kind {
         BuildingKind::Lumberjack => Resources { wood: 5, gold: 10 },
         BuildingKind::House => Resources { wood: 10, gold: 15 },
+        BuildingKind::Warehouse => Resources { wood: 20, gold: 30 },
     }
 }
 
@@ -551,6 +686,7 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
                     if resources.wood > 0 { resources.wood -= 1; resources.gold += 1; }
                 }
             }
+            BuildingKind::Warehouse => { /* пока пассивный */ }
         }
     }
 }

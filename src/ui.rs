@@ -3,7 +3,7 @@ use crate::types::{Resources, BuildingKind};
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 pub fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as i32) * s }
 
-pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32) {
+pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, depot_wood: i32, population: i32, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32) {
     let s = ui_scale(fh, base_scale_k);
     let bar_h = ui_bar_height(fh, s);
     fill_rect(frame, fw, fh, 0, 0, fw, bar_h, [0, 0, 0, 160]);
@@ -22,12 +22,24 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, select
     let btn_w = 90 * s; let btn_h = 18 * s; let by = pad + icon_size + 8 * s;
     draw_button(frame, fw, fh, pad, by, btn_w, btn_h, selected == BuildingKind::Lumberjack, b"Lumberjack [Z]", [200,200,200,255], s);
     draw_button(frame, fw, fh, pad + btn_w + 6 * s, by, btn_w, btn_h, selected == BuildingKind::House, b"House [X]", [200,200,200,255], s);
+    draw_button(frame, fw, fh, pad + (btn_w + 6 * s) * 2, by, btn_w, btn_h, selected == BuildingKind::Warehouse, b"Warehouse", [200,200,200,255], s);
 
     let info_x = fw - 160 * s; let info_y = 8 * s;
     draw_text_mini(frame, fw, fh, info_x, info_y, b"FPS:", [200,200,200,255], s);
     draw_number(frame, fw, fh, info_x + 20 * s, info_y, fps.round() as u32, [255,255,255,255], s);
     draw_text_mini(frame, fw, fh, info_x, info_y + 10 * s, if paused { b"PAUSE" } else { b"SPEED" }, [200,200,200,255], s);
     if !paused { let sp = (speed * 10.0).round() as u32; draw_number(frame, fw, fh, info_x + 36 * s, info_y + 10 * s, sp, [255,255,255,255], s); }
+
+    // Склад (итого дерево в складах)
+    let dep_x = pad + 120 * s;
+    fill_rect(frame, fw, fh, dep_x, pad, icon_size, icon_size, [90, 90, 120, 255]);
+    draw_number(frame, fw, fh, dep_x + icon_size + 4, pad, depot_wood as u32, [255,255,255,255], s);
+
+    // Население
+    let pop_x = dep_x + 80 * s; // немного правее склада
+    let pop_y = pad;
+    fill_rect(frame, fw, fh, pop_x, pop_y, icon_size, icon_size, [180, 60, 60, 255]);
+    draw_number(frame, fw, fh, pop_x + icon_size + 4, pop_y, population as u32, [255,255,255,255], s);
 }
 
 pub fn point_in_rect(px: i32, py: i32, x: i32, y: i32, w: i32, h: i32) -> bool { px >= x && py >= y && px < x + w && py < y + h }

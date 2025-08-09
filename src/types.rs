@@ -12,6 +12,7 @@ pub enum TileKind {
 pub enum BuildingKind {
     Lumberjack,
     House,
+    Warehouse,
 }
 
 #[derive(Clone, Debug)]
@@ -26,5 +27,31 @@ pub struct Resources {
     pub wood: i32,
     pub gold: i32,
 }
+
+#[derive(Clone, Debug)]
+pub struct Citizen {
+    pub pos: IVec2,      // текущая клетка
+    pub target: IVec2,   // цель (для будущего pathfinding)
+    pub moving: bool,
+    pub progress: f32,   // 0..1 прогресс между клетками
+    pub carrying_log: bool,
+    pub assigned_job: Option<usize>,
+    pub deliver_to: IVec2,
+}
+
+#[derive(Clone, Debug)]
+pub enum JobKind { ChopWood { pos: IVec2 }, HaulWood { from: IVec2, to: IVec2 } }
+
+#[derive(Clone, Debug)]
+pub struct Job { pub kind: JobKind, pub taken: bool, pub done: bool }
+
+#[derive(Clone, Debug)]
+pub struct LogItem {
+    pub pos: IVec2,
+    pub carried: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WarehouseStore { pub pos: IVec2, pub wood: i32 }
 
 

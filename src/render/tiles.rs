@@ -49,6 +49,32 @@ pub fn draw_building(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32
     for y in y0..=y1 { for x in x0..=x1 { let idx = ((y as usize) * (width as usize) + (x as usize)) * 4; frame[idx..idx + 4].copy_from_slice(&color); } }
 }
 
+pub fn draw_citizen_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, radius: i32, color: [u8;4]) {
+    let r = radius.max(1).min(12);
+    let r2 = r * r;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx*dx + dy*dy <= r2 {
+                let x = cx + dx; let y = cy + dy;
+                if x >= 0 && y >= 0 && x < width && y < height {
+                    let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
+                    frame[idx..idx+4].copy_from_slice(&color);
+                }
+            }
+        }
+    }
+}
+
+pub fn draw_log(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32) {
+    // маленький прямоугольник как полено
+    let w = (half_w as f32 * 0.4) as i32; let h = (half_h as f32 * 0.3) as i32;
+    let x0 = (cx - w/2).clamp(0, width-1);
+    let y0 = (cy - h/2).clamp(0, height-1);
+    let x1 = (cx + w/2).clamp(0, width-1);
+    let y1 = (cy + h/2).clamp(0, height-1);
+    for y in y0..=y1 { for x in x0..=x1 { let idx=((y as usize)*(width as usize)+(x as usize))*4; frame[idx..idx+4].copy_from_slice(&[120,80,40,255]); }}
+}
+
 pub fn blit_sprite_alpha_scaled(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32, dw: i32, dh: i32) {
     let dst_x0 = x.max(0); let dst_y0 = y.max(0); let dst_x1 = (x + dw).min(fw); let dst_y1 = (y + dh).min(fh);
     if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }
