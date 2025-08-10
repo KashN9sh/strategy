@@ -116,7 +116,52 @@ impl World {
 
     fn tile_by_noise(&self, tx: i32, ty: i32) -> TileKind {
         let n = self.fbm.get([tx as f64, ty as f64]) as f32;
-        if n < -0.2 { TileKind::Water } else if n < 0.2 { TileKind::Grass } else { TileKind::Forest }
+        // Дополнительные вариации ресурсов через смещённые октавы шума
+        let n2 = self.fbm.get([tx as f64 * 0.7 + 100.0, ty as f64 * 0.7 - 50.0]) as f32;
+        let _n3 = self.fbm.get([tx as f64 * 0.9 - 200.0, ty as f64 * 0.9 + 80.0]) as f32;
+        if n < -0.2 { TileKind::Water }
+        else if n > 0.6 && n2 > 0.5 { TileKind::Forest }
+        else { TileKind::Grass }
+    }
+
+    pub fn has_clay_deposit(&self, p: IVec2) -> bool {
+        // базовый шум (низкая частота) + локальная кластеризация
+        let base = self.fbm.get([p.x as f64 * 0.30 + 31.0, p.y as f64 * 0.30 - 77.0]) as f32;
+        let thr = 0.22_f32; let margin = 0.05_f32;
+        if base > thr { return true; }
+        if base > thr - margin {
+            const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+            let mut hits = 0;
+            for (dx,dy) in NB { let v = self.fbm.get([(p.x+dx) as f64 * 0.30 + 31.0, (p.y+dy) as f64 * 0.30 - 77.0]) as f32; if v > thr { hits += 1; } }
+            return hits >= 2;
+        }
+        false
+    }
+
+    pub fn has_stone_deposit(&self, p: IVec2) -> bool {
+        let base = self.fbm.get([p.x as f64 * 0.38 - 123.0, p.y as f64 * 0.38 + 19.0]) as f32;
+        let thr = 0.26_f32; let margin = 0.06_f32;
+        if base > thr { return true; }
+        if base > thr - margin {
+            const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+            let mut hits = 0;
+            for (dx,dy) in NB { let v = self.fbm.get([(p.x+dx) as f64 * 0.38 - 123.0, (p.y+dy) as f64 * 0.38 + 19.0]) as f32; if v > thr { hits += 1; } }
+            return hits >= 2;
+        }
+        false
+    }
+
+    pub fn has_iron_deposit(&self, p: IVec2) -> bool {
+        let base = self.fbm.get([p.x as f64 * 0.34 + 211.0, p.y as f64 * 0.34 + 87.0]) as f32;
+        let thr = 0.30_f32; let margin = 0.05_f32;
+        if base > thr { return true; }
+        if base > thr - margin {
+            const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+            let mut hits = 0;
+            for (dx,dy) in NB { let v = self.fbm.get([(p.x+dx) as f64 * 0.34 + 211.0, (p.y+dy) as f64 * 0.34 + 87.0]) as f32; if v > thr { hits += 1; } }
+            return hits >= 2;
+        }
+        false
     }
 
     // --- Деревья ---

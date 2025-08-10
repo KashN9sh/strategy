@@ -10,17 +10,24 @@ pub struct TileAtlas {
     pub grass: Vec<u8>,
     pub forest: Vec<u8>,
     pub water_frames: Vec<Vec<u8>>,
+    // предмасштабированные и замаскированные наложения месторождений
+    pub clay: Vec<u8>,
+    pub stone: Vec<u8>,
+    pub iron: Vec<u8>,
     pub base_loaded: bool,
     pub base_w: i32,
     pub base_h: i32,
     pub base_grass: Vec<u8>,
     pub base_forest: Vec<u8>,
     pub base_water: Vec<u8>,
+    pub base_clay: Vec<u8>,
+    pub base_stone: Vec<u8>,
+    pub base_iron: Vec<u8>,
 }
 
 impl TileAtlas {
     pub fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new() }
+        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
     }
 
     pub fn ensure_zoom(&mut self, zoom: f32) {
@@ -36,6 +43,10 @@ impl TileAtlas {
             self.forest = Self::scale_and_mask(&self.base_forest, self.base_w, self.base_h, self.half_w, self.half_h);
             self.water_frames.clear();
             self.water_frames.push(Self::scale_and_mask(&self.base_water, self.base_w, self.base_h, self.half_w, self.half_h));
+            // подготовим наложения deposit-тайлов под текущий zoom с ромбической маской
+            self.clay = Self::scale_and_mask(&self.base_clay, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.stone = Self::scale_and_mask(&self.base_stone, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.iron = Self::scale_and_mask(&self.base_iron, self.base_w, self.base_h, self.half_w, self.half_h);
         } else {
             self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
             self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
@@ -90,7 +101,11 @@ impl TileAtlas {
     }
 
     pub fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind, water_frame: usize) {
-        let src = match kind { TileKind::Grass => &self.grass, TileKind::Forest => &self.forest, TileKind::Water => &self.water_frames[water_frame % self.water_frames.len().max(1)] };
+        let src = match kind {
+            TileKind::Grass => &self.grass,
+            TileKind::Forest => &self.forest,
+            TileKind::Water => &self.water_frames[water_frame % self.water_frames.len().max(1)],
+        };
         let w = self.half_w * 2 + 1; let h = self.half_h * 2 + 1; let x0 = cx - self.half_w; let y0 = cy - self.half_h;
         let dst_y_start = y0.max(0); let dst_y_end = (y0 + h).min(fh); if dst_y_start >= dst_y_end { return; }
         for dy in dst_y_start..dst_y_end {

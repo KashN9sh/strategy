@@ -21,6 +21,8 @@ pub enum BuildingKind {
     Mill,
     Bakery,
     Fishery,
+    IronMine,
+    Smelter,
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +44,8 @@ pub struct Resources {
     pub flour: i32,
     pub bread: i32,
     pub fish: i32,
+    pub iron_ore: i32,
+    pub iron_ingots: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +94,8 @@ pub struct WarehouseStore {
     pub bread: i32,
     pub fish: i32,
     pub gold: i32,
+    pub iron_ore: i32,
+    pub iron_ingots: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,7 +109,12 @@ pub enum ResourceKind {
     Bread,
     Fish,
     Gold,
+    IronOre,
+    IronIngot,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DepositKind { Clay, Stone, Iron }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CitizenState {

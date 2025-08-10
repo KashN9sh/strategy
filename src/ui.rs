@@ -191,7 +191,7 @@ pub fn draw_ui(
         UICategory::Housing => &[BuildingKind::House],
         UICategory::Storage => &[BuildingKind::Warehouse],
         UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
-        UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::Kiln],
+        UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln, BuildingKind::Smelter],
         UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
         UICategory::Logistics => &[],
     };
@@ -204,10 +204,12 @@ pub fn draw_ui(
             BuildingKind::StoneQuarry => b"Quarry".as_ref(),
             BuildingKind::ClayPit => b"Clay Pit".as_ref(),
             BuildingKind::Kiln => b"Kiln".as_ref(),
+            BuildingKind::IronMine => b"Iron Mine".as_ref(),
             BuildingKind::WheatField => b"Wheat Field".as_ref(),
             BuildingKind::Mill => b"Mill".as_ref(),
             BuildingKind::Bakery => b"Bakery".as_ref(),
             BuildingKind::Fishery => b"Fishery".as_ref(),
+            BuildingKind::Smelter => b"Smelter".as_ref(),
         };
         let active = selected == bk;
         let bw = button_w_for(label, s);
@@ -242,6 +244,8 @@ pub fn draw_ui(
                 BuildingKind::Fishery => (b"Produces: Fish".as_ref(), [100,140,200,255], Some(b"Near water".as_ref())),
                 BuildingKind::Warehouse => (b"Stores resources".as_ref(), [150,120,80,255], None),
                 BuildingKind::House => (b"Generates: Gold".as_ref(), [220,180,60,255], Some(b"Consumes Bread/Fish".as_ref())),
+                BuildingKind::IronMine => (b"Produces: Iron Ore".as_ref(), [90,90,110,255], None),
+                BuildingKind::Smelter => (b"Produces: Iron Ingot".as_ref(), [190, 190, 210,255], Some(b"Uses Iron Ore + Wood".as_ref())),
             };
             let prod_w = icon + 4 + text_w(prod_label, s);
             let note_w = note.map(|t| text_w(t, s)).unwrap_or(0);
@@ -311,6 +315,8 @@ fn building_cost_ui(kind: BuildingKind) -> Resources {
         BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
         BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
         BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
+        BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
     }
 }
 

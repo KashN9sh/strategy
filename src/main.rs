@@ -181,12 +181,12 @@ fn run() -> Result<()> {
     let mut atlas = TileAtlas::new();
     let mut road_mode = false;
     let mut building_atlas: Option<BuildingAtlas> = None;
-    // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 3 тайла в строку: grass, forest, water)
+    // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 6 тайлов в строку: grass, forest, water, clay, stone, iron)
     if let Ok(img) = image::open("assets/tiles.png") {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
-        // делим по 3 спрайта по ширине
-        let tile_w = (iw / 3) as i32;
+        // делим по 6 спрайтов по ширине
+        let tile_w = (iw / 6) as i32;
         let tile_h = ih as i32;
         let slice_rgba = |index: u32| -> Vec<u8> {
             let x0 = (index * tile_w as u32) as usize;
@@ -204,6 +204,9 @@ fn run() -> Result<()> {
         atlas.base_grass = slice_rgba(0);
         atlas.base_forest = slice_rgba(1);
         atlas.base_water = slice_rgba(2);
+        atlas.base_clay = slice_rgba(3);
+        atlas.base_stone = slice_rgba(4);
+        atlas.base_iron = slice_rgba(5);
     }
     // buildings.png: N спрайтов по горизонтали, ширина = base_w (или 64), высота любая
     if let Ok(img) = image::open("assets/buildings.png") {
@@ -321,16 +324,16 @@ fn run() -> Result<()> {
                             }
                             // клик по зданиям выбранной категории
                             let mut bx = padb; let by2 = cy + btn_h + 6 * ui_s;
-                            let buildings_for_cat: &[BuildingKind] = match ui_category {
+                             let buildings_for_cat: &[BuildingKind] = match ui_category {
                                 ui::UICategory::Housing => &[BuildingKind::House],
-                                ui::UICategory::Storage => &[BuildingKind::Warehouse],
-                                ui::UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
-                                ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::Kiln],
+                                 ui::UICategory::Storage => &[BuildingKind::Warehouse],
+                                 ui::UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
+                                 ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln],
                                 ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
                                 ui::UICategory::Logistics => &[],
                             };
                             for &bk in buildings_for_cat.iter() {
-                                let label = match bk {
+                            let label = match bk {
                                     BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
                                     BuildingKind::House => b"House".as_ref(),
                                     BuildingKind::Warehouse => b"Warehouse".as_ref(),
@@ -341,7 +344,9 @@ fn run() -> Result<()> {
                                     BuildingKind::WheatField => b"Wheat Field".as_ref(),
                                     BuildingKind::Mill => b"Mill".as_ref(),
                                     BuildingKind::Bakery => b"Bakery".as_ref(),
-                                    BuildingKind::Fishery => b"Fishery".as_ref(),
+                                     BuildingKind::Fishery => b"Fishery".as_ref(),
+                                     BuildingKind::IronMine => b"Iron Mine".as_ref(),
+                                     BuildingKind::Smelter => b"Smelter".as_ref(),
                                 };
                                 let bw = ui::button_w_for(label, ui_s);
                                 if bx + bw > width_i32 - padb { break; }
@@ -370,6 +375,18 @@ fn run() -> Result<()> {
                                     }
                                     BuildingKind::WheatField => {
                                         allowed = tile_kind == TileKind::Grass;
+                                    }
+                                    BuildingKind::StoneQuarry => {
+                                        // Требуем spot камня
+                                        allowed = world.has_stone_deposit(tp);
+                                    }
+                                    BuildingKind::ClayPit => {
+                                        // Требуем spot глины
+                                        allowed = world.has_clay_deposit(tp);
+                                    }
+                                    BuildingKind::IronMine => {
+                                        // Требуем spot железа
+                                        allowed = world.has_iron_deposit(tp);
                                     }
                                     _ => {}
                                 }
@@ -400,7 +417,7 @@ fn run() -> Result<()> {
                                         });
                                         population += 1;
                                       } else if selected_building == BuildingKind::Warehouse {
-                                          warehouses.push(WarehouseStore { pos: tp, wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0 });
+                                          warehouses.push(WarehouseStore { pos: tp, wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0, iron_ore: 0, iron_ingots: 0 });
                                           // Переложим остатки ресурсов (кроме золота) в только что построенный склад
                                           if let Some(w) = warehouses.last_mut() {
                                               if resources.wood > 0 { w.wood += resources.wood; resources.wood = 0; }
@@ -410,7 +427,8 @@ fn run() -> Result<()> {
                                               if resources.wheat > 0 { w.wheat += resources.wheat; resources.wheat = 0; }
                                               if resources.flour > 0 { w.flour += resources.flour; resources.flour = 0; }
                                               if resources.bread > 0 { w.bread += resources.bread; resources.bread = 0; }
-                                              if resources.fish > 0 { w.fish += resources.fish; resources.fish = 0; }
+                                               if resources.fish > 0 { w.fish += resources.fish; resources.fish = 0; }
+                                               if resources.iron_ore > 0 { w.iron_ore += resources.iron_ore; resources.iron_ore = 0; }
                                               // золото хранится в казне (resources.gold)
                                           }
                                      } else if selected_building == BuildingKind::Forester {
@@ -477,6 +495,30 @@ fn run() -> Result<()> {
                                   let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2);
                                   render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage);
                               }
+                              // оверлеи месторождений (простая заливка-рамка)
+                              let tp = IVec2::new(mx, my);
+                              if world.get_tile(mx, my) != TileKind::Water {
+                                  // если загружен базовый атлас — используем спрайты месторождений поверх травы
+                                  if atlas.base_loaded {
+                                      let tile_w_px = atlas.half_w * 2 + 1;
+                                      let tile_h_px = atlas.half_h * 2 + 1;
+                                      let top_left_x = screen_pos.x - atlas.half_w;
+                                      let top_left_y = screen_pos.y - atlas.half_h;
+                                      if world.has_clay_deposit(tp) {
+                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.clay, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 170);
+                                      }
+                                      if world.has_stone_deposit(tp) {
+                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.stone, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 170);
+                                      }
+                                      if world.has_iron_deposit(tp) {
+                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.iron, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 190);
+                                      }
+                                  } else {
+                                      if world.has_clay_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 120, 80, 120]); }
+                                      if world.has_stone_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 200, 200, 120]); }
+                                      if world.has_iron_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [150, 140, 220, 140]); }
+                                  }
+                              }
                         }
                     }
 
@@ -536,6 +578,8 @@ fn run() -> Result<()> {
                             BuildingKind::Mill => [210, 210, 180, 255],
                             BuildingKind::Bakery => [200, 160, 120, 255],
                             BuildingKind::Fishery => [100, 140, 200, 255],
+                            BuildingKind::IronMine => [90, 90, 110, 255],
+                            BuildingKind::Smelter => [190, 190, 210, 255],
                         };
                         render::tiles::draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
                     }
@@ -577,6 +621,8 @@ fn run() -> Result<()> {
                             bread: resources.bread + warehouses.iter().map(|w| w.bread).sum::<i32>(),
                             fish: resources.fish + warehouses.iter().map(|w| w.fish).sum::<i32>(),
                             gold: resources.gold + warehouses.iter().map(|w| w.gold).sum::<i32>(),
+                            iron_ore: resources.iron_ore + warehouses.iter().map(|w| w.iron_ore).sum::<i32>(),
+                            iron_ingots: resources.iron_ingots + warehouses.iter().map(|w| w.iron_ingots).sum::<i32>(),
                         };
                         // Статусы жителей для UI
                         let mut idle=0; let mut working=0; let mut sleeping=0; let mut hauling=0; let mut fetching=0;
@@ -759,6 +805,8 @@ fn run() -> Result<()> {
                                                     ResourceKind::Bread => w.bread += amt,
                                                     ResourceKind::Fish => w.fish += amt,
                                                     ResourceKind::Gold => w.gold += amt,
+                                                    ResourceKind::IronOre => w.iron_ore += amt,
+                                                    ResourceKind::IronIngot => w.iron_ingots += amt,
                                                 }
                                             }
                                             // возвращаемся к работе
@@ -779,6 +827,8 @@ fn run() -> Result<()> {
                                                     ResourceKind::Bread => { if w.bread > 0 { w.bread -= 1; true } else { false } },
                                                     ResourceKind::Fish => { if w.fish > 0 { w.fish -= 1; true } else { false } },
                                                     ResourceKind::Gold => { if w.gold > 0 { w.gold -= 1; true } else { false } },
+                                                    ResourceKind::IronOre => { if w.iron_ore > 0 { w.iron_ore -= 1; true } else { false } },
+                                                    ResourceKind::IronIngot => { if w.iron_ingots > 0 { w.iron_ingots -= 1; true } else { false } },
                                                 };
                                                 if taken {
                                                     c.carrying = Some((req, 1));
@@ -822,6 +872,15 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Clay, 1));
+                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::IronMine => {
+                                            if c.carrying.is_none() && c.work_timer_ms >= 5000 {
+                                                c.work_timer_ms = 0;
+                                                if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                    c.carrying = Some((ResourceKind::IronOre, 1));
                                                     c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
@@ -908,6 +967,33 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // муку потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::Bread, 1));
+                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Smelter => {
+                                            // нужна IronOre и дрова (wood)
+                                            let has_ore = matches!(c.carrying, Some((ResourceKind::IronOre, _)));
+                                            if !has_ore {
+                                                let have_any = warehouses.iter().any(|w| w.iron_ore > 0);
+                                                if have_any {
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.pending_input = Some(ResourceKind::IronOre);
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToFetch;
+                                                    }
+                                                }
+                                            } else {
+                                                if c.work_timer_ms >= 6000 {
+                                                    c.work_timer_ms = 0;
+                                                    // списать 1 wood
+                                                    let mut ok = false;
+                                                    for w in warehouses.iter_mut() { if w.wood > 0 { w.wood -= 1; ok = true; break; } }
+                                                    if ok {
+                                                        c.carrying = None; // руду потратили
+                                                        if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                            c.carrying = Some((ResourceKind::IronIngot, 1));
                                                             c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
@@ -1016,6 +1102,8 @@ fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
         BuildingKind::Mill => Some(8),
         BuildingKind::Bakery => Some(9),
         BuildingKind::Fishery => Some(10),
+        BuildingKind::IronMine => Some(11),
+        BuildingKind::Smelter => Some(12),
     }
 }
 
@@ -1091,6 +1179,8 @@ fn building_cost(kind: BuildingKind) -> Resources {
         BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
         BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
         BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
+        BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
     }
 }
 
@@ -1134,6 +1224,8 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
             BuildingKind::Mill => { /* Производство выполняют жители */ }
             BuildingKind::Bakery => { /* Производство выполняют жители */ }
             BuildingKind::Fishery => { /* Производство выполняют жители */ }
+            BuildingKind::IronMine => { /* Производство выполняют жители */ }
+            BuildingKind::Smelter => { /* Производство выполняют жители */ }
         }
     }
 }
