@@ -55,6 +55,15 @@ pub struct Citizen {
     pub deliver_to: IVec2,
     // анти-залипание: таймер ожидания у цели (мс)
     pub idle_timer_ms: i32,
+    // суточный цикл и работа
+    pub home: IVec2,
+    pub workplace: Option<IVec2>,
+    pub state: CitizenState,
+    pub work_timer_ms: i32,
+    // перенос любых ресурсов (в дополнение к временной системе поленьев)
+    pub carrying: Option<(ResourceKind, i32)>,
+    // ожидаемый к доставке входной ресурс для цикла работы
+    pub pending_input: Option<ResourceKind>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +79,43 @@ pub struct LogItem {
 }
 
 #[derive(Clone, Debug)]
-pub struct WarehouseStore { pub pos: IVec2, pub wood: i32 }
+pub struct WarehouseStore {
+    pub pos: IVec2,
+    pub wood: i32,
+    pub stone: i32,
+    pub clay: i32,
+    pub bricks: i32,
+    pub wheat: i32,
+    pub flour: i32,
+    pub bread: i32,
+    pub fish: i32,
+    pub gold: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResourceKind {
+    Wood,
+    Stone,
+    Clay,
+    Bricks,
+    Wheat,
+    Flour,
+    Bread,
+    Fish,
+    Gold,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CitizenState {
+    Idle,
+    GoingToWork,
+    Working,
+    GoingToDeposit,
+    GoingToFetch,
+    GoingHome,
+    Sleeping,
+}
+
+ 
 
 

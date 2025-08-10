@@ -1,6 +1,6 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2};
-mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore};
+mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
 mod world; use world::World;
 mod atlas; use atlas::{TileAtlas, BuildingAtlas};
 mod render { pub mod tiles; }
@@ -236,7 +236,8 @@ fn run() -> Result<()> {
     let mut height_i32 = size.height as i32;
     // День/ночь
     const DAY_LENGTH_MS: f32 = 120_000.0;
-    let mut world_clock_ms: f32 = 0.0;
+    const START_HOUR: f32 = 8.0; // старт в 08:00
+    let mut world_clock_ms: f32 = DAY_LENGTH_MS * (START_HOUR / 24.0);
 
     let window = window.clone();
     event_loop.run(move |event, elwt| {
@@ -381,10 +382,25 @@ fn run() -> Result<()> {
                                     buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
                                      if selected_building == BuildingKind::House {
                                         // Простой спавн одного жителя на дом
-                                        citizens.push(Citizen { pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None, deliver_to: tp, idle_timer_ms: 0 });
+                                        citizens.push(Citizen {
+                                            pos: tp,
+                                            target: tp,
+                                            moving: false,
+                                            progress: 0.0,
+                                            carrying_log: false,
+                                            assigned_job: None,
+                                            deliver_to: tp,
+                                            idle_timer_ms: 0,
+                                            home: tp,
+                                            workplace: None,
+                                            state: CitizenState::Idle,
+                                            work_timer_ms: 0,
+                                            carrying: None,
+                                            pending_input: None,
+                                        });
                                         population += 1;
-                                     } else if selected_building == BuildingKind::Warehouse {
-                                         warehouses.push(WarehouseStore { pos: tp, wood: 0 });
+                                      } else if selected_building == BuildingKind::Warehouse {
+                                          warehouses.push(WarehouseStore { pos: tp, wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0 });
                                          // Переложим остаток «на руках» в только что построенный склад
                                          if let Some(w) = warehouses.last_mut() { w.wood += resources.wood.max(0); }
                                          resources.wood = 0;
@@ -539,10 +555,22 @@ fn run() -> Result<()> {
 
                     // UI наложение
                     if show_ui {
-                        let depot_total: i32 = warehouses.iter().map(|w| w.wood).sum();
-                        let total_visible_wood = if warehouses.is_empty() { resources.wood } else { depot_total };
+                        let depot_total_wood: i32 = warehouses.iter().map(|w| w.wood).sum();
+                        let total_visible_wood = if warehouses.is_empty() { resources.wood } else { depot_total_wood };
+                        // Показ ресурсов как суммы складов (если есть склады), иначе из ресурсов
+                        let visible = Resources {
+                            wood: total_visible_wood,
+                            stone: if warehouses.is_empty() { resources.stone } else { warehouses.iter().map(|w| w.stone).sum() },
+                            clay: if warehouses.is_empty() { resources.clay } else { warehouses.iter().map(|w| w.clay).sum() },
+                            bricks: if warehouses.is_empty() { resources.bricks } else { warehouses.iter().map(|w| w.bricks).sum() },
+                            wheat: if warehouses.is_empty() { resources.wheat } else { warehouses.iter().map(|w| w.wheat).sum() },
+                            flour: if warehouses.is_empty() { resources.flour } else { warehouses.iter().map(|w| w.flour).sum() },
+                            bread: if warehouses.is_empty() { resources.bread } else { warehouses.iter().map(|w| w.bread).sum() },
+                            fish: if warehouses.is_empty() { resources.fish } else { warehouses.iter().map(|w| w.fish).sum() },
+                            gold: if warehouses.is_empty() { resources.gold } else { warehouses.iter().map(|w| w.gold).sum() },
+                        };
                         let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress);
+                        ui::draw_ui(frame, width_i32, height_i32, &visible, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress);
                         // простая подсказка по наведению на ресурсы: дерево=общая сумма
                         let s = ui::ui_scale(height_i32, config.ui_scale_base);
                         let pad = 8 * s; let icon = 10 * s; let x0 = pad; let y0 = pad; let w = icon + 4 + 50; let h = icon;
@@ -577,31 +605,119 @@ fn run() -> Result<()> {
                         simulate(&mut buildings, &mut world, &mut resources, step_ms as i32);
                         world.grow_trees(step_ms as i32);
                         world_clock_ms = (world_clock_ms + step_ms) % DAY_LENGTH_MS;
-                        // 1) генерация задач лесорубками — только если нет активных задач/носильщиков для этого места
-                        for b in buildings.iter() {
-                            if b.kind == BuildingKind::Lumberjack {
-                                // ищем ближайшее дерево в радиусе R и публикуем задачу, если её ещё нет
-                                const R: i32 = 8;
-                                let mut best: Option<(i32, IVec2)> = None;
-                                for dy in -R..=R { for dx in -R..=R {
-                                    let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
-                                    if matches!(world.tree_stage(np), Some(2)) {
-                                        let d = dx.abs() + dy.abs();
-                                        if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
+
+                        // День/ночь
+                        let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                        let angle = t * std::f32::consts::TAU;
+                        let daylight = 0.5 - 0.5 * angle.cos();
+                        let is_day = daylight > 0.25; // простой порог
+
+                        // Ночная рутина: идём домой и спим, сбрасываем работу
+                        if !is_day {
+                            for c in citizens.iter_mut() {
+                                // отменяем активную задачу/перенос
+                                c.assigned_job = None;
+                                c.carrying_log = false;
+                                if c.state != CitizenState::Sleeping {
+                                    if c.pos != c.home && !c.moving {
+                                        c.target = c.home;
+                                        c.moving = true;
+                                        c.progress = 0.0;
+                                        c.state = CitizenState::GoingHome;
                                     }
-                                }}
-                                if let Some((_, np)) = best {
-                                    let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
-                                    if !already {
-                                        jobs.push(Job { id: { let id=next_job_id; next_job_id+=1; id }, kind: JobKind::ChopWood { pos: np }, taken: false, done: false });
+                                    if !c.moving && c.pos == c.home {
+                                        c.state = CitizenState::Sleeping;
+                                        c.workplace = None;
+                                        c.work_timer_ms = 0;
+                                        c.carrying = None;
                                     }
                                 }
                             }
                         }
-                        // 2) назначение задач: ближайший к задаче свободный житель
-                        jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs);
-                        // 3) выполнение задач
-                        jobs::process_jobs(&mut citizens, &mut jobs, &mut logs_on_ground, &mut warehouses, &mut resources, &buildings, &mut world, &mut next_job_id);
+                        // Утро: разбудить спящих и отменить возвращение домой, если день начался
+                        if is_day {
+                            for c in citizens.iter_mut() {
+                                match c.state {
+                                    CitizenState::Sleeping | CitizenState::GoingHome => {
+                                        c.state = CitizenState::Idle;
+                                        c.moving = false; // отменим путь домой, пусть берёт работу
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        // Дневная рутина рабочих по зданиям (кроме лесоруба/склада/дома)
+                        if is_day {
+                            use std::collections::HashSet;
+                            let mut occupied: HashSet<(i32,i32)> = citizens.iter()
+                                .filter_map(|c| c.workplace.map(|p| (p.x, p.y)))
+                                .collect();
+                            // Назначение рабочих
+                            for b in buildings.iter() {
+                                match b.kind {
+                                    BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Lumberjack => {}
+                                    _ => {
+                                        if !occupied.contains(&(b.pos.x, b.pos.y)) {
+                                            if let Some((ci, _)) = citizens.iter()
+                                                .enumerate()
+                                                .filter(|(_, c)| matches!(c.state, CitizenState::Idle | CitizenState::Sleeping) && !c.moving)
+                                                .min_by_key(|(_, c)| (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs())
+                                            {
+                                                let c = &mut citizens[ci];
+                                                if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
+                                                c.workplace = Some(b.pos);
+                                                c.target = b.pos;
+                                                c.moving = true;
+                                                c.progress = 0.0;
+                                                c.state = CitizenState::GoingToWork;
+                                                occupied.insert((b.pos.x, b.pos.y));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 1) генерация задач лесорубками — только если нет активных задач/носильщиков для этого места
+                        if is_day {
+                            for b in buildings.iter() {
+                                if b.kind == BuildingKind::Lumberjack {
+                                    // ищем ближайшее дерево в радиусе R и публикуем задачу, если её ещё нет
+                                    const R: i32 = 16;
+                                    let mut best: Option<(i32, IVec2)> = None;
+                                    for dy in -R..=R { for dx in -R..=R {
+                                        let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
+                                        if matches!(world.tree_stage(np), Some(2)) {
+                                            let d = dx.abs() + dy.abs();
+                                            if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
+                                        }
+                                    }}
+                                    if let Some((_, np)) = best {
+                                        let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
+                                        if !already {
+                                            jobs.push(Job { id: { let id=next_job_id; next_job_id+=1; id }, kind: JobKind::ChopWood { pos: np }, taken: false, done: false });
+                                        }
+                                    }
+                                }
+                            }
+                            // Гарантировать задачи на перенос для всех поленьев на земле
+                            if !warehouses.is_empty() {
+                                for li in logs_on_ground.iter() {
+                                    if li.carried { continue; }
+                                    let already = jobs.iter().any(|j| match j.kind { JobKind::HaulWood { from, .. } => from == li.pos, _ => false });
+                                    if !already {
+                                        if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - li.pos.x).abs() + (w.pos.y - li.pos.y).abs()).map(|w| w.pos) {
+                                            jobs.push(Job { id: { let id=next_job_id; next_job_id+=1; id }, kind: JobKind::HaulWood { from: li.pos, to: dst }, taken: false, done: false });
+                                        }
+                                    }
+                                }
+                            }
+                            // 2) назначение задач: ближайший к задаче свободный житель (только те, кто не назначен на работу)
+                            jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs);
+                            // 3) выполнение задач
+                            jobs::process_jobs(&mut citizens, &mut jobs, &mut logs_on_ground, &mut warehouses, &mut resources, &buildings, &mut world, &mut next_job_id);
+                        }
                         // простая симуляция жителей
                         for c in citizens.iter_mut() {
                             if !c.moving {
@@ -609,10 +725,210 @@ fn run() -> Result<()> {
                                 c.progress = 0.0;
                                 // если стоим > 5 секунд с назначенной задачей — сбросим её
                                 if c.idle_timer_ms > 5000 { c.assigned_job = None; c.carrying_log = false; c.idle_timer_ms = 0; }
+                                // смена состояний при прибытии
+                                match c.state {
+                                    CitizenState::GoingToWork => { c.state = CitizenState::Working; }
+                                    CitizenState::GoingHome => { if c.pos == c.home { c.state = CitizenState::Sleeping; } }
+                                    CitizenState::GoingToDeposit => {
+                                        if let Some((kind, amt)) = c.carrying.take() {
+                                            // кладём в ближайший склад (цель уже склад)
+                                            if let Some(w) = warehouses.iter_mut().find(|w| w.pos == c.pos) {
+                                                match kind {
+                                                    ResourceKind::Wood => w.wood += amt,
+                                                    ResourceKind::Stone => w.stone += amt,
+                                                    ResourceKind::Clay => w.clay += amt,
+                                                    ResourceKind::Bricks => w.bricks += amt,
+                                                    ResourceKind::Wheat => w.wheat += amt,
+                                                    ResourceKind::Flour => w.flour += amt,
+                                                    ResourceKind::Bread => w.bread += amt,
+                                                    ResourceKind::Fish => w.fish += amt,
+                                                    ResourceKind::Gold => w.gold += amt,
+                                                }
+                                            }
+                                            // возвращаемся к работе
+                                            if let Some(wp) = c.workplace { c.target = wp; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToWork; }
+                                        }
+                                    }
+                                    CitizenState::GoingToFetch => {
+                                        if let Some(req) = c.pending_input.take() {
+                                            // попытка забрать 1 ед. ресурса
+                                            if let Some(w) = warehouses.iter_mut().find(|w| w.pos == c.pos) {
+                                                let taken = match req {
+                                                    ResourceKind::Wood => { if w.wood > 0 { w.wood -= 1; true } else { false } },
+                                                    ResourceKind::Stone => { if w.stone > 0 { w.stone -= 1; true } else { false } },
+                                                    ResourceKind::Clay => { if w.clay > 0 { w.clay -= 1; true } else { false } },
+                                                    ResourceKind::Bricks => { if w.bricks > 0 { w.bricks -= 1; true } else { false } },
+                                                    ResourceKind::Wheat => { if w.wheat > 0 { w.wheat -= 1; true } else { false } },
+                                                    ResourceKind::Flour => { if w.flour > 0 { w.flour -= 1; true } else { false } },
+                                                    ResourceKind::Bread => { if w.bread > 0 { w.bread -= 1; true } else { false } },
+                                                    ResourceKind::Fish => { if w.fish > 0 { w.fish -= 1; true } else { false } },
+                                                    ResourceKind::Gold => { if w.gold > 0 { w.gold -= 1; true } else { false } },
+                                                };
+                                                if taken {
+                                                    c.carrying = Some((req, 1));
+                                                    if let Some(wp) = c.workplace { c.target = wp; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToWork; }
+                                                } else {
+                                                    c.state = CitizenState::Working; // ресурса нет
+                                                }
+                                            }
+                                        }
+                                    }
+                                    CitizenState::Sleeping => {}
+                                    _ => {}
+                                }
                             } else {
                                 c.idle_timer_ms = 0;
                                 c.progress += (step_ms / 300.0) as f32;
                                 if c.progress >= 1.0 { c.pos = c.target; c.moving = false; c.progress = 0.0; }
+                            }
+                        }
+
+                        // Производство при работе у здания
+                        if is_day {
+                            for c in citizens.iter_mut() {
+                                if !matches!(c.state, CitizenState::Working) { continue; }
+                                let Some(wp) = c.workplace else { continue; };
+                                if c.pos != wp { continue; }
+                                if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
+                                    c.work_timer_ms += step_ms as i32;
+                                    match b.kind {
+                                        BuildingKind::StoneQuarry => {
+                                            if c.carrying.is_none() && c.work_timer_ms >= 4000 {
+                                                c.work_timer_ms = 0;
+                                                if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                    c.carrying = Some((ResourceKind::Stone, 1));
+                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::ClayPit => {
+                                            if c.carrying.is_none() && c.work_timer_ms >= 4000 {
+                                                c.work_timer_ms = 0;
+                                                if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                    c.carrying = Some((ResourceKind::Clay, 1));
+                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::WheatField => {
+                                            if c.carrying.is_none() && c.work_timer_ms >= 6000 {
+                                                c.work_timer_ms = 0;
+                                                if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                    c.carrying = Some((ResourceKind::Wheat, 1));
+                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Mill => {
+                                            // нужна пшеница; если не несём пшеницу — идём за ней
+                                            if !matches!(c.carrying, Some((ResourceKind::Wheat, _))) {
+                                                let have_any = warehouses.iter().any(|w| w.wheat > 0);
+                                                if have_any {
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.pending_input = Some(ResourceKind::Wheat);
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToFetch;
+                                                    }
+                                                }
+                                            } else {
+                                                if c.work_timer_ms >= 5000 {
+                                                    c.work_timer_ms = 0;
+                                                    // consume carried wheat -> produce flour, then deliver
+                                                    c.carrying = None;
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.carrying = Some((ResourceKind::Flour, 1));
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Kiln => {
+                                            // нужна глина и дрова (wood)
+                                            let has_clay = matches!(c.carrying, Some((ResourceKind::Clay, _)));
+                                            if !has_clay {
+                                                let have_any = warehouses.iter().any(|w| w.clay > 0);
+                                                if have_any {
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.pending_input = Some(ResourceKind::Clay);
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToFetch;
+                                                    }
+                                                }
+                                            } else {
+                                                if c.work_timer_ms >= 5000 {
+                                                    c.work_timer_ms = 0;
+                                                    // попытка списать 1 wood со складов
+                                                    let mut ok = false;
+                                                    'outer: for w in warehouses.iter_mut() {
+                                                        if w.wood > 0 { w.wood -= 1; ok = true; break 'outer; }
+                                                    }
+                                                    if ok {
+                                                        c.carrying = None; // глину потратили
+                                                        if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                            c.carrying = Some((ResourceKind::Bricks, 1));
+                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Bakery => {
+                                            let has_flour = matches!(c.carrying, Some((ResourceKind::Flour, _)));
+                                            if !has_flour {
+                                                let have_any = warehouses.iter().any(|w| w.flour > 0);
+                                                if have_any {
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.pending_input = Some(ResourceKind::Flour);
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToFetch;
+                                                    }
+                                                }
+                                            } else {
+                                                if c.work_timer_ms >= 5000 {
+                                                    c.work_timer_ms = 0;
+                                                    // списать 1 wood
+                                                    let mut ok = false;
+                                                    'outer2: for w in warehouses.iter_mut() {
+                                                        if w.wood > 0 { w.wood -= 1; ok = true; break 'outer2; }
+                                                    }
+                                                    if ok {
+                                                        c.carrying = None; // муку потратили
+                                                        if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                            c.carrying = Some((ResourceKind::Bread, 1));
+                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Fishery => {
+                                            if c.carrying.is_none() && c.work_timer_ms >= 5000 {
+                                                const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
+                                                if NB.iter().any(|(dx,dy)| world.get_tile(b.pos.x+dx, b.pos.y+dy) == TileKind::Water) {
+                                                    c.work_timer_ms = 0;
+                                                    if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
+                                                        c.carrying = Some((ResourceKind::Fish, 1));
+                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        BuildingKind::Forester => {
+                                            if c.work_timer_ms >= 4000 {
+                                                c.work_timer_ms = 0;
+                                                const R: i32 = 6;
+                                                let mut best: Option<(i32, IVec2)> = None;
+                                                for dy in -R..=R { for dx in -R..=R {
+                                                    let p = IVec2::new(b.pos.x+dx, b.pos.y+dy);
+                                                    let tk = world.get_tile(p.x, p.y);
+                                                    if tk != TileKind::Water && !world.has_tree(p) && !world.is_occupied(p) && !world.is_road(p) {
+                                                        let d = dx.abs() + dy.abs();
+                                                        if best.map(|(bd,_)| d < bd).unwrap_or(true) { best = Some((d, p)); }
+                                                    }
+                                                }}
+                                                if let Some((_, p)) = best { world.plant_tree(p); }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                         }
                         accumulator_ms -= step_ms;
@@ -784,15 +1100,7 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
     for b in buildings.iter_mut() {
         b.timer_ms += dt_ms;
         match b.kind {
-            BuildingKind::Lumberjack => {
-                // каждые 2с +1 дерево, если рядом есть лес
-                if b.timer_ms >= 2000 {
-                    b.timer_ms = 0;
-                    if has_adjacent_forest(b.pos, world) {
-                        resources.wood += 1;
-                    }
-                }
-            }
+            BuildingKind::Lumberjack => { /* Производство выполняют жители через систему задач */ }
             BuildingKind::House => {
                 // каждые 5с: потребляет еду (хлеб или рыбу) и даёт золото
                 if b.timer_ms >= 5000 {
@@ -802,57 +1110,14 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
                 }
             }
             BuildingKind::Warehouse => { /* пока пассивный */ }
-            BuildingKind::Forester => {
-                if b.timer_ms >= 4000 {
-                    b.timer_ms = 0;
-                    // посадим дерево в радиусе 6 на ближайшей свободной клетке травы или леса без дерева
-                    const R: i32 = 6;
-                    let mut best: Option<(i32, IVec2)> = None;
-                    for dy in -R..=R { for dx in -R..=R {
-                        let p = IVec2::new(b.pos.x+dx, b.pos.y+dy);
-                        let tk = world.get_tile(p.x, p.y);
-                        if tk != TileKind::Water && !world.has_tree(p) && !world.is_occupied(p) && !world.is_road(p) {
-                            let d = dx.abs() + dy.abs();
-                            if best.map(|(bd,_)| d < bd).unwrap_or(true) { best = Some((d, p)); }
-                        }
-                    }}
-                    if let Some((_, p)) = best { world.plant_tree(p); }
-                }
-            }
-            BuildingKind::StoneQuarry => {
-                // каждые 4с +1 камень
-                if b.timer_ms >= 4000 { b.timer_ms = 0; resources.stone += 1; }
-            }
-            BuildingKind::ClayPit => {
-                // каждые 4с +1 глина
-                if b.timer_ms >= 4000 { b.timer_ms = 0; resources.clay += 1; }
-            }
-            BuildingKind::Kiln => {
-                // каждые 5с: 1 глина + 1 дерево -> 1 кирпич
-                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.clay > 0 && resources.wood > 0 { resources.clay -= 1; resources.wood -= 1; resources.bricks += 1; } }
-            }
-            BuildingKind::WheatField => {
-                // каждые 6с +1 пшеница
-                if b.timer_ms >= 6000 { b.timer_ms = 0; resources.wheat += 1; }
-            }
-            BuildingKind::Mill => {
-                // каждые 5с: 1 пшеница -> 1 мука
-                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.wheat > 0 { resources.wheat -= 1; resources.flour += 1; } }
-            }
-            BuildingKind::Bakery => {
-                // каждые 5с: 1 мука + 1 дерево -> 1 хлеб
-                if b.timer_ms >= 5000 { b.timer_ms = 0; if resources.flour > 0 && resources.wood > 0 { resources.flour -= 1; resources.wood -= 1; resources.bread += 1; } }
-            }
-            BuildingKind::Fishery => {
-                // каждые 5с: если рядом вода, +1 рыба
-                if b.timer_ms >= 5000 {
-                    b.timer_ms = 0;
-                    const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
-                    if NB.iter().any(|(dx,dy)| world.get_tile(b.pos.x+dx, b.pos.y+dy) == TileKind::Water) {
-                        resources.fish += 1;
-                    }
-                }
-            }
+            BuildingKind::Forester => { /* Производство выполняют жители */ }
+            BuildingKind::StoneQuarry => { /* Производство выполняют жители */ }
+            BuildingKind::ClayPit => { /* Производство выполняют жители */ }
+            BuildingKind::Kiln => { /* Производство выполняют жители */ }
+            BuildingKind::WheatField => { /* Производство выполняют жители */ }
+            BuildingKind::Mill => { /* Производство выполняют жители */ }
+            BuildingKind::Bakery => { /* Производство выполняют жители */ }
+            BuildingKind::Fishery => { /* Производство выполняют жители */ }
         }
     }
 }

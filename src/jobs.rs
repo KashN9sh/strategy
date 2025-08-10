@@ -1,6 +1,6 @@
 use glam::IVec2;
 
-use crate::types::{Building, BuildingKind, Citizen, Job, JobKind, LogItem, Resources, WarehouseStore};
+use crate::types::{Building, BuildingKind, Citizen, Job, JobKind, LogItem, Resources, WarehouseStore, CitizenState};
 use crate::world::World;
 
 fn job_anchor(kind: &JobKind) -> IVec2 {
@@ -18,7 +18,8 @@ pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Jo
         if let Some((cid, _)) = citizens
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.assigned_job.is_none())
+            // не трогаем жителей, у которых уже есть место работы или они в пути к нему/с него
+            .filter(|(_, c)| c.assigned_job.is_none() && c.workplace.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving)
             .min_by_key(|(_, c)| (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs())
         {
             let c = &mut citizens[cid];
