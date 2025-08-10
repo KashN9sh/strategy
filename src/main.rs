@@ -565,18 +565,18 @@ fn run() -> Result<()> {
                     // UI наложение
                     if show_ui {
                         let depot_total_wood: i32 = warehouses.iter().map(|w| w.wood).sum();
-                        let total_visible_wood = if warehouses.is_empty() { resources.wood } else { depot_total_wood };
-                        // Показ ресурсов как суммы складов (если есть склады), иначе из ресурсов
+                        let total_visible_wood = resources.wood + depot_total_wood;
+                        // Показ ресурсов как сумма "на руках" + в складах
                         let visible = Resources {
                             wood: total_visible_wood,
-                            stone: if warehouses.is_empty() { resources.stone } else { warehouses.iter().map(|w| w.stone).sum() },
-                            clay: if warehouses.is_empty() { resources.clay } else { warehouses.iter().map(|w| w.clay).sum() },
-                            bricks: if warehouses.is_empty() { resources.bricks } else { warehouses.iter().map(|w| w.bricks).sum() },
-                            wheat: if warehouses.is_empty() { resources.wheat } else { warehouses.iter().map(|w| w.wheat).sum() },
-                            flour: if warehouses.is_empty() { resources.flour } else { warehouses.iter().map(|w| w.flour).sum() },
-                            bread: if warehouses.is_empty() { resources.bread } else { warehouses.iter().map(|w| w.bread).sum() },
-                            fish: if warehouses.is_empty() { resources.fish } else { warehouses.iter().map(|w| w.fish).sum() },
-                            gold: if warehouses.is_empty() { resources.gold } else { warehouses.iter().map(|w| w.gold).sum() },
+                            stone: resources.stone + warehouses.iter().map(|w| w.stone).sum::<i32>(),
+                            clay: resources.clay + warehouses.iter().map(|w| w.clay).sum::<i32>(),
+                            bricks: resources.bricks + warehouses.iter().map(|w| w.bricks).sum::<i32>(),
+                            wheat: resources.wheat + warehouses.iter().map(|w| w.wheat).sum::<i32>(),
+                            flour: resources.flour + warehouses.iter().map(|w| w.flour).sum::<i32>(),
+                            bread: resources.bread + warehouses.iter().map(|w| w.bread).sum::<i32>(),
+                            fish: resources.fish + warehouses.iter().map(|w| w.fish).sum::<i32>(),
+                            gold: resources.gold + warehouses.iter().map(|w| w.gold).sum::<i32>(),
                         };
                         // Статусы жителей для UI
                         let mut idle=0; let mut working=0; let mut sleeping=0; let mut hauling=0; let mut fetching=0;

@@ -214,7 +214,8 @@ pub fn draw_ui(
         if bx + bw > fw - padb { break; }
         // Отрисовка с учётом доступности по стоимости
         let cost = building_cost_ui(bk);
-        let can_afford = resources.gold >= cost.gold && total_wood >= cost.wood;
+        // Доступность считаем по сумме: ресурсы на руках + на складах (в верхней панели уже передан суммарный Resources)
+        let can_afford = resources.gold >= cost.gold && resources.wood >= cost.wood;
         let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
         let hovered_btn = point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h);
         draw_button(frame, fw, fh, bx, by, bw, btn_h, active, hovered_btn, can_afford, label, text_col, s);
