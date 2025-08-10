@@ -6,9 +6,19 @@ pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics }
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 pub fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as i32) * s }
 pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; padb * 2 + btn_h * 2 + 6 * s }
-pub fn top_panel_height(s: i32) -> i32 { let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px; pad * 2 + icon.max(glyph_h) }
+pub fn top_panel_height(s: i32) -> i32 {
+    let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px;
+    // Две строки контента (иконки/цифры) + отступ между ними
+    pad * 2 + (icon.max(glyph_h)) * 2 + 6 * s
+}
 
-pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory, day_progress_01: f32) {
+pub fn draw_ui(
+    frame: &mut [u8], fw: i32, fh: i32,
+    resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind,
+    fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory, day_progress_01: f32,
+    citizens_idle: i32, citizens_working: i32, citizens_sleeping: i32, citizens_hauling: i32, citizens_fetching: i32,
+    cursor_x: i32, cursor_y: i32,
+) {
     let s = ui_scale(fh, base_scale_k);
     let bar_h = top_panel_height(s);
     fill_rect(frame, fw, fh, 0, 0, fw, bar_h, [0, 0, 0, 160]);
@@ -22,12 +32,52 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_
     fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [180, 60, 60, 255]);
     let num_x_pop = x + icon_size + 4;
     draw_number(frame, fw, fh, num_x_pop, pad, population.max(0) as u32, [255,255,255,255], s);
+    let mut tooltip: Option<(i32, Vec<u8>)> = None;
+    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) {
+        tooltip = Some((x + icon_size / 2, b"Population".to_vec()));
+    }
     x = num_x_pop + reserved_w + gap;
     // золото
     fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [220, 180, 60, 255]);
     let num_x_gold = x + icon_size + 4;
     draw_number(frame, fw, fh, num_x_gold, pad, resources.gold.max(0) as u32, [255,255,255,255], s);
+    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) {
+        tooltip = Some((x + icon_size / 2, b"Gold".to_vec()));
+    }
     x = num_x_gold + reserved_w + gap;
+
+    // Рассчитаем занятый справа блок (TIME/FPS/SPEED), чтобы не наезжать на него слева
+    let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
+    let mut minutes_tmp = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
+    let hours_tmp = (minutes_tmp / 60) as u32; minutes_tmp = minutes_tmp % 60; let _minutes_u_tmp = minutes_tmp as u32;
+    let fps_n_tmp = fps.round() as u32;
+    let fps_w_tmp = text_w(b"FPS", s) + gap_info + number_w(fps_n_tmp, s);
+    let speed_w_tmp = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
+    let time_w_tmp = text_w(b"TIME", s) + gap_info + (5 * 4 * px);
+    let total_w_tmp = time_w_tmp + gap_info + fps_w_tmp + gap_info + speed_w_tmp;
+    let right_x0 = fw - pad_right - total_w_tmp;
+
+    // Блок статистики жителей (idle/working/sleeping/haul/fetch)
+    let mut sx = x;
+    let sy = pad;
+    let mut entry_stat = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, label: &[u8], s: i32| {
+        let px = 2 * s; let reserve_digits = 3; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
+        let need_w = icon_size + 4 + reserved_w + gap;
+        if *x + need_w > right_x0 { return; }
+        fill_rect(frame, fw, fh, *x, sy, icon_size, icon_size, label_color);
+        let num_x = *x + icon_size + 4;
+        draw_number(frame, fw, fh, num_x, sy, val.max(0) as u32, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, *x, sy, icon_size, icon_size) {
+            tooltip = Some((*x + icon_size / 2, label.to_vec()));
+        }
+        *x = num_x + reserved_w + gap;
+    };
+    entry_stat(frame, &mut sx, [70, 160, 70, 255], citizens_idle, b"Idle", s);
+    entry_stat(frame, &mut sx, [70, 110, 200, 255], citizens_working, b"Working", s);
+    entry_stat(frame, &mut sx, [120, 120, 120, 255], citizens_sleeping, b"Sleeping", s);
+    entry_stat(frame, &mut sx, [210, 150, 70, 255], citizens_hauling, b"Hauling", s);
+    entry_stat(frame, &mut sx, [80, 200, 200, 255], citizens_fetching, b"Fetching", s);
+    x = sx + 6 * s;
 
     // верх: больше не рисуем кнопки строительства — они в нижней панели
 
@@ -66,32 +116,51 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_
         draw_number(frame, fw, fh, ix, y_info, sp, [255,255,255,255], s);
     }
 
+    // Вторая строка: ресурсы — сразу под первой строкой
     // Панель дополнительных ресурсов (камень, глина, кирпич, пшеница, мука, хлеб, рыба)
-    let mut rx = x + 40 * s;
-    let ry = pad;
-    let entry = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, s: i32| {
-        let px = 2 * s; // масштаб шрифта
-        let reserve_digits = 4; // резерв под 4 цифры
-        let reserved_w = reserve_digits * 4 * px; // ширина цифр с шагом 4*px
-        let gap = 6 * s; // межколонный отступ
-        // иконка
+    let mut rx = pad;
+    let ry = pad + icon_size + 6 * s;
+    let mut entry = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, label: &[u8], s: i32| {
+        let px = 2 * s; let reserve_digits = 4; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
+        let need_w = icon_size + 4 + reserved_w + gap;
+        if *x + need_w > right_x0 { return; }
         fill_rect(frame, fw, fh, *x, ry, icon_size, icon_size, label_color);
-        // число
         let num_x = *x + icon_size + 4;
         draw_number(frame, fw, fh, num_x, ry, val.max(0) as u32, [255,255,255,255], s);
-        // сдвиг курсора строго на иконку + резерв под 4 цифры + зазор
+        if point_in_rect(cursor_x, cursor_y, *x, ry, icon_size, icon_size) {
+            let mut text = Vec::new();
+            text.extend_from_slice(label);
+            text.extend_from_slice(b": ");
+            let s_val = format!("{}", val.max(0));
+            text.extend_from_slice(s_val.as_bytes());
+            tooltip = Some((*x + icon_size / 2, text));
+        }
         *x = num_x + reserved_w + gap;
     };
     let mut xcur = rx;
     // Дерево (из складов или видимое общее)
-    entry(frame, &mut xcur, [110,70,30,255], total_wood, s);
-    entry(frame, &mut xcur, [120,120,120,255], resources.stone, s);
-    entry(frame, &mut xcur, [150,90,70,255], resources.clay, s);
-    entry(frame, &mut xcur, [180,120,90,255], resources.bricks, s);
-    entry(frame, &mut xcur, [200,180,80,255], resources.wheat, s);
-    entry(frame, &mut xcur, [210,210,180,255], resources.flour, s);
-    entry(frame, &mut xcur, [200,160,120,255], resources.bread, s);
-    entry(frame, &mut xcur, [100,140,200,255], resources.fish, s);
+    entry(frame, &mut xcur, [110,70,30,255], total_wood, b"Wood", s);
+    entry(frame, &mut xcur, [120,120,120,255], resources.stone, b"Stone", s);
+    entry(frame, &mut xcur, [150,90,70,255], resources.clay, b"Clay", s);
+    entry(frame, &mut xcur, [180,120,90,255], resources.bricks, b"Bricks", s);
+    entry(frame, &mut xcur, [200,180,80,255], resources.wheat, b"Wheat", s);
+    entry(frame, &mut xcur, [210,210,180,255], resources.flour, b"Flour", s);
+    entry(frame, &mut xcur, [200,160,120,255], resources.bread, b"Bread", s);
+    entry(frame, &mut xcur, [100,140,200,255], resources.fish, b"Fish", s);
+
+    // Рисуем tooltip, если есть
+    if let Some((anchor_x, text)) = tooltip.take() {
+        // Аккуратное позиционирование: центрируем под курсором, под верхней панелью
+        let width = (text.len() as i32) * 4 * s + 8 * s;
+        let tx = (anchor_x - width / 2).clamp(8 * s, fw - width - 8 * s);
+        let ty = bar_h + 4 * s;
+        draw_tooltip(frame, fw, fh, tx, ty, &text, s);
+    }
+
+    // Линейка прогресса дня в самом низу верхней панели (под второй строкой)
+    let pb_h = 2 * s; let pb_y = bar_h - pb_h; let pb_w = (fw as f32 * day_progress_01.clamp(0.0, 1.0)) as i32;
+    fill_rect(frame, fw, fh, 0, pb_y, fw, pb_h, [0, 0, 0, 120]);
+    fill_rect(frame, fw, fh, 0, pb_y, pb_w, pb_h, [220, 200, 120, 200]);
 
     // Нижняя панель с категориями/зданиями
     let bottom_h = bottom_panel_height(s); // компактная высота под 2 строки кнопок
@@ -156,11 +225,16 @@ fn draw_button(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, w: i32, h: i3
 }
 
 pub fn draw_tooltip(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, text: &[u8], s: i32) {
-    // вычислим примитивную ширину по числу символов (4*s на символ)
-    let width = (text.len() as i32) * 4 * s + 8 * s;
-    let height = 12 * s;
-    fill_rect(frame, fw, fh, x, y, width, height, [0, 0, 0, 200]);
-    draw_text_mini(frame, fw, fh, x + 4 * s, y + 4 * s, text, [230,230,230,255], s);
+    // ширина глифа = 4*px, где px = 2*s → 8*s на символ
+    let px = 2 * s;
+    let char_w = 4 * px;
+    let width = (text.len() as i32) * char_w + 10 * s; // паддинги по 5*s слева/справа
+    let text_h = 5 * px; // высота глифа 3x5 в пикселях
+    let height = text_h + 6 * s; // по 3*s сверху/снизу
+    // подложка + лёгкая тень сверху (стиль панелей: альфа ≈160)
+    fill_rect(frame, fw, fh, x + 2 * s, y + 2 * s, width, height, [0, 0, 0, 100]);
+    fill_rect(frame, fw, fh, x, y, width, height, [0, 0, 0, 160]);
+    draw_text_mini(frame, fw, fh, x + 5 * s, y + 3 * s, text, [230,230,230,255], s);
 }
 
 pub fn button_w_for(label: &[u8], s: i32) -> i32 {

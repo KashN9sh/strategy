@@ -569,14 +569,21 @@ fn run() -> Result<()> {
                             fish: if warehouses.is_empty() { resources.fish } else { warehouses.iter().map(|w| w.fish).sum() },
                             gold: if warehouses.is_empty() { resources.gold } else { warehouses.iter().map(|w| w.gold).sum() },
                         };
-                        let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                        ui::draw_ui(frame, width_i32, height_i32, &visible, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress);
-                        // простая подсказка по наведению на ресурсы: дерево=общая сумма
-                        let s = ui::ui_scale(height_i32, config.ui_scale_base);
-                        let pad = 8 * s; let icon = 10 * s; let x0 = pad; let y0 = pad; let w = icon + 4 + 50; let h = icon;
-                        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x0, y0, w, h) {
-                            ui::draw_tooltip(frame, width_i32, height_i32, x0, y0 + h + 4, b"Wood = on hand + in warehouses", s);
+                        // Статусы жителей для UI
+                        let mut idle=0; let mut working=0; let mut sleeping=0; let mut hauling=0; let mut fetching=0;
+                        for c in &citizens {
+                            use types::CitizenState::*;
+                            match c.state {
+                                Idle => idle+=1,
+                                Working => working+=1,
+                                Sleeping => sleeping+=1,
+                                GoingToDeposit => hauling+=1,
+                                GoingToFetch => fetching+=1,
+                                GoingToWork | GoingHome => idle+=1,
+                            }
                         }
+                        let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                        ui::draw_ui(frame, width_i32, height_i32, &visible, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress, idle, working, sleeping, hauling, fetching, cursor_xy.x, cursor_xy.y);
                     }
 
                     if let Err(err) = pixels.render() {
