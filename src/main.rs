@@ -295,7 +295,7 @@ fn run() -> Result<()> {
                     if button == winit::event::MouseButton::Left {
                         if show_ui {
                             let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
-                            let bar_h = ui::ui_bar_height(height_i32, ui_s);
+                            let bar_h = ui::top_panel_height(ui_s);
                             // нижняя панель UI
                             let bottom_bar_h = ui::bottom_panel_height(ui_s);
                             let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;

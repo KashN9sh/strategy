@@ -6,10 +6,11 @@ pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics }
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 pub fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as i32) * s }
 pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; padb * 2 + btn_h * 2 + 6 * s }
+pub fn top_panel_height(s: i32) -> i32 { let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px; pad * 2 + icon.max(glyph_h) }
 
 pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory) {
     let s = ui_scale(fh, base_scale_k);
-    let bar_h = ui_bar_height(fh, s);
+    let bar_h = top_panel_height(s);
     fill_rect(frame, fw, fh, 0, 0, fw, bar_h, [0, 0, 0, 160]);
 
     let pad = 8 * s;
