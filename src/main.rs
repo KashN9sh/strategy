@@ -234,6 +234,9 @@ fn run() -> Result<()> {
 
     let mut width_i32 = size.width as i32;
     let mut height_i32 = size.height as i32;
+    // День/ночь
+    const DAY_LENGTH_MS: f32 = 120_000.0;
+    let mut world_clock_ms: f32 = 0.0;
 
     let window = window.clone();
     event_loop.run(move |event, elwt| {
@@ -526,11 +529,20 @@ fn run() -> Result<()> {
                         render::tiles::draw_citizen_marker(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), [255, 230, 120, 255]);
                     }
 
+                    // Оверлей день/ночь
+                    let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                    let angle = t * std::f32::consts::TAU;
+                    let daylight = 0.5 - 0.5 * angle.cos();
+                    let darkness = (1.0 - daylight).max(0.0);
+                    let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
+                    if night_strength > 0 { overlay_tint(frame, width_i32, height_i32, [18, 28, 60, night_strength]); }
+
                     // UI наложение
                     if show_ui {
                         let depot_total: i32 = warehouses.iter().map(|w| w.wood).sum();
                         let total_visible_wood = if warehouses.is_empty() { resources.wood } else { depot_total };
-                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category);
+                        let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress);
                         // простая подсказка по наведению на ресурсы: дерево=общая сумма
                         let s = ui::ui_scale(height_i32, config.ui_scale_base);
                         let pad = 8 * s; let icon = 10 * s; let x0 = pad; let y0 = pad; let w = icon + 4 + 50; let h = icon;
@@ -564,6 +576,7 @@ fn run() -> Result<()> {
                     while accumulator_ms >= step_ms {
                         simulate(&mut buildings, &mut world, &mut resources, step_ms as i32);
                         world.grow_trees(step_ms as i32);
+                        world_clock_ms = (world_clock_ms + step_ms) % DAY_LENGTH_MS;
                         // 1) генерация задач лесорубками — только если нет активных задач/носильщиков для этого места
                         for b in buildings.iter() {
                             if b.kind == BuildingKind::Lumberjack {
@@ -624,6 +637,22 @@ fn run() -> Result<()> {
 fn clear(frame: &mut [u8], rgba: [u8; 4]) {
     for px in frame.chunks_exact_mut(4) {
         px.copy_from_slice(&rgba);
+    }
+}
+
+fn overlay_tint(frame: &mut [u8], fw: i32, fh: i32, [r,g,b,a]: [u8;4]) {
+    if a == 0 { return; }
+    let a = a as u32; let na = 255 - a;
+    for y in 0..fh {
+        let row = (y as usize) * (fw as usize) * 4;
+        for x in 0..fw {
+            let idx = row + (x as usize) * 4;
+            let dr = frame[idx] as u32; let dg = frame[idx+1] as u32; let db = frame[idx+2] as u32;
+            frame[idx]   = ((a * r as u32 + na * dr) / 255) as u8;
+            frame[idx+1] = ((a * g as u32 + na * dg) / 255) as u8;
+            frame[idx+2] = ((a * b as u32 + na * db) / 255) as u8;
+            frame[idx+3] = 255;
+        }
     }
 }
 

@@ -8,7 +8,7 @@ pub fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as 
 pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; padb * 2 + btn_h * 2 + 6 * s }
 pub fn top_panel_height(s: i32) -> i32 { let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px; pad * 2 + icon.max(glyph_h) }
 
-pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory) {
+pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind, fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory, day_progress_01: f32) {
     let s = ui_scale(fh, base_scale_k);
     let bar_h = top_panel_height(s);
     fill_rect(frame, fw, fh, 0, 0, fw, bar_h, [0, 0, 0, 160]);
@@ -31,13 +31,26 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_
 
     // верх: больше не рисуем кнопки строительства — они в нижней панели
 
-    // Инфо справа: одна строка, правое выравнивание: "FPS <n>  SPEED <m>" или "FPS <n>  PAUSE"
+    // Инфо справа: одна строка, правое выравнивание: "TIME HH:MM  FPS <n>  SPEED <m>" или "TIME HH:MM  FPS <n>  PAUSE"
     let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
+    // Время суток из day_progress_01 (0..1)
+    let mut minutes = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
+    let hours = (minutes / 60) as u32; minutes = minutes % 60; let minutes_u = minutes as u32;
     let fps_n = fps.round() as u32;
     let fps_w = text_w(b"FPS", s) + gap_info + number_w(fps_n, s);
     let speed_w = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
-    let total_w = fps_w + gap_info + speed_w;
+    let time_w = text_w(b"TIME", s) + gap_info + (5 * 4 * px); // HH:MM — 5 глифов
+    let total_w = time_w + gap_info + fps_w + gap_info + speed_w;
     let mut ix = fw - pad_right - total_w;
+    // TIME
+    draw_text_mini(frame, fw, fh, ix, y_info, b"TIME", [200,200,200,255], s);
+    ix += text_w(b"TIME", s) + gap_info;
+    // HH:MM
+    ix += draw_two_digits(frame, fw, fh, ix, y_info, hours, [255,255,255,255], s);
+    draw_glyph_3x5(frame, fw, fh, ix, y_info, b':', [255,255,255,255], px);
+    ix += 4 * px;
+    ix += draw_two_digits(frame, fw, fh, ix, y_info, minutes_u, [255,255,255,255], s);
+    ix += gap_info;
     // FPS
     draw_text_mini(frame, fw, fh, ix, y_info, b"FPS", [200,200,200,255], s);
     ix += text_w(b"FPS", s) + gap_info;
@@ -161,6 +174,16 @@ fn number_w(mut n: u32, s: i32) -> i32 {
     let mut len = 0; if n == 0 { len = 1; }
     while n > 0 { len += 1; n /= 10; }
     len * 4 * (2 * s)
+}
+
+fn draw_two_digits(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, val: u32, col: [u8;4], s: i32) -> i32 {
+    // Рисует двузначное число с ведущим нулём, возвращает ширину
+    let px = 2 * s;
+    let tens = (val / 10) % 10; let ones = val % 10;
+    let mut ix = x;
+    draw_glyph_3x5(frame, fw, fh, ix, y, b'0' + tens as u8, col, px); ix += 4 * px;
+    draw_glyph_3x5(frame, fw, fh, ix, y, b'0' + ones as u8, col, px); ix += 4 * px;
+    ix - x
 }
 
 fn draw_text_mini(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, text: &[u8], color: [u8;4], s: i32) {
