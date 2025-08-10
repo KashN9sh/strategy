@@ -401,9 +401,18 @@ fn run() -> Result<()> {
                                         population += 1;
                                       } else if selected_building == BuildingKind::Warehouse {
                                           warehouses.push(WarehouseStore { pos: tp, wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0 });
-                                         // Переложим остаток «на руках» в только что построенный склад
-                                         if let Some(w) = warehouses.last_mut() { w.wood += resources.wood.max(0); }
-                                         resources.wood = 0;
+                                          // Переложим остатки ресурсов (кроме золота) в только что построенный склад
+                                          if let Some(w) = warehouses.last_mut() {
+                                              if resources.wood > 0 { w.wood += resources.wood; resources.wood = 0; }
+                                              if resources.stone > 0 { w.stone += resources.stone; resources.stone = 0; }
+                                              if resources.clay > 0 { w.clay += resources.clay; resources.clay = 0; }
+                                              if resources.bricks > 0 { w.bricks += resources.bricks; resources.bricks = 0; }
+                                              if resources.wheat > 0 { w.wheat += resources.wheat; resources.wheat = 0; }
+                                              if resources.flour > 0 { w.flour += resources.flour; resources.flour = 0; }
+                                              if resources.bread > 0 { w.bread += resources.bread; resources.bread = 0; }
+                                              if resources.fish > 0 { w.fish += resources.fish; resources.fish = 0; }
+                                              // золото хранится в казне (resources.gold)
+                                          }
                                      } else if selected_building == BuildingKind::Forester {
                                          // просто добавим здание, логика в simulate()
                                     }
