@@ -211,7 +211,64 @@ pub fn draw_ui(
         let active = selected == bk;
         let bw = button_w_for(label, s);
         if bx + bw > fw - padb { break; }
-        draw_button(frame, fw, fh, bx, by, bw, btn_h, active, label, [220,220,220,255], s);
+        // Отрисовка с учётом доступности по стоимости
+        let cost = building_cost_ui(bk);
+        let can_afford = resources.gold >= cost.gold && total_wood >= cost.wood;
+        let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
+        draw_button(frame, fw, fh, bx, by, bw, btn_h, active, label, text_col, s);
+        // Тултип по наведению: стоимость и требования
+        if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
+            // Построим тултип с иконками стоимости и описанием производства
+            let px = 2 * s; let char_w = 4 * px; let pad = 5 * s; let gap = 6 * s;
+            let icon = 10 * s;
+            let cost_w = {
+                let w_wood = icon + 4 + number_w(cost.wood.max(0) as u32, s);
+                let w_gold = icon + 4 + number_w(cost.gold.max(0) as u32, s);
+                w_wood + gap + w_gold
+            };
+            // Описание производства
+            let (prod_label, prod_color, note) = match bk {
+                BuildingKind::Lumberjack => (b"Produces: Wood".as_ref(), [110,70,30,255], None),
+                BuildingKind::Forester => (b"Plants trees".as_ref(), [90,140,90,255], None),
+                BuildingKind::StoneQuarry => (b"Produces: Stone".as_ref(), [120,120,120,255], None),
+                BuildingKind::ClayPit => (b"Produces: Clay".as_ref(), [150,90,70,255], None),
+                BuildingKind::Kiln => (b"Produces: Bricks".as_ref(), [180,120,90,255], Some(b"Uses Clay + Wood".as_ref())),
+                BuildingKind::WheatField => (b"Produces: Wheat".as_ref(), [200,180,80,255], None),
+                BuildingKind::Mill => (b"Produces: Flour".as_ref(), [210,210,180,255], Some(b"Uses Wheat".as_ref())),
+                BuildingKind::Bakery => (b"Produces: Bread".as_ref(), [200,160,120,255], Some(b"Uses Flour + Wood".as_ref())),
+                BuildingKind::Fishery => (b"Produces: Fish".as_ref(), [100,140,200,255], Some(b"Near water".as_ref())),
+                BuildingKind::Warehouse => (b"Stores resources".as_ref(), [150,120,80,255], None),
+                BuildingKind::House => (b"Generates: Gold".as_ref(), [220,180,60,255], Some(b"Consumes Bread/Fish".as_ref())),
+            };
+            let prod_w = icon + 4 + text_w(prod_label, s);
+            let note_w = note.map(|t| text_w(t, s)).unwrap_or(0);
+            let tip_w = (cost_w.max(prod_w).max(note_w)) + 2 * pad;
+            let line_h = icon.max(5 * px) + 2 * s;
+            let lines = if note.is_some() { 3 } else { 2 };
+            let tip_h = lines * line_h + 2 * s;
+            // Позиция над панелью
+            let tx_mid = bx + bw / 2;
+            let x_tip = (tx_mid - tip_w / 2).clamp(8 * s, fw - tip_w - 8 * s);
+            let y_tip = by0 - tip_h - 4 * s;
+            // Фон
+            fill_rect(frame, fw, fh, x_tip + 2 * s, y_tip + 2 * s, tip_w, tip_h, [0,0,0,100]);
+            fill_rect(frame, fw, fh, x_tip, y_tip, tip_w, tip_h, [0,0,0,160]);
+            // Строка 1: Cost (иконки + числа)
+            let mut cx = x_tip + pad; let cy = y_tip + s + (line_h - icon) / 2;
+            // wood
+            fill_rect(frame, fw, fh, cx, cy, icon, icon, [110,70,30,255]);
+            cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.wood.max(0) as u32, [230,230,230,255], s);
+            cx += number_w(cost.wood.max(0) as u32, s) + gap;
+            // gold
+            fill_rect(frame, fw, fh, cx, cy, icon, icon, [220,180,60,255]);
+            cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.gold.max(0) as u32, [230,230,230,255], s);
+            // Строка 2: Produces
+            let cy2 = y_tip + line_h + s + (line_h - icon) / 2; let mut cx2 = x_tip + pad;
+            fill_rect(frame, fw, fh, cx2, cy2, icon, icon, prod_color);
+            cx2 += icon + 4; draw_text_mini(frame, fw, fh, cx2, cy2 - (icon - 5*px)/2, prod_label, [230,230,230,255], s);
+            // Строка 3: note (если есть)
+            if let Some(t) = note { let cy3 = y_tip + 2*line_h + s + (line_h - 5*px)/2; draw_text_mini(frame, fw, fh, x_tip + pad, cy3, t, [200,200,200,255], s); }
+        }
         bx += bw + 6 * s;
     }
 }
@@ -222,6 +279,23 @@ fn draw_button(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, w: i32, h: i3
     let bg = if active { [70, 120, 220, 200] } else { [50, 50, 50, 160] };
     fill_rect(frame, fw, fh, x, y, w, h, bg);
     draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
+}
+
+// Косты для UI: дублируем из игровой логики для отображения
+fn building_cost_ui(kind: BuildingKind) -> Resources {
+    match kind {
+        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10, ..Default::default() },
+        BuildingKind::House => Resources { wood: 10, gold: 15, ..Default::default() },
+        BuildingKind::Warehouse => Resources { wood: 20, gold: 30, ..Default::default() },
+        BuildingKind::Forester => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::StoneQuarry => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::ClayPit => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::Kiln => Resources { wood: 15, gold: 15, ..Default::default() },
+        BuildingKind::WheatField => Resources { wood: 5, gold: 5, ..Default::default() },
+        BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
+        BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
+        BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
+    }
 }
 
 pub fn draw_tooltip(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, text: &[u8], s: i32) {
