@@ -174,7 +174,8 @@ fn run() -> Result<()> {
     let mut jobs: Vec<Job> = Vec::new();
     let mut next_job_id: u64 = 1;
     let mut logs_on_ground: Vec<LogItem> = Vec::new();
-    let mut resources = Resources { wood: 20, gold: 100, ..Default::default() };
+    // стартовый пакет: немного дерева/еды/денег, и склад с запасом дерева
+    let mut resources = Resources { wood: 60, gold: 200, bread: 10, fish: 10, ..Default::default() };
     let mut warehouses: Vec<WarehouseStore> = Vec::new();
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
@@ -371,17 +372,19 @@ fn run() -> Result<()> {
                             }
                             if allowed {
                                 let cost = building_cost(selected_building);
-                                if resources.wood >= cost.wood && resources.gold >= cost.gold {
-                                    resources.wood -= cost.wood;
+                                if resources.gold >= cost.gold && spend_wood(&mut warehouses, &mut resources, cost.wood) {
                                     resources.gold -= cost.gold;
                                     world.occupy(tp);
                                     buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
-                                    if selected_building == BuildingKind::House {
+                                     if selected_building == BuildingKind::House {
                                         // Простой спавн одного жителя на дом
                                         citizens.push(Citizen { pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None, deliver_to: tp, idle_timer_ms: 0 });
                                         population += 1;
                                      } else if selected_building == BuildingKind::Warehouse {
-                                        warehouses.push(WarehouseStore { pos: tp, wood: 0 });
+                                         warehouses.push(WarehouseStore { pos: tp, wood: 0 });
+                                         // Переложим остаток «на руках» в только что построенный склад
+                                         if let Some(w) = warehouses.last_mut() { w.wood += resources.wood.max(0); }
+                                         resources.wood = 0;
                                      } else if selected_building == BuildingKind::Forester {
                                          // просто добавим здание, логика в simulate()
                                     }
@@ -526,8 +529,8 @@ fn run() -> Result<()> {
                     // UI наложение
                     if show_ui {
                         let depot_total: i32 = warehouses.iter().map(|w| w.wood).sum();
-                        let total_wood = depot_total + resources.wood;
-                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category);
+                        let total_visible_wood = if warehouses.is_empty() { resources.wood } else { depot_total };
+                        ui::draw_ui(frame, width_i32, height_i32, &resources, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category);
                         // простая подсказка по наведению на ресурсы: дерево=общая сумма
                         let s = ui::ui_scale(height_i32, config.ui_scale_base);
                         let pad = 8 * s; let icon = 10 * s; let x0 = pad; let y0 = pad; let w = icon + 4 + 50; let h = icon;
@@ -728,6 +731,24 @@ fn building_cost(kind: BuildingKind) -> Resources {
         BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
         BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
     }
+}
+
+fn warehouses_total_wood(warehouses: &Vec<WarehouseStore>) -> i32 { warehouses.iter().map(|w| w.wood).sum() }
+
+fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, mut amount: i32) -> bool {
+    if amount <= 0 { return true; }
+    if warehouses.is_empty() {
+        if resources.wood >= amount { resources.wood -= amount; return true; } else { return false; }
+    }
+    let total = warehouses_total_wood(warehouses);
+    if total < amount { return false; }
+    for w in warehouses.iter_mut() {
+        if amount == 0 { break; }
+        let take = amount.min(w.wood);
+        w.wood -= take;
+        amount -= take;
+    }
+    true
 }
 
 fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Resources, dt_ms: i32) {

@@ -52,23 +52,17 @@ pub fn process_jobs(
                             if stage >= 2 { world.remove_tree(pos); logs_on_ground.push(LogItem { pos, carried: false }); }
                             else { jobs[jid].done = true; c.assigned_job = None; continue; }
                         } else { jobs[jid].done = true; c.assigned_job = None; continue; }
-                        // Цель доставки — ближайший склад; если нет, ближайший дом; иначе оставим как есть
+                        // Цель доставки — ближайший склад; если складов нет — завершаем без Haul
                         let target_pos = if let Some((_, wh)) = warehouses
                             .iter()
                             .enumerate()
                             .min_by_key(|(_, w)| (w.pos.x - pos.x).abs() + (w.pos.y - pos.y).abs())
                         {
                             wh.pos
-                        } else if let Some(home) = buildings
-                            .iter()
-                            .find(|b| b.kind == BuildingKind::House)
-                            .map(|b| b.pos)
-                        {
-                            home
                         } else {
-                            pos
+                            jobs[jid].done = true; c.assigned_job = None; continue;
                         };
-                        // Всегда завершаем ChopWood и публикуем HaulWood, даже если to == from (для простоты цикла)
+                        // Завершаем ChopWood и публикуем HaulWood до склада
                         jobs[jid].done = true;
                         jobs.push(Job { id: { let id=*next_job_id; *next_job_id+=1; id }, kind: JobKind::HaulWood { from: pos, to: target_pos }, taken: false, done: false });
                         c.assigned_job = None;
@@ -91,11 +85,7 @@ pub fn process_jobs(
                         }
                     } else {
                         if !c.moving && c.pos == to {
-                            if let Some(w) = warehouses.iter_mut().find(|w| w.pos == to) {
-                                w.wood += 1;
-                            } else {
-                                resources.wood += 1;
-                            }
+                            if let Some(w) = warehouses.iter_mut().find(|w| w.pos == to) { w.wood += 1; }
                             jobs[jid].done = true;
                             c.carrying_log = false;
                             c.assigned_job = None;

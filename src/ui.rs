@@ -16,54 +16,62 @@ pub fn draw_ui(frame: &mut [u8], fw: i32, fh: i32, resources: &Resources, total_
     let pad = 8 * s;
     let icon_size = 10 * s;
     let mut x = pad;
-    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [110, 70, 30, 255]);
-    x += icon_size + 4;
-    draw_number(frame, fw, fh, x, pad, total_wood as u32, [255, 255, 255, 255], s);
-    x += 50;
+    // Слева — население и золото, с резервом под 4 цифры
+    let px = 2 * s; let reserve_digits = 4; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
+    // население
+    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [180, 60, 60, 255]);
+    let num_x_pop = x + icon_size + 4;
+    draw_number(frame, fw, fh, num_x_pop, pad, population.max(0) as u32, [255,255,255,255], s);
+    x = num_x_pop + reserved_w + gap;
+    // золото
     fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [220, 180, 60, 255]);
-    x += icon_size + 4;
-    draw_number(frame, fw, fh, x, pad, resources.gold as u32, [255, 255, 255, 255], s);
+    let num_x_gold = x + icon_size + 4;
+    draw_number(frame, fw, fh, num_x_gold, pad, resources.gold.max(0) as u32, [255,255,255,255], s);
+    x = num_x_gold + reserved_w + gap;
 
     // верх: больше не рисуем кнопки строительства — они в нижней панели
 
     // Инфо справа: одна строка, правое выравнивание: "FPS <n>  SPEED <m>" или "FPS <n>  PAUSE"
-    let px = 2 * s; let gap = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
+    let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
     let fps_n = fps.round() as u32;
-    let fps_w = text_w(b"FPS", s) + gap + number_w(fps_n, s);
-    let speed_w = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap + number_w(sp, s) };
-    let total_w = fps_w + gap + speed_w;
+    let fps_w = text_w(b"FPS", s) + gap_info + number_w(fps_n, s);
+    let speed_w = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
+    let total_w = fps_w + gap_info + speed_w;
     let mut ix = fw - pad_right - total_w;
     // FPS
     draw_text_mini(frame, fw, fh, ix, y_info, b"FPS", [200,200,200,255], s);
-    ix += text_w(b"FPS", s) + gap;
+    ix += text_w(b"FPS", s) + gap_info;
     draw_number(frame, fw, fh, ix, y_info, fps_n, [255,255,255,255], s);
-    ix += number_w(fps_n, s) + gap;
+    ix += number_w(fps_n, s) + gap_info;
     // SPEED/PAUSE
     if paused {
         draw_text_mini(frame, fw, fh, ix, y_info, b"PAUSE", [200,200,200,255], s);
     } else {
         let sp = (speed * 10.0).round() as u32;
         draw_text_mini(frame, fw, fh, ix, y_info, b"SPEED", [200,200,200,255], s);
-        ix += text_w(b"SPEED", s) + gap;
+        ix += text_w(b"SPEED", s) + gap_info;
         draw_number(frame, fw, fh, ix, y_info, sp, [255,255,255,255], s);
     }
 
-    // Население (справа от ресурсов)
-    let pop_x = pad + 160 * s;
-    let pop_y = pad;
-    fill_rect(frame, fw, fh, pop_x, pop_y, icon_size, icon_size, [180, 60, 60, 255]);
-    draw_number(frame, fw, fh, pop_x + icon_size + 4, pop_y, population as u32, [255,255,255,255], s);
-
     // Панель дополнительных ресурсов (камень, глина, кирпич, пшеница, мука, хлеб, рыба)
-    let mut rx = pop_x + 80 * s;
+    let mut rx = x + 40 * s;
     let ry = pad;
     let entry = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, s: i32| {
+        let px = 2 * s; // масштаб шрифта
+        let reserve_digits = 4; // резерв под 4 цифры
+        let reserved_w = reserve_digits * 4 * px; // ширина цифр с шагом 4*px
+        let gap = 6 * s; // межколонный отступ
+        // иконка
         fill_rect(frame, fw, fh, *x, ry, icon_size, icon_size, label_color);
-        *x += icon_size + 4;
-        draw_number(frame, fw, fh, *x, ry, val as u32, [255,255,255,255], s);
-        *x += 46 * s;
+        // число
+        let num_x = *x + icon_size + 4;
+        draw_number(frame, fw, fh, num_x, ry, val.max(0) as u32, [255,255,255,255], s);
+        // сдвиг курсора строго на иконку + резерв под 4 цифры + зазор
+        *x = num_x + reserved_w + gap;
     };
     let mut xcur = rx;
+    // Дерево (из складов или видимое общее)
+    entry(frame, &mut xcur, [110,70,30,255], total_wood, s);
     entry(frame, &mut xcur, [120,120,120,255], resources.stone, s);
     entry(frame, &mut xcur, [150,90,70,255], resources.clay, s);
     entry(frame, &mut xcur, [180,120,90,255], resources.bricks, s);
