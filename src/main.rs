@@ -740,7 +740,7 @@ fn run() -> Result<()> {
                 let mut did_step = false;
                 if !paused {
                     while accumulator_ms >= step_ms {
-                        simulate(&mut buildings, &mut world, &mut resources, step_ms as i32);
+                        simulate(&mut buildings, &mut world, &mut resources, &mut warehouses, step_ms as i32);
                         world.grow_trees(step_ms as i32);
                         world_clock_ms = (world_clock_ms + step_ms) % DAY_LENGTH_MS;
 
@@ -1294,7 +1294,13 @@ fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, m
     true
 }
 
-fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Resources, dt_ms: i32) {
+fn simulate(
+    buildings: &mut Vec<Building>,
+    world: &mut World,
+    resources: &mut Resources,
+    warehouses: &mut Vec<WarehouseStore>,
+    dt_ms: i32,
+) {
     for b in buildings.iter_mut() {
         b.timer_ms += dt_ms;
         match b.kind {
@@ -1303,8 +1309,22 @@ fn simulate(buildings: &mut Vec<Building>, world: &mut World, resources: &mut Re
                 // каждые 5с: потребляет еду (хлеб или рыбу) и даёт золото
                 if b.timer_ms >= 5000 {
                     b.timer_ms = 0;
-                    if resources.bread > 0 { resources.bread -= 1; resources.gold += 1; }
-                    else if resources.fish > 0 { resources.fish -= 1; resources.gold += 1; }
+                    // сначала пробуем брать еду со складов, затем из глобальных ресурсов
+                    let mut consumed = false;
+                    // хлеб приоритетнее
+                    for w in warehouses.iter_mut() {
+                        if w.bread > 0 { w.bread -= 1; consumed = true; break; }
+                    }
+                    if !consumed {
+                        for w in warehouses.iter_mut() {
+                            if w.fish > 0 { w.fish -= 1; consumed = true; break; }
+                        }
+                    }
+                    if !consumed {
+                        if resources.bread > 0 { resources.bread -= 1; consumed = true; }
+                        else if resources.fish > 0 { resources.fish -= 1; consumed = true; }
+                    }
+                    if consumed { resources.gold += 1; }
                 }
             }
             BuildingKind::Warehouse => { /* пока пассивный */ }
