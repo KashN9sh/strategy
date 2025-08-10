@@ -125,3 +125,6 @@ impl TileAtlas {
 
 pub struct BuildingAtlas { pub sprites: Vec<Vec<u8>>, pub w: i32, pub h: i32 }
 
+// Отдельный атлас деревьев (кадры по горизонтали: стадии роста)
+pub struct TreeAtlas { pub sprites: Vec<Vec<u8>>, pub w: i32, pub h: i32 }
+

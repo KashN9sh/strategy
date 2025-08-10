@@ -182,6 +182,7 @@ fn run() -> Result<()> {
     let mut atlas = TileAtlas::new();
     let mut road_mode = false;
     let mut building_atlas: Option<BuildingAtlas> = None;
+    let mut tree_atlas: Option<atlas::TreeAtlas> = None;
     // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 6 тайлов в строку: grass, forest, water, clay, stone, iron)
     if let Ok(img) = image::open("assets/tiles.png") {
         let img = img.to_rgba8();
@@ -227,6 +228,24 @@ fn run() -> Result<()> {
             sprites.push(out);
         }
         building_atlas = Some(BuildingAtlas { sprites, w: base_w as i32, h: ih as i32 });
+    }
+    // trees.png: N спрайтов по горизонтали (стадии роста 0..N-1), ширина = base_w (или 64), высота любая
+    if let Ok(img) = image::open("assets/trees.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let base_w = if atlas.base_loaded { atlas.base_w } else { 64 } as u32;
+        let cols = (iw / base_w).max(1);
+        let mut sprites = Vec::new();
+        for i in 0..cols {
+            let x0 = (i * base_w) as usize;
+            let mut out = vec![0u8; base_w as usize * ih as usize * 4];
+            for y in 0..ih as usize {
+                let src = (y * iw as usize + x0) * 4; let dst = y * base_w as usize * 4;
+                out[dst..dst + base_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + base_w as usize * 4]);
+            }
+            sprites.push(out);
+        }
+        tree_atlas = Some(atlas::TreeAtlas { sprites, w: base_w as i32, h: ih as i32 });
     }
     let mut water_anim_time: f32 = 0.0;
     let mut show_grid = false;
@@ -494,8 +513,19 @@ fn run() -> Result<()> {
 
                               // деревья на лесных клетках как отдельные сущности
                               if world.has_tree(IVec2::new(mx, my)) {
-                                  let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2);
-                                  render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage);
+                                  let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+                                  if let Some(ta) = &tree_atlas { if !ta.sprites.is_empty() {
+                                      let idx = stage.min(ta.sprites.len()-1);
+                                      // Масштаб спрайта дерева под текущий тайл
+                                      let tile_w_px = atlas.half_w * 2 + 1;
+                                      let scale = tile_w_px as f32 / ta.w as f32;
+                                      let draw_w = (ta.w as f32 * scale).round() as i32;
+                                      let draw_h = (ta.h as f32 * scale).round() as i32;
+                                      let top_left_x = screen_pos.x - draw_w / 2;
+                                      let top_left_y = screen_pos.y - atlas.half_h - draw_h + (atlas.half_h/2);
+                                      render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
+                                  } else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }}
+                                  else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
                               }
                               // оверлеи месторождений (простая заливка-рамка)
                               let tp = IVec2::new(mx, my);
