@@ -180,7 +180,8 @@ pub fn draw_ui(
     for (cat, label) in cats.iter() {
         let active = *cat == category;
         let bw = button_w_for(label, s);
-        draw_button(frame, fw, fh, cx, by0 + padb, bw, btn_h, active, label, [200,200,200,255], s);
+        let hovered = point_in_rect(cursor_x, cursor_y, cx, by0 + padb, bw, btn_h);
+        draw_button(frame, fw, fh, cx, by0 + padb, bw, btn_h, active, hovered, true, label, [200,200,200,255], s);
         cx += bw + 6 * s;
     }
     // Здания по выбранной категории (нижняя строка)
@@ -215,7 +216,8 @@ pub fn draw_ui(
         let cost = building_cost_ui(bk);
         let can_afford = resources.gold >= cost.gold && total_wood >= cost.wood;
         let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
-        draw_button(frame, fw, fh, bx, by, bw, btn_h, active, label, text_col, s);
+        let hovered_btn = point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h);
+        draw_button(frame, fw, fh, bx, by, bw, btn_h, active, hovered_btn, can_afford, label, text_col, s);
         // Тултип по наведению: стоимость и требования
         if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
             // Построим тултип с иконками стоимости и описанием производства
@@ -275,9 +277,22 @@ pub fn draw_ui(
 
 pub fn point_in_rect(px: i32, py: i32, x: i32, y: i32, w: i32, h: i32) -> bool { px >= x && py >= y && px < x + w && py < y + h }
 
-fn draw_button(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, w: i32, h: i32, active: bool, label: &[u8], col: [u8;4], s: i32) {
-    let bg = if active { [70, 120, 220, 200] } else { [50, 50, 50, 160] };
+fn draw_button(
+    frame: &mut [u8], fw: i32, fh: i32,
+    x: i32, y: i32, w: i32, h: i32,
+    active: bool, hovered: bool, enabled: bool,
+    label: &[u8], col: [u8;4], s: i32,
+) {
+    // Деревянная палитра (светлее)
+    let bg_base = [140, 105, 75, 180];
+    let bg_hover = [160, 120, 85, 200];
+    let bg_active = [185, 140, 95, 220];
+    let bg_disabled = [115, 95, 75, 150];
+    let bg = if !enabled { bg_disabled } else if active { bg_active } else if hovered { bg_hover } else { bg_base };
     fill_rect(frame, fw, fh, x, y, w, h, bg);
+    // лёгкая верхняя кромка (блик) и нижняя тень для объёма
+    fill_rect(frame, fw, fh, x, y, w, (2 * s).max(2), [255, 255, 255, 45]);
+    fill_rect(frame, fw, fh, x, y + h - (2 * s).max(2), w, (2 * s).max(2), [0, 0, 0, 40]);
     draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
 }
 
