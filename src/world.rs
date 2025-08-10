@@ -26,6 +26,10 @@ pub struct World {
     pub max_chunks: usize,
     // деревья, которые были вырублены (не восстанавливать при догрузке чанков)
     pub removed_trees: HashSet<(i32, i32)>,
+    // кэш месторождений по тайлам (уменьшаем вызовы шума в рендер-цикле)
+    pub clay_deposits: HashSet<(i32, i32)>,
+    pub stone_deposits: HashSet<(i32, i32)>,
+    pub iron_deposits: HashSet<(i32, i32)>,
 }
 
 impl World {
@@ -33,7 +37,7 @@ impl World {
         let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
         fbm = fbm.set_seed(seed as u32).set_octaves(5).set_frequency(0.03).set_lacunarity(2.0).set_persistence(0.5);
         let (tx, rx) = spawn_chunk_worker(seed);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new() }
+        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new() }
     }
 
     pub fn reset_noise(&mut self, seed: u64) {
@@ -46,6 +50,9 @@ impl World {
         self.roads.clear();
         self.trees.clear();
         self.removed_trees.clear();
+        self.clay_deposits.clear();
+        self.stone_deposits.clear();
+        self.iron_deposits.clear();
         let (tx, rx) = spawn_chunk_worker(seed);
         self.tx = tx; self.rx = rx; self.pending.clear();
     }
@@ -85,6 +92,15 @@ impl World {
                             self.trees.insert((tx, ty), Tree { stage: 2, age_ms: 0 });
                         }
                     }
+                    // заполним кэш месторождений (только для неводных клеток)
+                    if chunk.tiles[idx] != TileKind::Water {
+                        let tx = res.cx * CHUNK_W + lx;
+                        let ty = res.cy * CHUNK_H + ly;
+                        let p = IVec2::new(tx, ty);
+                        if self.compute_has_clay_deposit(p) { self.clay_deposits.insert((tx, ty)); }
+                        if self.compute_has_stone_deposit(p) { self.stone_deposits.insert((tx, ty)); }
+                        if self.compute_has_iron_deposit(p) { self.iron_deposits.insert((tx, ty)); }
+                    }
                 }}
             }
         }
@@ -96,6 +112,10 @@ impl World {
                     let min_tx = cx * CHUNK_W; let max_tx = min_tx + CHUNK_W - 1;
                     let min_ty = cy * CHUNK_H; let max_ty = min_ty + CHUNK_H - 1;
                     self.trees.retain(|&(tx, ty), _| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
+                    // очистим кэш месторождений в пределах чанка
+                    self.clay_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
+                    self.stone_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
+                    self.iron_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
                     self.chunks.remove(&key);
                 } else { break; }
             }
@@ -124,8 +144,14 @@ impl World {
         else { TileKind::Grass }
     }
 
-    pub fn has_clay_deposit(&self, p: IVec2) -> bool {
-        // базовый шум (низкая частота) + локальная кластеризация
+    pub fn has_clay_deposit(&self, p: IVec2) -> bool { self.clay_deposits.contains(&(p.x, p.y)) }
+
+    pub fn has_stone_deposit(&self, p: IVec2) -> bool { self.stone_deposits.contains(&(p.x, p.y)) }
+
+    pub fn has_iron_deposit(&self, p: IVec2) -> bool { self.iron_deposits.contains(&(p.x, p.y)) }
+
+    // --- Приватные методы расчёта месторождений (для заполнения кэша при интеграции чанков) ---
+    fn compute_has_clay_deposit(&self, p: IVec2) -> bool {
         let base = self.fbm.get([p.x as f64 * 0.30 + 31.0, p.y as f64 * 0.30 - 77.0]) as f32;
         let thr = 0.22_f32; let margin = 0.05_f32;
         if base > thr { return true; }
@@ -138,7 +164,7 @@ impl World {
         false
     }
 
-    pub fn has_stone_deposit(&self, p: IVec2) -> bool {
+    fn compute_has_stone_deposit(&self, p: IVec2) -> bool {
         let base = self.fbm.get([p.x as f64 * 0.38 - 123.0, p.y as f64 * 0.38 + 19.0]) as f32;
         let thr = 0.26_f32; let margin = 0.06_f32;
         if base > thr { return true; }
@@ -151,7 +177,7 @@ impl World {
         false
     }
 
-    pub fn has_iron_deposit(&self, p: IVec2) -> bool {
+    fn compute_has_iron_deposit(&self, p: IVec2) -> bool {
         let base = self.fbm.get([p.x as f64 * 0.34 + 211.0, p.y as f64 * 0.34 + 87.0]) as f32;
         let thr = 0.30_f32; let margin = 0.05_f32;
         if base > thr { return true; }

@@ -170,6 +170,7 @@ fn run() -> Result<()> {
     let mut selected_building: BuildingKind = BuildingKind::Lumberjack;
     let mut ui_category: ui::UICategory = ui::UICategory::Forestry;
     let mut buildings: Vec<Building> = Vec::new();
+    let mut buildings_dirty: bool = true;
     let mut citizens: Vec<Citizen> = Vec::new();
     let mut jobs: Vec<Job> = Vec::new();
     let mut next_job_id: u64 = 1;
@@ -269,14 +270,14 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
-                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
-                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
+                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); buildings_dirty = true; citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
+                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); buildings_dirty = true; citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
                         if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom, &world)); }
                         if key == PhysicalKey::Code(input.load_game) {
                             if let Ok(save) = load_game() {
                                 seed = save.seed;
                                 world.reset_noise(seed);
-                                buildings = save.to_buildings();
+                                buildings = save.to_buildings(); buildings_dirty = true;
                                 citizens.clear(); population = 0; // пока не сохраняем жителей
                                 resources = save.resources;
                                 cam_px = Vec2::new(save.cam_x, save.cam_y);
@@ -397,6 +398,7 @@ fn run() -> Result<()> {
                                     resources.gold -= cost.gold;
                                     world.occupy(tp);
                                     buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
+                                    buildings_dirty = true;
                                      if selected_building == BuildingKind::House {
                                         // Простой спавн одного жителя на дом
                                         citizens.push(Citizen {
@@ -504,15 +506,15 @@ fn run() -> Result<()> {
                                       let tile_h_px = atlas.half_h * 2 + 1;
                                       let top_left_x = screen_pos.x - atlas.half_w;
                                       let top_left_y = screen_pos.y - atlas.half_h;
-                                      if world.has_clay_deposit(tp) {
-                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.clay, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 170);
-                                      }
-                                      if world.has_stone_deposit(tp) {
-                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.stone, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 170);
-                                      }
-                                      if world.has_iron_deposit(tp) {
-                                          render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.iron, tile_w_px, tile_h_px, tile_w_px, tile_h_px, 190);
-                                      }
+                                       if world.has_clay_deposit(tp) {
+                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.clay, tile_w_px, tile_h_px, 170);
+                                       }
+                                       if world.has_stone_deposit(tp) {
+                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.stone, tile_w_px, tile_h_px, 170);
+                                       }
+                                       if world.has_iron_deposit(tp) {
+                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.iron, tile_w_px, tile_h_px, 190);
+                                       }
                                   } else {
                                       if world.has_clay_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 120, 80, 120]); }
                                       if world.has_stone_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 200, 200, 120]); }
@@ -542,7 +544,10 @@ fn run() -> Result<()> {
                     }
 
                     // Отрисуем здания по глубине
-                    buildings.sort_by_key(|b| b.pos.x + b.pos.y);
+                    if buildings_dirty {
+                        buildings.sort_by_key(|b| b.pos.x + b.pos.y);
+                        buildings_dirty = false;
+                    }
                     for b in buildings.iter() {
                         let mx = b.pos.x;
                         let my = b.pos.y;
@@ -1040,10 +1045,7 @@ fn run() -> Result<()> {
                 }
                 if did_step {
                     window.request_redraw();
-                } else {
-                    // всё равно перерисуем с периодичностью
-                    window.request_redraw();
-                }
+                } else { window.request_redraw(); }
             }
             _ => {}
         }
@@ -1163,7 +1165,8 @@ fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i
     }
     // запас; не ограничиваем картой, чтобы рисовать воду вне карты
     if min_tx == i32::MAX { return (-64, -64, 64, 64); }
-    (min_tx - 4, min_ty - 4, max_tx + 4, max_ty + 4)
+    // немного запаса вокруг экрана
+    (min_tx - 2, min_ty - 2, max_tx + 2, max_ty + 2)
 }
 
 fn building_cost(kind: BuildingKind) -> Resources {
