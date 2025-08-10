@@ -128,3 +128,86 @@ pub struct BuildingAtlas { pub sprites: Vec<Vec<u8>>, pub w: i32, pub h: i32 }
 // Отдельный атлас деревьев (кадры по горизонтали: стадии роста)
 pub struct TreeAtlas { pub sprites: Vec<Vec<u8>>, pub w: i32, pub h: i32 }
 
+// Временный процедурный атлас дорог для автосоединений (16 масок N/E/S/W)
+pub struct RoadAtlas {
+    pub sprites: Vec<Vec<u8>>, // 16 элементов
+    pub w: i32,
+    pub h: i32,
+    zoom_px: i32,
+    half_w: i32,
+    half_h: i32,
+}
+
+impl RoadAtlas {
+    pub fn new() -> Self { Self { sprites: Vec::new(), w: 0, h: 0, zoom_px: -1, half_w: 0, half_h: 0 } }
+
+    pub fn ensure_zoom(&mut self, half_w: i32, half_h: i32) {
+        let zoom_px = half_w.max(1) * 2 + 1;
+        if zoom_px == self.zoom_px && self.half_w == half_w && self.half_h == half_h { return; }
+        self.zoom_px = zoom_px; self.half_w = half_w; self.half_h = half_h; self.w = zoom_px; self.h = half_h * 2 + 1;
+        self.sprites.clear(); self.sprites.resize(16, vec![0u8; (self.w * self.h * 4) as usize]);
+        for mask in 0..16 { self.build_sprite(mask as u8); }
+    }
+
+    fn build_sprite(&mut self, mask: u8) {
+        let mut buf = vec![0u8; (self.w * self.h * 4) as usize];
+        // базовая ромбическая заливка дороги
+        Self::draw_diamond(&mut buf, self.w, self.h, self.half_w, self.half_h, [120, 110, 90, 220]);
+        // соединительные «полосы» — заранее заметные
+        let col = [95, 85, 70, 255];
+        let center = (self.half_w, self.half_h);
+        let top = (self.half_w, 0);
+        let right = (self.w - 1, self.half_h);
+        let bottom = (self.half_w, self.h - 1);
+        let left = (0, self.half_h);
+        let mut thick = |x0: i32, y0: i32, x1: i32, y1: i32| {
+            Self::draw_line_rgba(&mut buf, self.w, self.h, x0, y0, x1, y1, col);
+            // утолщение 2 пикселя по нормали
+            let dx = x1 - x0; let dy = y1 - y0; let nx = if dy == 0 { 0 } else { dy.signum() }; let ny = if dx == 0 { 0 } else { -dx.signum() };
+            Self::draw_line_rgba(&mut buf, self.w, self.h, x0 + nx, y0 + ny, x1 + nx, y1 + ny, col);
+            Self::draw_line_rgba(&mut buf, self.w, self.h, x0 - nx, y0 - ny, x1 - nx, y1 - ny, col);
+        };
+        if mask & 0b0001 != 0 { thick(center.0, center.1, top.0, top.1); }
+        if mask & 0b0010 != 0 { thick(center.0, center.1, right.0, right.1); }
+        if mask & 0b0100 != 0 { thick(center.0, center.1, bottom.0, bottom.1); }
+        if mask & 0b1000 != 0 { thick(center.0, center.1, left.0, left.1); }
+        // лёгкий светлый гребень по центру для читаемости
+        Self::draw_line_rgba(&mut buf, self.w, self.h, left.0, left.1, right.0, right.1, [140,130,110,255]);
+        Self::draw_line_rgba(&mut buf, self.w, self.h, top.0, top.1, bottom.0, bottom.1, [140,130,110,255]);
+        self.sprites[mask as usize] = buf;
+    }
+
+    fn draw_diamond(buf: &mut [u8], w: i32, h: i32, half_w: i32, half_h: i32, color: [u8;4]) {
+        let tile_w = half_w * 2 + 1; let tile_h = half_h * 2 + 1;
+        for dy in -half_h..=half_h {
+            let t = dy.abs() as f32 / half_h.max(1) as f32;
+            let row_half = ((1.0 - t) * half_w as f32).round() as i32;
+            let y = dy + half_h; let x0 = half_w - row_half; let x1 = half_w + row_half;
+            let base = (y as usize) * (w as usize) * 4;
+            for x in x0..=x1 { let idx = base + (x as usize) * 4; buf[idx..idx + 4].copy_from_slice(&color); }
+        }
+        // остальное остаётся прозрачным
+        let _ = tile_w; let _ = tile_h;
+    }
+
+    fn draw_line_rgba(buf: &mut [u8], w: i32, h: i32, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: [u8;4]) {
+        let dx = (x1 - x0).abs(); let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs(); let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        loop {
+            if x0 >= 0 && y0 >= 0 && x0 < w && y0 < h {
+                let idx = ((y0 as usize) * (w as usize) + (x0 as usize)) * 4;
+                // альфа-композит поверх
+                let a = color[3] as u32; let na = 255 - a;
+                let dr = buf[idx] as u32; let dg = buf[idx+1] as u32; let db = buf[idx+2] as u32;
+                buf[idx] = ((a * color[0] as u32 + na * dr) / 255) as u8;
+                buf[idx+1] = ((a * color[1] as u32 + na * dg) / 255) as u8;
+                buf[idx+2] = ((a * color[2] as u32 + na * db) / 255) as u8;
+                buf[idx+3] = 255;
+            }
+            if x0 == x1 && y0 == y1 { break; }
+            let e2 = 2 * err; if e2 >= dy { err += dy; x0 += sx; } if e2 <= dx { err += dx; y0 += sy; }
+        }
+    }
+}
+

@@ -68,6 +68,9 @@ pub struct Citizen {
     pub carrying: Option<(ResourceKind, i32)>,
     // ожидаемый к доставке входной ресурс для цикла работы
     pub pending_input: Option<ResourceKind>,
+    // путь (последовательность клеток) и текущий индекс шага
+    pub path: Vec<IVec2>,
+    pub path_index: usize,
 }
 
 #[derive(Clone, Debug)]

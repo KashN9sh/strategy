@@ -180,7 +180,12 @@ fn run() -> Result<()> {
     let mut warehouses: Vec<WarehouseStore> = Vec::new();
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
+    let mut road_atlas = atlas::RoadAtlas::new();
     let mut road_mode = false;
+    let mut path_debug_mode = false;
+    let mut path_sel_a: Option<IVec2> = None;
+    let mut path_sel_b: Option<IVec2> = None;
+    let mut last_path: Option<Vec<IVec2>> = None;
     let mut building_atlas: Option<BuildingAtlas> = None;
     let mut tree_atlas: Option<atlas::TreeAtlas> = None;
     // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 6 тайлов в строку: grass, forest, water, clay, stone, iron)
@@ -287,6 +292,7 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(KeyCode::KeyH) { show_forest_overlay = !show_forest_overlay; }
                         if key == PhysicalKey::Code(KeyCode::KeyU) { show_ui = !show_ui; }
                         if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
+                        if key == PhysicalKey::Code(KeyCode::KeyP) { path_debug_mode = !path_debug_mode; path_sel_a=None; path_sel_b=None; last_path=None; }
                         if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
                         if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
                         if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); buildings_dirty = true; citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
@@ -380,6 +386,18 @@ fn run() -> Result<()> {
                                 let on = !world.is_road(tp);
                                 world.set_road(tp, on);
                                 return;
+                            } else if path_debug_mode {
+                                // выбор двух точек для A*
+                                match (path_sel_a, path_sel_b) {
+                                    (None, _) => { path_sel_a = Some(tp); last_path=None; }
+                                    (Some(_), None) => { path_sel_b = Some(tp); }
+                                    (Some(_), Some(_)) => { path_sel_a = Some(tp); path_sel_b=None; last_path=None; }
+                                }
+                                if let (Some(a), Some(b)) = (path_sel_a, path_sel_b) {
+                                    // ограничим экспансии чтобы не зависнуть
+                                    last_path = crate::path::astar(&world, a, b, 20_000);
+                                }
+                                return;
                             }
                             // кликаем по тайлу под курсором, но убедимся, что используем те же snapped-пиксели камеры,
                             // чтобы не было рассинхрона между рендером и хитом
@@ -435,6 +453,8 @@ fn run() -> Result<()> {
                                             work_timer_ms: 0,
                                             carrying: None,
                                             pending_input: None,
+                                            path: Vec::new(),
+                                            path_index: 0,
                                         });
                                         population += 1;
                                       } else if selected_building == BuildingKind::Warehouse {
@@ -486,6 +506,8 @@ fn run() -> Result<()> {
 
                     // Границы видимых тайлов через инверсию проекции
                     let (min_tx, min_ty, max_tx, max_ty) = visible_tile_bounds_px(width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h);
+                    // Подготовим процедурный атлас дорог под текущий масштаб
+                    road_atlas.ensure_zoom(atlas.half_w, atlas.half_h);
                     // Закажем генерацию колец чанков
                     world.schedule_ring(min_tx, min_ty, max_tx, max_ty);
                     // Интегрируем готовые чанки (non-blocking)
@@ -505,8 +527,17 @@ fn run() -> Result<()> {
                             // сетка
                             if show_grid { render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]); }
 
-                            // дороги (простая заливка поверх тайла)
-                            if world.is_road(IVec2::new(mx, my)) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [120, 110, 90, 200]); }
+                            // дороги (процедурный спрайт по маске соседей)
+                            if world.is_road(IVec2::new(mx, my)) {
+                                let nb = [ (0,-1,0b0001), (1,0,0b0010), (0,1,0b0100), (-1,0,0b1000) ];
+                                let mut mask: u8 = 0;
+                                for (dx,dy,bit) in nb { if world.is_road(IVec2::new(mx+dx, my+dy)) { mask |= bit; } }
+                                let spr = &road_atlas.sprites[mask as usize];
+                                let w = road_atlas.w; let h = road_atlas.h;
+                                let top_left_x = screen_pos.x - atlas.half_w;
+                                let top_left_y = screen_pos.y - atlas.half_h;
+                                render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, spr, w, h, 255);
+                            }
 
                             // оверлей плотности леса (простая функция от шума)
                             if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v, 50, 50, 255]); }
@@ -641,6 +672,16 @@ fn run() -> Result<()> {
                     let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
                     if night_strength > 0 { overlay_tint(frame, width_i32, height_i32, [18, 28, 60, night_strength]); }
 
+                    // Отрисовка найденного пути в дебаг-режиме
+                    if let (true, Some(path)) = (path_debug_mode, &last_path) {
+                        for p in path.iter() {
+                            let world_x = (p.x - p.y) * atlas.half_w - cam_snap.x as i32;
+                            let world_y = (p.x + p.y) * atlas.half_h - cam_snap.y as i32;
+                            let sp = screen_center + IVec2::new(world_x, world_y);
+                            render::tiles::draw_iso_outline(frame, width_i32, height_i32, sp.x, sp.y, atlas.half_w, atlas.half_h, [50, 200, 240, 255]);
+                        }
+                    }
+
                     // UI наложение
                     if show_ui {
                         let depot_total_wood: i32 = warehouses.iter().map(|w| w.wood).sum();
@@ -717,9 +758,7 @@ fn run() -> Result<()> {
                                 c.carrying_log = false;
                                 if c.state != CitizenState::Sleeping {
                                     if c.pos != c.home && !c.moving {
-                                        c.target = c.home;
-                                        c.moving = true;
-                                        c.progress = 0.0;
+                                        plan_path(&world, c, c.home);
                                         c.state = CitizenState::GoingHome;
                                     }
                                     if !c.moving && c.pos == c.home {
@@ -765,6 +804,7 @@ fn run() -> Result<()> {
                                                 if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
                                                 c.workplace = Some(b.pos);
                                                 c.target = b.pos;
+                                                plan_path(&world, c, b.pos);
                                                 c.moving = true;
                                                 c.progress = 0.0;
                                                 c.state = CitizenState::GoingToWork;
@@ -811,11 +851,11 @@ fn run() -> Result<()> {
                                 }
                             }
                             // 2) назначение задач: ближайший к задаче свободный житель (только те, кто не назначен на работу)
-                            jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs);
+                            jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs, &world);
                             // 3) выполнение задач
                             jobs::process_jobs(&mut citizens, &mut jobs, &mut logs_on_ground, &mut warehouses, &mut resources, &buildings, &mut world, &mut next_job_id);
                         }
-                        // простая симуляция жителей
+                        // перемещение жителей по пути (A*)
                         for c in citizens.iter_mut() {
                             if !c.moving {
                                 c.idle_timer_ms += step_ms as i32;
@@ -845,7 +885,7 @@ fn run() -> Result<()> {
                                                 }
                                             }
                                             // возвращаемся к работе
-                                            if let Some(wp) = c.workplace { c.target = wp; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToWork; }
+                                            if let Some(wp) = c.workplace { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
                                         }
                                     }
                                     CitizenState::GoingToFetch => {
@@ -867,7 +907,7 @@ fn run() -> Result<()> {
                                                 };
                                                 if taken {
                                                     c.carrying = Some((req, 1));
-                                                    if let Some(wp) = c.workplace { c.target = wp; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToWork; }
+                                                    if let Some(wp) = c.workplace { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
                                                 } else {
                                                     c.state = CitizenState::Working; // ресурса нет
                                                 }
@@ -879,8 +919,27 @@ fn run() -> Result<()> {
                                 }
                             } else {
                                 c.idle_timer_ms = 0;
-                                c.progress += (step_ms / 300.0) as f32;
-                                if c.progress >= 1.0 { c.pos = c.target; c.moving = false; c.progress = 0.0; }
+                                // если дорога пустая — идём к следующей точке пути
+                                if c.pos == c.target {
+                                    // достигнута вершина пути
+                                    if c.path_index + 1 < c.path.len() { c.path_index += 1; c.target = c.path[c.path_index]; c.progress = 0.0; }
+                                    else { c.moving = false; c.progress = 0.0; }
+                                } else {
+                                    // скорость шага зависит от целевой клетки: дорога быстрее, трава медленнее, лес ещё медленнее
+                                    let mut step_time_ms: f32 = 300.0; // базовая скорость (нравится на дорогах)
+                                    if world.is_road(c.target) {
+                                        step_time_ms = 300.0;
+                                    } else {
+                                        use crate::types::TileKind::*;
+                                        match world.get_tile(c.target.x, c.target.y) {
+                                            Grass => step_time_ms = 450.0,
+                                            Forest => step_time_ms = 600.0,
+                                            Water => step_time_ms = 300.0,
+                                        }
+                                    }
+                                    c.progress += (step_ms / step_time_ms) as f32;
+                                    if c.progress >= 1.0 { c.pos = c.target; c.progress = 0.0; }
+                                }
                             }
                         }
 
@@ -898,7 +957,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Stone, 1));
-                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -907,7 +966,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Clay, 1));
-                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -916,7 +975,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::IronOre, 1));
-                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -925,7 +984,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Wheat, 1));
-                                                    c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -946,7 +1005,7 @@ fn run() -> Result<()> {
                                                     c.carrying = None;
                                                     if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                         c.carrying = Some((ResourceKind::Flour, 1));
-                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                        plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                     }
                                                 }
                                             }
@@ -973,8 +1032,8 @@ fn run() -> Result<()> {
                                                     if ok {
                                                         c.carrying = None; // глину потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
-                                                            c.carrying = Some((ResourceKind::Bricks, 1));
-                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                         c.carrying = Some((ResourceKind::Bricks, 1));
+                                                         plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1002,7 +1061,7 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // муку потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::Bread, 1));
-                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                            plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1029,7 +1088,7 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // руду потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::IronIngot, 1));
-                                                            c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                            plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1042,7 +1101,7 @@ fn run() -> Result<()> {
                                                     c.work_timer_ms = 0;
                                                     if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                         c.carrying = Some((ResourceKind::Fish, 1));
-                                                        c.target = dst; c.moving = true; c.progress = 0.0; c.state = CitizenState::GoingToDeposit;
+                                                        plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                     }
                                                 }
                                             }
@@ -1271,5 +1330,21 @@ fn has_adjacent_forest(p: IVec2, world: &mut World) -> bool {
         if world.get_tile(x, y) == TileKind::Forest { return true; }
     }
     false
+}
+
+fn plan_path(world: &World, c: &mut Citizen, goal: IVec2) {
+    c.target = goal;
+    if let Some(path) = crate::path::astar(world, c.pos, goal, 50_000) {
+        c.path = path; c.path_index = 1;
+        if c.path_index < c.path.len() { c.target = c.path[c.path_index]; c.moving = true; c.progress = 0.0; }
+        else { c.moving = false; }
+    } else {
+        // не смогли сразу построить путь (чанки ещё не готовы) — сделаем один шаг по направлению к цели
+        c.path.clear(); c.path_index = 0;
+        let dx = (goal.x - c.pos.x).signum();
+        let dy = (goal.y - c.pos.y).signum();
+        let next = if dx != 0 { IVec2::new(c.pos.x + dx, c.pos.y) } else { IVec2::new(c.pos.x, c.pos.y + dy) };
+        c.target = next; c.moving = true; c.progress = 0.0;
+    }
 }
 

@@ -75,6 +75,37 @@ pub fn draw_log(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, hal
     for y in y0..=y1 { for x in x0..=x1 { let idx=((y as usize)*(width as usize)+(x as usize))*4; frame[idx..idx+4].copy_from_slice(&[120,80,40,255]); }}
 }
 
+// Автосоединение дорог: рисует соединения к соседям N/E/S/W поверх базовой заливки дороги
+pub fn draw_road_connections(
+    frame: &mut [u8], width: i32, height: i32,
+    cx: i32, cy: i32, half_w: i32, half_h: i32,
+    mask: u8, color: [u8; 4]
+) {
+    // Центр ромба
+    let center = (cx, cy);
+    // Цели: середины рёбер ромба
+    let top = (cx, cy - half_h);
+    let right = (cx + half_w, cy);
+    let bottom = (cx, cy + half_h);
+    let left = (cx - half_w, cy);
+    // Рисуем толстые линии (3px) к активным сторонам
+    let mut draw_thick = |x0: i32, y0: i32, x1: i32, y1: i32| {
+        // основная линия
+        draw_line(frame, width, height, x0, y0, x1, y1, color);
+        // смещения по перпендикуляру для толщины
+        let dx = x1 - x0; let dy = y1 - y0;
+        // нормаль (dy, -dx); нормируем грубо по знаку
+        let nx = if dy == 0 { 0 } else { dy.signum() };
+        let ny = if dx == 0 { 0 } else { -dx.signum() };
+        draw_line(frame, width, height, x0 + nx, y0 + ny, x1 + nx, y1 + ny, color);
+        draw_line(frame, width, height, x0 - nx, y0 - ny, x1 - nx, y1 - ny, color);
+    };
+    if mask & 0b0001 != 0 { draw_thick(center.0, center.1, top.0, top.1); }
+    if mask & 0b0010 != 0 { draw_thick(center.0, center.1, right.0, right.1); }
+    if mask & 0b0100 != 0 { draw_thick(center.0, center.1, bottom.0, bottom.1); }
+    if mask & 0b1000 != 0 { draw_thick(center.0, center.1, left.0, left.1); }
+}
+
 pub fn blit_sprite_alpha_scaled(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, src: &Vec<u8>, sw: i32, sh: i32, dw: i32, dh: i32) {
     let dst_x0 = x.max(0); let dst_y0 = y.max(0); let dst_x1 = (x + dw).min(fw); let dst_y1 = (y + dh).min(fh);
     if dst_x0 >= dst_x1 || dst_y0 >= dst_y1 { return; }

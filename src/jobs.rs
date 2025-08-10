@@ -10,7 +10,7 @@ fn job_anchor(kind: &JobKind) -> IVec2 {
     }
 }
 
-pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Job>) {
+pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Job>, world: &World) {
     // Для каждой свободной задачи найдём ближайшего свободного жителя
     for (_jid, job) in jobs.iter_mut().enumerate() {
         if job.taken || job.done { continue; }
@@ -18,14 +18,15 @@ pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Jo
         if let Some((cid, _)) = citizens
             .iter()
             .enumerate()
-            // не трогаем жителей, у которых уже есть место работы или они в пути к нему/с него
-            .filter(|(_, c)| c.assigned_job.is_none() && c.workplace.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving)
+            // берём любых свободных (Idle) и не движущихся граждан, даже если у них есть workplace —
+            // задачи имеют приоритет над «привязкой» к рабочему месту
+            .filter(|(_, c)| c.assigned_job.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving)
             .min_by_key(|(_, c)| (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs())
         {
             let c = &mut citizens[cid];
             job.taken = true;
             c.assigned_job = Some(job.id);
-            c.target = target;
+            super::plan_path(world, c, target);
             c.moving = true;
             c.progress = 0.0;
         }
@@ -50,7 +51,7 @@ pub fn process_jobs(
                     if !c.moving && c.pos == pos {
                         // Если дерево зрелое — срубаем и спавним полено; иначе завершаем без публикации Haul
                         if let Some(stage) = world.tree_stage(pos) {
-                            if stage >= 2 { world.remove_tree(pos); logs_on_ground.push(LogItem { pos, carried: false }); }
+                            if stage == 2 { world.remove_tree(pos); logs_on_ground.push(LogItem { pos, carried: false }); }
                             else { jobs[jid].done = true; c.assigned_job = None; continue; }
                         } else { jobs[jid].done = true; c.assigned_job = None; continue; }
                         // Цель доставки — ближайший склад; если складов нет — завершаем без Haul
@@ -67,6 +68,9 @@ pub fn process_jobs(
                         jobs[jid].done = true;
                         jobs.push(Job { id: { let id=*next_job_id; *next_job_id+=1; id }, kind: JobKind::HaulWood { from: pos, to: target_pos }, taken: false, done: false });
                         c.assigned_job = None;
+                    } else if !c.moving {
+                        // планируем путь к дереву, если ещё не двигаемся
+                        super::plan_path(world, c, pos);
                     }
                 }
                 JobKind::HaulWood { from, to } => {
@@ -76,9 +80,8 @@ pub fn process_jobs(
                                 // забираем полено и удаляем его из мира сразу
                                 logs_on_ground.remove(idx);
                                 c.carrying_log = true;
-                                c.target = to;
-                                c.moving = true;
-                                c.progress = 0.0;
+                            // планируем путь до склада
+                            super::plan_path(world, c, to);
                             } else {
                                 jobs[jid].done = true;
                                 c.assigned_job = None;
