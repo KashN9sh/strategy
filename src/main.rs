@@ -188,8 +188,56 @@ fn run() -> Result<()> {
     let mut last_path: Option<Vec<IVec2>> = None;
     let mut building_atlas: Option<BuildingAtlas> = None;
     let mut tree_atlas: Option<atlas::TreeAtlas> = None;
-    // Попытаемся загрузить атлас из assets/tiles.png (ожидаем 6 тайлов в строку: grass, forest, water, clay, stone, iron)
-    if let Ok(img) = image::open("assets/tiles.png") {
+    // Попытаемся загрузить спрайтшит 32x32: assets/spritesheet.png
+    if let Ok(img) = image::open("assets/spritesheet.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let cell_w = 32u32; let cell_h = 32u32;
+        let cols = (iw / cell_w).max(1); let rows = (ih / cell_h).max(1);
+        let mut cell_rgba = |cx: u32, cy: u32| -> Vec<u8> {
+            let x0 = cx * cell_w; let y0 = cy * cell_h;
+            let mut out = vec![0u8; (cell_w * cell_h * 4) as usize];
+            for y in 0..cell_h as usize {
+                let src = ((y0 as usize + y) * iw as usize + x0 as usize) * 4;
+                let dst = y * cell_w as usize * 4;
+                out[dst..dst + cell_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + cell_w as usize * 4]);
+            }
+            out
+        };
+        // Жёсткая раскладка по описанию:
+        // row 2 (индекс 2) — вариации травы (grass)
+        // последний ряд (rows-1): вода — первая ячейка чистая вода, остальные — кромки
+        let grass_row = 2u32.min(rows-1);
+        // соберём все варианты травы из строки
+        let mut grass_variants_raw: Vec<Vec<u8>> = Vec::new();
+        let grass_cols = cols.min(3); // используем только первые три варианта травы
+        for cx in 0..grass_cols { grass_variants_raw.push(cell_rgba(cx, grass_row)); }
+        let water_row = rows-1;
+        let water_full = cell_rgba(0, water_row);
+        let mut water_edges_raw: Vec<Vec<u8>> = Vec::new();
+        for cx in 1..cols { water_edges_raw.push(cell_rgba(cx, water_row)); }
+        // База для ромбической маски (на случай фоллбека и оверлеев deposits)
+        let def0 = grass_variants_raw.get(0).cloned().unwrap_or_else(|| cell_rgba(0,0));
+        let def1 = grass_variants_raw.get(1).cloned().unwrap_or_else(|| def0.clone());
+        let def2 = water_full.clone();
+        atlas.base_loaded = true;
+        atlas.base_w = cell_w as i32;
+        atlas.base_h = cell_h as i32;
+        atlas.base_grass = def0;
+        atlas.base_forest = def1; // временно вторую траву используем как forest-базу
+        atlas.base_water = def2;
+        // депозит-маркер: 6-я строка, 7-й спрайт (1-based) → cy=5, cx=6 (0-based); с защитой границ
+        let dep_row = 5u32.min(rows-1);
+        let dep_cx = 6u32.min(cols-1);
+        let dep_tile = cell_rgba(dep_cx, dep_row);
+        atlas.base_clay = dep_tile.clone();
+        atlas.base_stone = dep_tile.clone();
+        atlas.base_iron = dep_tile.clone();
+        // сохраним вариации травы — будем использовать при рендере PNG-тайлов
+        atlas.grass_variants = grass_variants_raw;
+        // заглушки для deposits из старого tiles.png отсутствуют — оставим пустыми, оверлеи не обязательны
+    } else if let Ok(img) = image::open("assets/tiles.png") {
+        // Старый путь: 6 тайлов в строку: grass, forest, water, clay, stone, iron
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         // делим по 6 спрайтов по ширине
@@ -563,7 +611,38 @@ fn run() -> Result<()> {
                             let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
                             let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
                             let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                            atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
+                            if atlas.base_loaded {
+                                // рисуем PNG-тайл целиком (чтобы детали могли выступать за ромб)
+                                let tile_w_px = atlas.half_w * 2 + 1;
+                                let draw_w = tile_w_px;
+                                let scale = tile_w_px as f32 / atlas.base_w.max(1) as f32;
+                                let draw_h = (atlas.base_h as f32 * scale).round() as i32;
+                                let diamond_h = atlas.half_h * 2 + 1;
+                                let extra_h = (draw_h - diamond_h).max(0);
+                                let top_left_x = screen_pos.x - draw_w / 2;
+                                let top_left_y = screen_pos.y - atlas.half_h - extra_h;
+                                match kind {
+                                    TileKind::Grass => {
+                                        // хэш по координате для вариативности
+                                        let idx = ((mx as i64 * 73856093 ^ my as i64 * 19349663) & 0x7fffffff) as usize;
+                                        if !atlas.grass_variants.is_empty() {
+                                            let spr = &atlas.grass_variants[idx % atlas.grass_variants.len()];
+                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                        } else {
+                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                        }
+                                    }
+                                    TileKind::Forest => {
+                                        render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                    }
+                                    TileKind::Water => {
+                                        render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                    }
+                                }
+                            } else {
+                                // процедурный ромб
+                                atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
+                            }
 
                             // сетка
                             if show_grid { render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]); }
@@ -603,23 +682,27 @@ fn run() -> Result<()> {
                                       render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, col);
                                   }
                               }
-                              // оверлеи месторождений (простая заливка-рамка)
+                            // оверлеи месторождений (поверх)
                               let tp = IVec2::new(mx, my);
                               if world.get_tile(mx, my) != TileKind::Water {
-                                  // если загружен базовый атлас — используем спрайты месторождений поверх травы
+                                  // если загружен базовый атлас — используем PNG-спрайт ячейки депозита поверх травы (полный спрайт)
                                   if atlas.base_loaded {
                                       let tile_w_px = atlas.half_w * 2 + 1;
-                                      let tile_h_px = atlas.half_h * 2 + 1;
-                                      let top_left_x = screen_pos.x - atlas.half_w;
-                                      let top_left_y = screen_pos.y - atlas.half_h;
+                                      let draw_w = tile_w_px;
+                                      let scale = tile_w_px as f32 / atlas.base_w.max(1) as f32;
+                                      let draw_h = (atlas.base_h as f32 * scale).round() as i32;
+                                      let diamond_h = atlas.half_h * 2 + 1;
+                                      let extra_h = (draw_h - diamond_h).max(0);
+                                      let top_left_x = screen_pos.x - draw_w / 2;
+                                      let top_left_y = screen_pos.y - atlas.half_h - extra_h;
                                        if world.has_clay_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.clay, tile_w_px, tile_h_px, 170);
+                                           render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
                                        }
                                        if world.has_stone_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.stone, tile_w_px, tile_h_px, 170);
+                                           render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_stone, atlas.base_w, atlas.base_h, draw_w, draw_h, 220);
                                        }
                                        if world.has_iron_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.iron, tile_w_px, tile_h_px, 190);
+                                           render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_iron, atlas.base_w, atlas.base_h, draw_w, draw_h, [200, 205, 220], 140, 240);
                                        }
                                   } else {
                                       if world.has_clay_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 120, 80, 120]); }

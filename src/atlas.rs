@@ -10,6 +10,8 @@ pub struct TileAtlas {
     pub grass: Vec<u8>,
     pub forest: Vec<u8>,
     pub water_frames: Vec<Vec<u8>>,
+    // сырые PNG-спрайты вариаций травы (для прямого блита без маски)
+    pub grass_variants: Vec<Vec<u8>>,
     // предмасштабированные и замаскированные наложения месторождений
     pub clay: Vec<u8>,
     pub stone: Vec<u8>,
@@ -27,7 +29,7 @@ pub struct TileAtlas {
 
 impl TileAtlas {
     pub fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
+        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
     }
 
     pub fn ensure_zoom(&mut self, zoom: f32) {
@@ -39,14 +41,15 @@ impl TileAtlas {
         self.half_w = half_w.max(1);
         self.half_h = half_h.max(1);
         if self.base_loaded {
-            self.grass = Self::scale_and_mask(&self.base_grass, self.base_w, self.base_h, self.half_w, self.half_h);
-            self.forest = Self::scale_and_mask(&self.base_forest, self.base_w, self.base_h, self.half_w, self.half_h);
+            // безопасные версии: если источник пустой — вернём пустой буфер нужного размера
+            self.grass = Self::scale_and_mask_or_empty(&self.base_grass, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.forest = Self::scale_and_mask_or_empty(&self.base_forest, self.base_w, self.base_h, self.half_w, self.half_h);
             self.water_frames.clear();
-            self.water_frames.push(Self::scale_and_mask(&self.base_water, self.base_w, self.base_h, self.half_w, self.half_h));
+            self.water_frames.push(Self::scale_and_mask_or_empty(&self.base_water, self.base_w, self.base_h, self.half_w, self.half_h));
             // подготовим наложения deposit-тайлов под текущий zoom с ромбической маской
-            self.clay = Self::scale_and_mask(&self.base_clay, self.base_w, self.base_h, self.half_w, self.half_h);
-            self.stone = Self::scale_and_mask(&self.base_stone, self.base_w, self.base_h, self.half_w, self.half_h);
-            self.iron = Self::scale_and_mask(&self.base_iron, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.clay = Self::scale_and_mask_or_empty(&self.base_clay, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.stone = Self::scale_and_mask_or_empty(&self.base_stone, self.base_w, self.base_h, self.half_w, self.half_h);
+            self.iron = Self::scale_and_mask_or_empty(&self.base_iron, self.base_w, self.base_h, self.half_w, self.half_h);
         } else {
             self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
             self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
@@ -98,6 +101,11 @@ impl TileAtlas {
             }
         }
         buf
+    }
+
+    fn scale_and_mask_or_empty(base: &Vec<u8>, bw: i32, bh: i32, half_w: i32, half_h: i32) -> Vec<u8> {
+        if base.is_empty() || bw <= 0 || bh <= 0 { return vec![0u8; ((half_w * 2 + 1) * (half_h * 2 + 1) * 4) as usize]; }
+        Self::scale_and_mask(base, bw, bh, half_w, half_h)
     }
 
     pub fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind, water_frame: usize) {
