@@ -96,7 +96,7 @@ struct SaveData {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
-struct SaveBuilding { kind: BuildingKind, x: i32, y: i32, timer_ms: i32 }
+struct SaveBuilding { kind: BuildingKind, x: i32, y: i32, timer_ms: i32, #[serde(default)] workers_target: i32 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct SaveTree { x: i32, y: i32, stage: u8, age_ms: i32 }
@@ -105,7 +105,7 @@ impl SaveData {
     fn from_runtime(seed: u64, res: &Resources, buildings: &Vec<Building>, cam_px: Vec2, zoom: f32, world: &world::World) -> Self {
         let buildings = buildings
             .iter()
-            .map(|b| SaveBuilding { kind: b.kind, x: b.pos.x, y: b.pos.y, timer_ms: b.timer_ms })
+            .map(|b| SaveBuilding { kind: b.kind, x: b.pos.x, y: b.pos.y, timer_ms: b.timer_ms, workers_target: b.workers_target })
             .collect();
         let mut trees = Vec::new();
         for (&(x, y), tr) in world.trees.iter() { trees.push(SaveTree { x, y, stage: tr.stage, age_ms: tr.age_ms }); }
@@ -115,7 +115,7 @@ impl SaveData {
     fn to_buildings(&self) -> Vec<Building> {
         self.buildings
             .iter()
-            .map(|s| Building { kind: s.kind, pos: IVec2::new(s.x, s.y), timer_ms: s.timer_ms })
+            .map(|s| Building { kind: s.kind, pos: IVec2::new(s.x, s.y), timer_ms: s.timer_ms, workers_target: if s.workers_target == 0 { match s.kind { BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Lumberjack => 0, _ => 1 } } else { s.workers_target } })
             .collect()
     }
 }
@@ -260,6 +260,10 @@ fn run() -> Result<()> {
     let mut cursor_xy = IVec2::new(0, 0);
     let mut fps_ema: f32 = 60.0;
     let mut show_ui = true;
+    // выбранный житель для ручного назначения на работу (отключено)
+    let mut selected_citizen: Option<usize> = None; // больше не используется для назначения
+    // активная панель здания (по клику)
+    let mut active_building_panel: Option<IVec2> = None;
 
     let mut width_i32 = size.width as i32;
     let mut height_i32 = size.height as i32;
@@ -389,7 +393,29 @@ fn run() -> Result<()> {
                                 bx += bw + 6 * ui_s;
                             }
                         }
+                        // обработка клика по панели здания (+/-) — только если панель активна
+                        if let Some(p) = active_building_panel {
+                            let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
+                            let panel = ui::layout_building_panel(width_i32, height_i32, ui_s);
+                            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.minus_x, panel.minus_y, panel.minus_w, panel.minus_h) {
+                                if let Some(b) = buildings.iter_mut().find(|bb| bb.pos == p) { b.workers_target = (b.workers_target - 1).max(0); }
+                                return;
+                            }
+                            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.plus_x, panel.plus_y, panel.plus_w, panel.plus_h) {
+                                if let Some(b) = buildings.iter_mut().find(|bb| bb.pos == p) { b.workers_target = (b.workers_target + 1).min(9); }
+                                return;
+                            }
+                        }
                         if let Some(tp) = hovered_tile {
+                            // клик по зданию — открыть/закрыть панель здания
+                            if let Some(bh) = buildings.iter().find(|bb| bb.pos == tp) {
+                                active_building_panel = match active_building_panel {
+                                    Some(cur) if cur == bh.pos => None,
+                                    _ => Some(bh.pos),
+                                };
+                                return;
+                            }
+                            // отключили клики по гражданам и ручное назначение — всё через панель зданий
                             if road_mode {
                                 // Переключение дороги по клику
                                 let on = !world.is_road(tp);
@@ -443,7 +469,11 @@ fn run() -> Result<()> {
                                 if resources.gold >= cost.gold && spend_wood(&mut warehouses, &mut resources, cost.wood) {
                                     resources.gold -= cost.gold;
                                     world.occupy(tp);
-                                    buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0 });
+                                    let default_workers = match selected_building {
+                                        BuildingKind::House | BuildingKind::Warehouse => 0,
+                                        _ => 1,
+                                    };
+                                    buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0, workers_target: default_workers });
                                     buildings_dirty = true;
                                      if selected_building == BuildingKind::House {
                                         // Простой спавн одного жителя на дом
@@ -464,7 +494,8 @@ fn run() -> Result<()> {
                                             pending_input: None,
                                             path: Vec::new(),
                                             path_index: 0,
-                                             fed_today: false,
+                                             fed_today: true,
+                                             manual_workplace: false,
                                         });
                                         population += 1;
                                       } else if selected_building == BuildingKind::Warehouse {
@@ -675,7 +706,28 @@ fn run() -> Result<()> {
                         let world_y = ((fx + fy) * atlas.half_h as f32).round() as i32 - cam_snap.y as i32;
                         let screen_pos = screen_center + IVec2::new(world_x, world_y);
                         let r = (atlas.half_w as f32 * 0.15).round() as i32; // масштаб от тайла
-                        render::tiles::draw_citizen_marker(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), [255, 230, 120, 255]);
+                        // цвет по месту работы
+                        let mut col = [255, 230, 120, 255];
+                        if let Some(wp) = c.workplace {
+                            if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
+                                col = match b.kind {
+                                    BuildingKind::Lumberjack => [140, 90, 40, 255],
+                                    BuildingKind::Forester => [90, 140, 90, 255],
+                                    BuildingKind::StoneQuarry => [120, 120, 120, 255],
+                                    BuildingKind::ClayPit => [150, 90, 70, 255],
+                                    BuildingKind::Kiln => [160, 60, 40, 255],
+                                    BuildingKind::WheatField => [200, 180, 80, 255],
+                                    BuildingKind::Mill => [210, 210, 180, 255],
+                                    BuildingKind::Bakery => [200, 160, 120, 255],
+                                    BuildingKind::Fishery => [100, 140, 200, 255],
+                                    BuildingKind::IronMine => [90, 90, 110, 255],
+                                    BuildingKind::Smelter => [190, 190, 210, 255],
+                                    BuildingKind::Warehouse => [150, 120, 80, 255],
+                                    BuildingKind::House => [180, 180, 180, 255],
+                                };
+                            }
+                        }
+                        render::tiles::draw_citizen_marker(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), col);
                     }
 
                     // Оверлей день/ночь
@@ -729,6 +781,27 @@ fn run() -> Result<()> {
                         }
                         let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
                         ui::draw_ui(frame, width_i32, height_i32, &visible, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress, idle, working, sleeping, hauling, fetching, cursor_xy.x, cursor_xy.y);
+                        // Если выбрана панель здания — рисуем её
+                        if let Some(p) = active_building_panel {
+                            if let Some(b) = buildings.iter().find(|bb| bb.pos == p) {
+                                // считаем фактических работников
+                                let workers_current = citizens.iter().filter(|c| c.workplace == Some(b.pos)).count() as i32;
+                                let (prod, cons): (&[u8], Option<&[u8]>) = match b.kind {
+                                    BuildingKind::StoneQuarry => (b"+ Stone", None),
+                                    BuildingKind::ClayPit => (b"+ Clay", None),
+                                    BuildingKind::IronMine => (b"+ Iron Ore", None),
+                                    BuildingKind::WheatField => (b"+ Wheat", None),
+                                    BuildingKind::Mill => (b"+ Flour", Some(b"- Wheat")),
+                                    BuildingKind::Kiln => (b"+ Bricks", Some(b"- Clay, - Wood")),
+                                    BuildingKind::Bakery => (b"+ Bread", Some(b"- Flour, - Wood")),
+                                    BuildingKind::Fishery => (b"+ Fish", None),
+                                    BuildingKind::Smelter => (b"+ Iron Ingot", Some(b"- Iron Ore, - Wood")),
+                                    BuildingKind::Lumberjack => (b"+ Wood (via jobs)", None),
+                                    BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Forester => (b"", None),
+                                };
+                                ui::draw_building_panel(frame, width_i32, height_i32, ui::ui_scale(height_i32, config.ui_scale_base), b.kind, workers_current, b.workers_target, prod, cons);
+                            }
+                        }
                     }
 
                     if let Err(err) = pixels.render() {
@@ -796,7 +869,7 @@ fn run() -> Result<()> {
                                     }
                                     if !c.moving && c.pos == c.home {
                                         c.state = CitizenState::Sleeping;
-                                        c.workplace = None;
+                                        if !c.manual_workplace { c.workplace = None; }
                                         c.work_timer_ms = 0;
                                         c.carrying = None;
                                     }
@@ -816,45 +889,76 @@ fn run() -> Result<()> {
                                     _ => {}
                                 }
                             }
+                            // направим вручную закреплённых к месту работы
+                            for c in citizens.iter_mut() {
+                                if c.manual_workplace { if let Some(wp) = c.workplace { if !c.moving { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; } } }
+                            }
                         }
 
-                        // Дневная рутина рабочих по зданиям (кроме лесоруба/склада/дома)
+                        // Дневная рутина рабочих по зданиям (кроме дома/склада)
                         if is_day {
-                            use std::collections::HashSet;
-                            let mut occupied: HashSet<(i32,i32)> = citizens.iter()
-                                .filter_map(|c| c.workplace.map(|p| (p.x, p.y)))
-                                .collect();
                             // Назначение рабочих
                             for b in buildings.iter() {
                                 match b.kind {
-                                    BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Lumberjack => {}
+                                    BuildingKind::House | BuildingKind::Warehouse => {}
                                     _ => {
-                                        if !occupied.contains(&(b.pos.x, b.pos.y)) {
-                                            if let Some((ci, _)) = citizens.iter()
-                                                .enumerate()
-                                                .filter(|(_, c)| matches!(c.state, CitizenState::Idle | CitizenState::Sleeping) && !c.moving)
-                                                .min_by_key(|(_, c)| (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs())
-                                            {
-                                                let c = &mut citizens[ci];
-                                                if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
-                                                c.workplace = Some(b.pos);
-                                                c.target = b.pos;
-                                                plan_path(&world, c, b.pos);
-                                                c.moving = true;
-                                                c.progress = 0.0;
-                                                c.state = CitizenState::GoingToWork;
-                                                occupied.insert((b.pos.x, b.pos.y));
-                                            }
+                                        // считаем сколько уже назначено на это здание
+                                        let current = citizens.iter().filter(|c| c.workplace == Some(b.pos)).count() as i32;
+                                        if current >= b.workers_target { continue; }
+                                        if let Some((ci, _)) = citizens.iter()
+                                            .enumerate()
+                                            .filter(|(_, c)| matches!(c.state, CitizenState::Idle | CitizenState::Sleeping) && !c.moving && !c.manual_workplace)
+                                            .min_by_key(|(_, c)| (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs())
+                                        {
+                                            let c = &mut citizens[ci];
+                                            if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
+                                            c.workplace = Some(b.pos);
+                                            c.target = b.pos;
+                                            plan_path(&world, c, b.pos);
+                                            c.moving = true;
+                                            c.progress = 0.0;
+                                            c.state = CitizenState::GoingToWork;
+                                        }
+                                    }
+                                }
+                            }
+                            // Снижение числа работников: если фактических больше цели — освободим лишних (кроме ручных)
+                            for b in buildings.iter() {
+                                if matches!(b.kind, BuildingKind::House | BuildingKind::Warehouse) { continue; }
+                                let mut assigned: Vec<usize> = citizens.iter()
+                                    .enumerate()
+                                    .filter(|(_, c)| c.workplace == Some(b.pos) && !c.manual_workplace)
+                                    .map(|(i, _)| i)
+                                    .collect();
+                                let over = (assigned.len() as i32 - b.workers_target).max(0) as usize;
+                                if over > 0 {
+                                    // снимем часть: берём тех, кто дальше всего от здания
+                                    assigned.sort_by_key(|&i| {
+                                        let c = &citizens[i];
+                                        (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs()
+                                    });
+                                    for &i in assigned.iter().rev().take(over) {
+                                        let c = &mut citizens[i];
+                                        c.workplace = None;
+                                        if matches!(c.state, CitizenState::GoingToWork | CitizenState::Working) {
+                                            c.state = CitizenState::Idle;
+                                            c.moving = false;
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // 1) генерация задач лесорубками — только если нет активных задач/носильщиков для этого места
+                        // 1) генерация задач лесорубками — ограничиваем по числу назначенных работников на лесорубку
                         if is_day {
                             for b in buildings.iter() {
                                 if b.kind == BuildingKind::Lumberjack {
+                                    // сколько работников закреплено на этой лесорубке
+                                    let workers_here = citizens.iter().filter(|c| c.workplace == Some(b.pos) && c.fed_today).count() as i32;
+                                    if workers_here <= 0 { continue; }
+                                    // лимит задач = работников_here; считаем только Chop-задачи рядом
+                                    let active_tasks_here = jobs.iter().filter(|j| match j.kind { JobKind::ChopWood { pos } => (pos.x - b.pos.x).abs() + (pos.y - b.pos.y).abs() <= 48, _ => false }).count() as i32;
+                                    if active_tasks_here >= workers_here { continue; }
                                     // ищем ближайшее зрелое дерево; если нет в радиусе 24, расширяем до 32
                                     let mut search = |rad: i32| -> Option<IVec2> {
                                         let mut best: Option<(i32, IVec2)> = None;
@@ -872,7 +976,7 @@ fn run() -> Result<()> {
                                     for dy in -24..=24 { for dx in -24..=24 {
                                         if matches!(world.tree_stage(IVec2::new(b.pos.x+dx, b.pos.y+dy)), Some(2)) { stage2_cnt += 1; }
                                     }}
-                                    if let Some(np) = search(24).or_else(|| search(32)) {
+                                    if let Some(np) = search(24).or_else(|| search(32)).or_else(|| search(48)).or_else(|| search(64)) {
                                         let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
                                         if !already {
                                             jobs.push(Job { id: { let id=next_job_id; next_job_id+=1; id }, kind: JobKind::ChopWood { pos: np }, taken: false, done: false });
@@ -897,7 +1001,7 @@ fn run() -> Result<()> {
                             }
                             // 2) назначение задач: ближайший к задаче свободный житель (только те, кто не назначен на работу)
                             // Назначаем только накормленных работников
-                            jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs, &world);
+                            jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs, &world, &buildings);
                             // 3) выполнение задач
                             jobs::process_jobs(&mut citizens, &mut jobs, &mut logs_on_ground, &mut warehouses, &mut resources, &buildings, &mut world, &mut next_job_id);
                         }

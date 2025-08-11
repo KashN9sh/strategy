@@ -10,19 +10,39 @@ fn job_anchor(kind: &JobKind) -> IVec2 {
     }
 }
 
-pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Job>, world: &World) {
+pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Job>, world: &World, buildings: &Vec<Building>) {
     // Для каждой свободной задачи найдём ближайшего свободного жителя
     for (_jid, job) in jobs.iter_mut().enumerate() {
         if job.taken || job.done { continue; }
         let target = job_anchor(&job.kind);
-        if let Some((cid, _)) = citizens
-            .iter()
-            .enumerate()
-            // берём любых свободных (Idle) и не движущихся граждан, даже если у них есть workplace —
-            // задачи имеют приоритет над «привязкой» к рабочему месту
-            .filter(|(_, c)| c.assigned_job.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving && c.fed_today)
-            .min_by_key(|(_, c)| (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs())
-        {
+        // 1) Кандидаты — работники лесорубок (если задача про лес)
+        let mut best: Option<(usize, i32)> = None;
+        let prefers_lumberjack = matches!(job.kind, JobKind::ChopWood { .. } | JobKind::HaulWood { .. });
+        if prefers_lumberjack {
+            for (i, c) in citizens.iter().enumerate() {
+                if c.assigned_job.is_some() || c.moving || !c.fed_today { continue; }
+                // допускаем состояния Idle/Working/GoingToWork — можем переключить на задачу
+                if !matches!(c.state, CitizenState::Idle | CitizenState::Working | CitizenState::GoingToWork) { continue; }
+                if let Some(wp) = c.workplace {
+                    if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
+                        if b.kind == BuildingKind::Lumberjack {
+                            let d = (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs();
+                            if best.map(|(_,bd)| d < bd).unwrap_or(true) { best = Some((i, d)); }
+                        }
+                    }
+                }
+            }
+        }
+        // 2) Фоллбэк — свободные Idle граждане
+        if best.is_none() {
+            for (i, c) in citizens.iter().enumerate() {
+                if c.assigned_job.is_some() || c.moving || !c.fed_today { continue; }
+                if !matches!(c.state, CitizenState::Idle) { continue; }
+                let d = (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs();
+                if best.map(|(_,bd)| d < bd).unwrap_or(true) { best = Some((i, d)); }
+            }
+        }
+        if let Some((cid, _)) = best {
             let c = &mut citizens[cid];
             job.taken = true;
             c.assigned_job = Some(job.id);

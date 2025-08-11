@@ -30,6 +30,7 @@ pub struct Building {
     pub kind: BuildingKind,
     pub pos: IVec2, // координаты тайла
     pub timer_ms: i32,
+    pub workers_target: i32,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
@@ -73,6 +74,8 @@ pub struct Citizen {
     pub path_index: usize,
     // был ли накормлен сегодня (дневная смена)
     pub fed_today: bool,
+    // ручное закрепление за рабочим местом (не пере назначать автоматически)
+    pub manual_workplace: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +104,12 @@ pub struct WarehouseStore {
     pub gold: i32,
     pub iron_ore: i32,
     pub iron_ingots: i32,
+}
+
+impl Default for WarehouseStore {
+    fn default() -> Self {
+        Self { pos: IVec2::new(0,0), wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0, iron_ore: 0, iron_ingots: 0 }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

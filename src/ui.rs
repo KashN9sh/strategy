@@ -12,6 +12,125 @@ pub fn top_panel_height(s: i32) -> i32 {
     pad * 2 + (icon.max(glyph_h)) * 2 + 6 * s
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct BuildingPanelLayout { pub x: i32, pub y: i32, pub w: i32, pub h: i32, pub minus_x: i32, pub minus_y: i32, pub minus_w: i32, pub minus_h: i32, pub plus_x: i32, pub plus_y: i32, pub plus_w: i32, pub plus_h: i32 }
+
+pub fn layout_building_panel(fw: i32, fh: i32, s: i32) -> BuildingPanelLayout {
+    let padb = 8 * s;
+    let bottom_h = bottom_panel_height(s);
+    // Компактная плашка слева, не на всю ширину
+    let w = (fw as f32 * 0.33) as i32; // треть экрана
+    let panel_h = 64 * s; // достаточно для 3 строк
+    let x = padb;
+    let y = fh - bottom_h - panel_h - 6 * s;
+    // Кнопки +/-
+    let minus_w = 14 * s; let minus_h = 14 * s; let plus_w = 14 * s; let plus_h = 14 * s;
+    let minus_x = x + w - (plus_w + minus_w + 12 * s);
+    // выравниваем по строке Workers (см. draw_building_panel: y + 6*s + line_h)
+    let px = 2 * s; let line_h = (5 * px).max(10 * s) + 4 * s; let workers_y = y + 6 * s + line_h;
+    let minus_y = workers_y - 2 * s;
+    let plus_x = x + w - (plus_w + 4 * s);
+    let plus_y = workers_y - 2 * s;
+    BuildingPanelLayout { x, y, w, h: panel_h, minus_x, minus_y, minus_w, minus_h, plus_x, plus_y, plus_w, plus_h }
+}
+
+fn resource_colors_for_building(kind: BuildingKind) -> (Option<[u8;4]>, Vec<[u8;4]>) {
+    // цвета из верхней панели
+    let wood = [110,70,30,255];
+    let stone = [120,120,120,255];
+    let clay = [150,90,70,255];
+    let bricks = [180,120,90,255];
+    let wheat = [200,180,80,255];
+    let flour = [210,210,180,255];
+    let bread = [200,160,120,255];
+    let fish = [100,140,200,255];
+    let iron_ore = [90,90,110,255];
+    let iron_ingot = [190,190,210,255];
+    match kind {
+        BuildingKind::Lumberjack => (Some(wood), vec![]),
+        BuildingKind::StoneQuarry => (Some(stone), vec![]),
+        BuildingKind::ClayPit => (Some(clay), vec![]),
+        BuildingKind::IronMine => (Some(iron_ore), vec![]),
+        BuildingKind::WheatField => (Some(wheat), vec![]),
+        BuildingKind::Mill => (Some(flour), vec![wheat]),
+        BuildingKind::Kiln => (Some(bricks), vec![clay, wood]),
+        BuildingKind::Bakery => (Some(bread), vec![flour, wood]),
+        BuildingKind::Fishery => (Some(fish), vec![]),
+        BuildingKind::Smelter => (Some(iron_ingot), vec![iron_ore, wood]),
+        _ => (None, vec![]),
+    }
+}
+
+pub fn draw_building_panel(
+    frame: &mut [u8], fw: i32, fh: i32, s: i32,
+    kind: BuildingKind, workers_current: i32, workers_target: i32,
+    prod_label: &[u8], cons_label: Option<&[u8]>,
+) {
+    let layout = layout_building_panel(fw, fh, s);
+    // фон
+    fill_rect(frame, fw, fh, layout.x + 2 * s, layout.y + 2 * s, layout.w, layout.h, [0,0,0,100]);
+    fill_rect(frame, fw, fh, layout.x, layout.y, layout.w, layout.h, [0,0,0,160]);
+    let pad = 8 * s; let px = 2 * s; let icon = 10 * s;
+    let mut cx = layout.x + pad;
+    // название
+    let title = match kind {
+        BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
+        BuildingKind::House => b"House".as_ref(),
+        BuildingKind::Warehouse => b"Warehouse".as_ref(),
+        BuildingKind::Forester => b"Forester".as_ref(),
+        BuildingKind::StoneQuarry => b"Quarry".as_ref(),
+        BuildingKind::ClayPit => b"Clay Pit".as_ref(),
+        BuildingKind::Kiln => b"Kiln".as_ref(),
+        BuildingKind::WheatField => b"Wheat Field".as_ref(),
+        BuildingKind::Mill => b"Mill".as_ref(),
+        BuildingKind::Bakery => b"Bakery".as_ref(),
+        BuildingKind::Fishery => b"Fishery".as_ref(),
+        BuildingKind::IronMine => b"Iron Mine".as_ref(),
+        BuildingKind::Smelter => b"Smelter".as_ref(),
+    };
+    let mut yline = layout.y + 6 * s;
+    draw_text_mini(frame, fw, fh, cx, yline, title, [230,230,230,255], s);
+    // шаг строк
+    let line_h = (5 * px).max(icon) + 4 * s; // высота глифа + отступ
+    // workers
+    yline += line_h;
+    let workers_text = b"Workers";
+    draw_text_mini(frame, fw, fh, cx, yline, workers_text, [200,200,200,255], s);
+    let mut valx = cx + text_w(workers_text, s) + 6 * s;
+    draw_number(frame, fw, fh, valx, yline, workers_current.max(0) as u32, [255,255,255,255], s);
+    valx += number_w(workers_current.max(0) as u32, s);
+    draw_glyph_3x5(frame, fw, fh, valx, yline, b'/', [180,180,180,255], px);
+    valx += 4 * px;
+    draw_number(frame, fw, fh, valx, yline, workers_target.max(0) as u32, [220,220,220,255], s);
+    // +/-
+    fill_rect(frame, fw, fh, layout.minus_x, layout.minus_y, layout.minus_w, layout.minus_h, [120, 100, 80, 220]);
+    fill_rect(frame, fw, fh, layout.plus_x, layout.plus_y, layout.plus_w, layout.plus_h, [120, 100, 80, 220]);
+    // минус знак
+    fill_rect(frame, fw, fh, layout.minus_x + 3 * s, layout.minus_y + layout.minus_h/2 - s, layout.minus_w - 6 * s, 2 * s, [230,230,230,255]);
+    // плюс знак
+    let cxp = layout.plus_x + layout.plus_w/2; let cyp = layout.plus_y + layout.plus_h/2;
+    fill_rect(frame, fw, fh, cxp - (layout.plus_w/2 - 3 * s), cyp - s, layout.plus_w - 6 * s, 2 * s, [230,230,230,255]);
+    fill_rect(frame, fw, fh, cxp - s, cyp - (layout.plus_h/2 - 3 * s), 2 * s, layout.plus_h - 6 * s, [230,230,230,255]);
+    // production/consumption c иконками ресурсов
+    yline += line_h;
+    let (prod_col_opt, cons_cols) = resource_colors_for_building(kind);
+    let mut prod_x = cx;
+    if let Some(col) = prod_col_opt {
+        fill_rect(frame, fw, fh, prod_x, yline, icon, icon, col);
+        prod_x += icon + 6 * s;
+    }
+    draw_text_mini(frame, fw, fh, prod_x, yline, prod_label, [220,220,220,255], s);
+    if let Some(c) = cons_label {
+        let mut con_x = cx + text_w(prod_label, s) + 12 * s + (if prod_col_opt.is_some() { icon + 6 * s } else { 0 });
+        for (idx, col) in cons_cols.iter().enumerate() {
+            if idx > 0 { con_x += 2 * s; }
+            fill_rect(frame, fw, fh, con_x, yline, icon, icon, *col);
+            con_x += icon + 4 * s;
+        }
+        draw_text_mini(frame, fw, fh, con_x, yline, c, [200,200,200,255], s);
+    }
+}
+
 pub fn draw_ui(
     frame: &mut [u8], fw: i32, fh: i32,
     resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind,
