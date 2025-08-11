@@ -215,7 +215,13 @@ fn run() -> Result<()> {
         let water_row = rows-1;
         let water_full = cell_rgba(0, water_row);
         let mut water_edges_raw: Vec<Vec<u8>> = Vec::new();
-        for cx in 1..cols { water_edges_raw.push(cell_rgba(cx, water_row)); }
+        // тайлы 2..8 (1-based) → cx=1..=7
+        for cx in 1..=7 { if cx < cols { water_edges_raw.push(cell_rgba(cx, water_row)); } }
+        // Варианты глины: 2-я строка, первые 3 спрайта
+        let clay_row = 1u32.min(rows-1);
+        let clay_cols = cols.min(3);
+        let mut clay_variants_raw: Vec<Vec<u8>> = Vec::new();
+        for cx in 0..clay_cols { clay_variants_raw.push(cell_rgba(cx, clay_row)); }
         // База для ромбической маски (на случай фоллбека и оверлеев deposits)
         let def0 = grass_variants_raw.get(0).cloned().unwrap_or_else(|| cell_rgba(0,0));
         let def1 = grass_variants_raw.get(1).cloned().unwrap_or_else(|| def0.clone());
@@ -235,6 +241,8 @@ fn run() -> Result<()> {
         atlas.base_iron = dep_tile.clone();
         // сохраним вариации травы — будем использовать при рендере PNG-тайлов
         atlas.grass_variants = grass_variants_raw;
+        atlas.clay_variants = clay_variants_raw;
+        atlas.water_edges = water_edges_raw;
         // заглушки для deposits из старого tiles.png отсутствуют — оставим пустыми, оверлеи не обязательны
     } else if let Ok(img) = image::open("assets/tiles.png") {
         // Старый путь: 6 тайлов в строку: grass, forest, water, clay, stone, iron
@@ -636,12 +644,43 @@ fn run() -> Result<()> {
                                         render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
                                     }
                                     TileKind::Water => {
-                                        render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                        // Автоберег: по соседям суши выбираем подходящий edge-спрайт, иначе — чистая вода
+                                        let land_n = world.get_tile(mx, my-1) != TileKind::Water;
+                                        let land_e = world.get_tile(mx+1, my) != TileKind::Water;
+                                        let land_s = world.get_tile(mx, my+1) != TileKind::Water;
+                                        let land_w = world.get_tile(mx-1, my) != TileKind::Water;
+                                        // Диагонали, чтобы отличить «выпуклый» угол от шва двух прямых
+                                        let land_ne = world.get_tile(mx+1, my-1) != TileKind::Water;
+                                        let land_nw = world.get_tile(mx-1, my-1) != TileKind::Water;
+                                        let land_se = world.get_tile(mx+1, my+1) != TileKind::Water;
+                                        let land_sw = world.get_tile(mx-1, my+1) != TileKind::Water;
+                                        if !atlas.water_edges.is_empty() && (land_n || land_e || land_s || land_w) {
+                                            // Приоритет: сначала «выпуклые» углы (когда диагональ — вода), затем прямые стороны
+                                            let idx_opt: Option<usize> =
+                                                if land_n && land_e && !land_ne { Some(7) } // top-right (N|E)
+                                                else if land_n && land_w && !land_nw { Some(4) } // top-left (N|W)
+                                                else if land_s && land_e && !land_se { Some(5) } // bottom-right (S|E)
+                                                else if land_s && land_w && !land_sw { Some(6) } // bottom-left (S|W)
+                                                else if land_n { Some(0) }
+                                                else if land_w { Some(1) }
+                                                else if land_e { Some(2) }
+                                                else if land_s { Some(3) }
+                                                else { None };
+                                            if let Some(mut idx) = idx_opt {
+                                                if idx >= atlas.water_edges.len() { idx = atlas.water_edges.len()-1; }
+                                                let spr = &atlas.water_edges[idx];
+                                                render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                            } else {
+                                                render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                            }
+                                        } else {
+                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                                        }
                                     }
                                 }
                             } else {
                                 // процедурный ромб
-                                atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
+                            atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
                             }
 
                             // сетка
@@ -695,15 +734,22 @@ fn run() -> Result<()> {
                                       let extra_h = (draw_h - diamond_h).max(0);
                                       let top_left_x = screen_pos.x - draw_w / 2;
                                       let top_left_y = screen_pos.y - atlas.half_h - extra_h;
-                                       if world.has_clay_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
-                                       }
-                                       if world.has_stone_deposit(tp) {
+                                      if world.has_clay_deposit(tp) {
+                                           // выбор варианта глины по координате
+                                           if !atlas.clay_variants.is_empty() {
+                                               let idx = ((mx as i64 * 83492791 ^ my as i64 * 29765723) & 0x7fffffff) as usize;
+                                               let spr = &atlas.clay_variants[idx % atlas.clay_variants.len()];
+                                               render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                                           } else {
+                                               render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                                           }
+                                      }
+                                      if world.has_stone_deposit(tp) {
                                            render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_stone, atlas.base_w, atlas.base_h, draw_w, draw_h, 220);
-                                       }
-                                       if world.has_iron_deposit(tp) {
+                                      }
+                                      if world.has_iron_deposit(tp) {
                                            render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_iron, atlas.base_w, atlas.base_h, draw_w, draw_h, [200, 205, 220], 140, 240);
-                                       }
+                                      }
                                   } else {
                                       if world.has_clay_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 120, 80, 120]); }
                                       if world.has_stone_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 200, 200, 120]); }
@@ -734,7 +780,7 @@ fn run() -> Result<()> {
 
                     // Отрисуем здания по глубине
                     if buildings_dirty {
-                        buildings.sort_by_key(|b| b.pos.x + b.pos.y);
+                    buildings.sort_by_key(|b| b.pos.x + b.pos.y);
                         buildings_dirty = false;
                     }
                     for b in buildings.iter() {
@@ -988,19 +1034,19 @@ fn run() -> Result<()> {
                                         // считаем сколько уже назначено на это здание
                                         let current = citizens.iter().filter(|c| c.workplace == Some(b.pos)).count() as i32;
                                         if current >= b.workers_target { continue; }
-                                        if let Some((ci, _)) = citizens.iter()
-                                            .enumerate()
+                                            if let Some((ci, _)) = citizens.iter()
+                                                .enumerate()
                                             .filter(|(_, c)| matches!(c.state, CitizenState::Idle | CitizenState::Sleeping) && !c.moving && !c.manual_workplace)
-                                            .min_by_key(|(_, c)| (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs())
-                                        {
-                                            let c = &mut citizens[ci];
-                                            if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
-                                            c.workplace = Some(b.pos);
-                                            c.target = b.pos;
+                                                .min_by_key(|(_, c)| (c.pos.x - b.pos.x).abs() + (c.pos.y - b.pos.y).abs())
+                                            {
+                                                let c = &mut citizens[ci];
+                                                if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
+                                                c.workplace = Some(b.pos);
+                                                c.target = b.pos;
                                             plan_path(&world, c, b.pos);
-                                            c.moving = true;
-                                            c.progress = 0.0;
-                                            c.state = CitizenState::GoingToWork;
+                                                c.moving = true;
+                                                c.progress = 0.0;
+                                                c.state = CitizenState::GoingToWork;
                                         }
                                     }
                                 }
@@ -1044,14 +1090,14 @@ fn run() -> Result<()> {
                                     if active_tasks_here >= workers_here { continue; }
                                     // ищем ближайшее зрелое дерево; если нет в радиусе 24, расширяем до 32
                                     let mut search = |rad: i32| -> Option<IVec2> {
-                                        let mut best: Option<(i32, IVec2)> = None;
+                                    let mut best: Option<(i32, IVec2)> = None;
                                         for dy in -rad..=rad { for dx in -rad..=rad {
-                                            let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
-                                            if matches!(world.tree_stage(np), Some(2)) {
-                                                let d = dx.abs() + dy.abs();
-                                                if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
-                                            }
-                                        }}
+                                        let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
+                                        if matches!(world.tree_stage(np), Some(2)) {
+                                            let d = dx.abs() + dy.abs();
+                                            if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
+                                        }
+                                    }}
                                         best.map(|(_,p)| p)
                                     };
                                     // посчитаем количество stage2 в базовом радиусе для дебага
@@ -1269,7 +1315,7 @@ fn run() -> Result<()> {
                                                     if ok {
                                                         c.carrying = None; // глину потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
-                                                         c.carrying = Some((ResourceKind::Bricks, 1));
+                                                            c.carrying = Some((ResourceKind::Bricks, 1));
                                                          plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }

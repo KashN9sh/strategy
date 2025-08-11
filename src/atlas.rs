@@ -10,8 +10,10 @@ pub struct TileAtlas {
     pub grass: Vec<u8>,
     pub forest: Vec<u8>,
     pub water_frames: Vec<Vec<u8>>,
-    // сырые PNG-спрайты вариаций травы (для прямого блита без маски)
-    pub grass_variants: Vec<Vec<u8>>,
+    // вариативные PNG-спрайты
+    pub grass_variants: Vec<Vec<u8>>, // для целикового блита
+    pub clay_variants: Vec<Vec<u8>>,  // варианты глины из спрайтшита
+    pub water_edges: Vec<Vec<u8>>,    // кромки воды (последняя строка, ячейки 2..8)
     // предмасштабированные и замаскированные наложения месторождений
     pub clay: Vec<u8>,
     pub stone: Vec<u8>,
@@ -29,7 +31,7 @@ pub struct TileAtlas {
 
 impl TileAtlas {
     pub fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
+        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay_variants: Vec::new(), water_edges: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
     }
 
     pub fn ensure_zoom(&mut self, zoom: f32) {
