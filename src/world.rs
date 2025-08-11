@@ -89,7 +89,17 @@ impl World {
                         let tx = res.cx * CHUNK_W + lx;
                         let ty = res.cy * CHUNK_H + ly;
                         if !self.removed_trees.contains(&(tx, ty)) {
-                            self.trees.insert((tx, ty), Tree { stage: 2, age_ms: 0 });
+                            // Детерминированное распределение зрелости по координатам и seed:
+                            // ~15% stage0, ~30% stage1, ~55% stage2
+                            let mut v = (tx as i64).wrapping_mul(0x9E3779B97F4A7C15u64 as i64)
+                                ^ (ty as i64).wrapping_mul(0xC2B2AE3D27D4EB4Fu64 as i64)
+                                ^ (self.seed as i64);
+                            // xorshift64*
+                            v ^= v >> 12; v ^= v << 25; v ^= v >> 27;
+                            let u = ((v.wrapping_mul(0x2545F4914F6CDD1D) >> 11) & 0xFFFF_FFFF) as u32;
+                            let r = (u as f32) / (u32::MAX as f32); // 0..1
+                            let stage = if r < 0.15 { 0 } else if r < 0.45 { 1 } else { 2 };
+                            self.trees.insert((tx, ty), Tree { stage, age_ms: 0 });
                         }
                     }
                     // заполним кэш месторождений (только для неводных клеток)

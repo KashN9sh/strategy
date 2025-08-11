@@ -71,6 +71,8 @@ pub struct Citizen {
     // путь (последовательность клеток) и текущий индекс шага
     pub path: Vec<IVec2>,
     pub path_index: usize,
+    // был ли накормлен сегодня (дневная смена)
+    pub fed_today: bool,
 }
 
 #[derive(Clone, Debug)]

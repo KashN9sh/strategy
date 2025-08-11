@@ -20,7 +20,7 @@ pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Jo
             .enumerate()
             // берём любых свободных (Idle) и не движущихся граждан, даже если у них есть workplace —
             // задачи имеют приоритет над «привязкой» к рабочему месту
-            .filter(|(_, c)| c.assigned_job.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving)
+            .filter(|(_, c)| c.assigned_job.is_none() && matches!(c.state, CitizenState::Idle) && !c.moving && c.fed_today)
             .min_by_key(|(_, c)| (c.pos.x - target.x).abs() + (c.pos.y - target.y).abs())
         {
             let c = &mut citizens[cid];

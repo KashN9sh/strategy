@@ -255,6 +255,7 @@ fn run() -> Result<()> {
     let mut water_anim_time: f32 = 0.0;
     let mut show_grid = false;
     let mut show_forest_overlay = false;
+    let mut show_tree_stage_overlay = false;
     let mut show_ui = true;
     let mut cursor_xy = IVec2::new(0, 0);
     let mut fps_ema: f32 = 60.0;
@@ -266,6 +267,13 @@ fn run() -> Result<()> {
     const DAY_LENGTH_MS: f32 = 120_000.0;
     const START_HOUR: f32 = 8.0; // старт в 08:00
     let mut world_clock_ms: f32 = DAY_LENGTH_MS * (START_HOUR / 24.0);
+    // Предыдущее состояние дня/ночи для детекции рассвета
+    let mut prev_is_day_flag: bool = {
+        let t0 = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+        let angle0 = t0 * std::f32::consts::TAU;
+        let daylight0 = 0.5 - 0.5 * angle0.cos();
+        daylight0 > 0.25
+    };
 
     let window = window.clone();
     event_loop.run(move |event, elwt| {
@@ -290,6 +298,7 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.speed_3x) { speed_mult = 3.0; }
                         if key == PhysicalKey::Code(KeyCode::KeyG) { show_grid = !show_grid; }
                         if key == PhysicalKey::Code(KeyCode::KeyH) { show_forest_overlay = !show_forest_overlay; }
+                        if key == PhysicalKey::Code(KeyCode::KeyJ) { show_tree_stage_overlay = !show_tree_stage_overlay; }
                         if key == PhysicalKey::Code(KeyCode::KeyU) { show_ui = !show_ui; }
                         if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
                         if key == PhysicalKey::Code(KeyCode::KeyP) { path_debug_mode = !path_debug_mode; path_sel_a=None; path_sel_b=None; last_path=None; }
@@ -455,6 +464,7 @@ fn run() -> Result<()> {
                                             pending_input: None,
                                             path: Vec::new(),
                                             path_index: 0,
+                                             fed_today: false,
                                         });
                                         population += 1;
                                       } else if selected_building == BuildingKind::Warehouse {
@@ -557,6 +567,10 @@ fn run() -> Result<()> {
                                       render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
                                   } else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }}
                                   else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
+                                  if show_tree_stage_overlay {
+                                      let col = match stage { 0 => [80,160,220,200], 1 => [220,200,80,200], _ => [220,80,80,220] };
+                                      render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, col);
+                                  }
                               }
                               // оверлеи месторождений (простая заливка-рамка)
                               let tp = IVec2::new(mx, my);
@@ -740,6 +754,9 @@ fn run() -> Result<()> {
                 let mut did_step = false;
                 if !paused {
                     while accumulator_ms >= step_ms {
+                        // Подтянем готовые чанки перед генерацией задач, чтобы деревья из новых чанков
+                        // были видны логике (особенно если камера сдвинулась).
+                        world.integrate_ready_chunks();
                         simulate(&mut buildings, &mut world, &mut resources, &mut warehouses, step_ms as i32);
                         world.grow_trees(step_ms as i32);
                         world_clock_ms = (world_clock_ms + step_ms) % DAY_LENGTH_MS;
@@ -749,6 +766,22 @@ fn run() -> Result<()> {
                         let angle = t * std::f32::consts::TAU;
                         let daylight = 0.5 - 0.5 * angle.cos();
                         let is_day = daylight > 0.25; // простой порог
+                        // На рассвете (переход ночь→день) сбрасываем флаг кормления и пытаемся накормить каждого
+                        if !prev_is_day_flag && is_day {
+                            for c in citizens.iter_mut() { c.fed_today = false; }
+                            // Одна попытка на жителя: хлеб приоритетнее, из складов затем из глобала
+                            for c in citizens.iter_mut() {
+                                let mut consumed = false;
+                                for w in warehouses.iter_mut() { if w.bread > 0 { w.bread -= 1; consumed = true; break; } }
+                                if !consumed { for w in warehouses.iter_mut() { if w.fish > 0 { w.fish -= 1; consumed = true; break; } } }
+                                if !consumed {
+                                    if resources.bread > 0 { resources.bread -= 1; consumed = true; }
+                                    else if resources.fish > 0 { resources.fish -= 1; consumed = true; }
+                                }
+                                if consumed { c.fed_today = true; resources.gold += 1; }
+                            }
+                        }
+                        prev_is_day_flag = is_day;
 
                         // Ночная рутина: идём домой и спим, сбрасываем работу
                         if !is_day {
@@ -769,6 +802,8 @@ fn run() -> Result<()> {
                                     }
                                 }
                             }
+                            // Сбросим захваты задач, чтобы утром их можно было перераспределить
+                            for j in jobs.iter_mut() { j.taken = false; }
                         }
                         // Утро: разбудить спящих и отменить возвращение домой, если день начался
                         if is_day {
@@ -820,21 +855,31 @@ fn run() -> Result<()> {
                         if is_day {
                             for b in buildings.iter() {
                                 if b.kind == BuildingKind::Lumberjack {
-                                    // ищем ближайшее дерево в радиусе R и публикуем задачу, если её ещё нет
-                                    const R: i32 = 16;
-                                    let mut best: Option<(i32, IVec2)> = None;
-                                    for dy in -R..=R { for dx in -R..=R {
-                                        let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
-                                        if matches!(world.tree_stage(np), Some(2)) {
-                                            let d = dx.abs() + dy.abs();
-                                            if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
-                                        }
+                                    // ищем ближайшее зрелое дерево; если нет в радиусе 24, расширяем до 32
+                                    let mut search = |rad: i32| -> Option<IVec2> {
+                                        let mut best: Option<(i32, IVec2)> = None;
+                                        for dy in -rad..=rad { for dx in -rad..=rad {
+                                            let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
+                                            if matches!(world.tree_stage(np), Some(2)) {
+                                                let d = dx.abs() + dy.abs();
+                                                if best.map(|(bd, _)| d < bd).unwrap_or(true) { best = Some((d, np)); }
+                                            }
+                                        }}
+                                        best.map(|(_,p)| p)
+                                    };
+                                    // посчитаем количество stage2 в базовом радиусе для дебага
+                                    let mut stage2_cnt = 0;
+                                    for dy in -24..=24 { for dx in -24..=24 {
+                                        if matches!(world.tree_stage(IVec2::new(b.pos.x+dx, b.pos.y+dy)), Some(2)) { stage2_cnt += 1; }
                                     }}
-                                    if let Some((_, np)) = best {
+                                    if let Some(np) = search(24).or_else(|| search(32)) {
                                         let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
                                         if !already {
                                             jobs.push(Job { id: { let id=next_job_id; next_job_id+=1; id }, kind: JobKind::ChopWood { pos: np }, taken: false, done: false });
+                                            // println!("Лесорубка {:?}: публикуем ChopWood {:?} (stage2 в радиусе 24: {})", b.pos, np, stage2_cnt);
                                         }
+                                    } else {
+                                        // println!("Лесорубка {:?}: нет зрелых деревьев (stage2 в радиусе 24: {})", b.pos, stage2_cnt);
                                     }
                                 }
                             }
@@ -851,6 +896,7 @@ fn run() -> Result<()> {
                                 }
                             }
                             // 2) назначение задач: ближайший к задаче свободный житель (только те, кто не назначен на работу)
+                            // Назначаем только накормленных работников
                             jobs::assign_jobs_nearest_worker(&mut citizens, &mut jobs, &world);
                             // 3) выполнение задач
                             jobs::process_jobs(&mut citizens, &mut jobs, &mut logs_on_ground, &mut warehouses, &mut resources, &buildings, &mut world, &mut next_job_id);
@@ -864,7 +910,10 @@ fn run() -> Result<()> {
                                 if c.idle_timer_ms > 5000 { c.assigned_job = None; c.carrying_log = false; c.idle_timer_ms = 0; }
                                 // смена состояний при прибытии
                                 match c.state {
-                                    CitizenState::GoingToWork => { c.state = CitizenState::Working; }
+                                    CitizenState::GoingToWork => {
+                                        // Не пускаем работать, если не накормлен
+                                        if c.fed_today { c.state = CitizenState::Working; } else { c.state = CitizenState::Idle; }
+                                    }
                                     CitizenState::GoingHome => { if c.pos == c.home { c.state = CitizenState::Sleeping; } }
                                     CitizenState::GoingToDeposit => {
                                         if let Some((kind, amt)) = c.carrying.take() {
@@ -947,6 +996,7 @@ fn run() -> Result<()> {
                         if is_day {
                             for c in citizens.iter_mut() {
                                 if !matches!(c.state, CitizenState::Working) { continue; }
+                                if !c.fed_today { c.state = CitizenState::Idle; continue; }
                                 let Some(wp) = c.workplace else { continue; };
                                 if c.pos != wp { continue; }
                                 if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
@@ -1305,28 +1355,7 @@ fn simulate(
         b.timer_ms += dt_ms;
         match b.kind {
             BuildingKind::Lumberjack => { /* Производство выполняют жители через систему задач */ }
-            BuildingKind::House => {
-                // каждые 5с: потребляет еду (хлеб или рыбу) и даёт золото
-                if b.timer_ms >= 5000 {
-                    b.timer_ms = 0;
-                    // сначала пробуем брать еду со складов, затем из глобальных ресурсов
-                    let mut consumed = false;
-                    // хлеб приоритетнее
-                    for w in warehouses.iter_mut() {
-                        if w.bread > 0 { w.bread -= 1; consumed = true; break; }
-                    }
-                    if !consumed {
-                        for w in warehouses.iter_mut() {
-                            if w.fish > 0 { w.fish -= 1; consumed = true; break; }
-                        }
-                    }
-                    if !consumed {
-                        if resources.bread > 0 { resources.bread -= 1; consumed = true; }
-                        else if resources.fish > 0 { resources.fish -= 1; consumed = true; }
-                    }
-                    if consumed { resources.gold += 1; }
-                }
-            }
+            BuildingKind::House => { /* Питание обрабатываем на рассвете, дом тут ничего не делает */ }
             BuildingKind::Warehouse => { /* пока пассивный */ }
             BuildingKind::Forester => { /* Производство выполняют жители */ }
             BuildingKind::StoneQuarry => { /* Производство выполняют жители */ }
