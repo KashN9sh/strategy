@@ -147,6 +147,9 @@ pub fn draw_ui(
     entry(frame, &mut xcur, [210,210,180,255], resources.flour, b"Flour", s);
     entry(frame, &mut xcur, [200,160,120,255], resources.bread, b"Bread", s);
     entry(frame, &mut xcur, [100,140,200,255], resources.fish, b"Fish", s);
+    // металлургия
+    entry(frame, &mut xcur, [90,90,110,255], resources.iron_ore, b"Iron Ore", s);
+    entry(frame, &mut xcur, [190,190,210,255], resources.iron_ingots, b"Iron Ingot", s);
 
     // Рисуем tooltip, если есть
     if let Some((anchor_x, text)) = tooltip.take() {
