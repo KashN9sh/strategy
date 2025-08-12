@@ -49,6 +49,25 @@ pub struct Resources {
     pub iron_ingots: i32,
 }
 
+// Единый источник стоимости зданий для логики и UI
+pub fn building_cost(kind: BuildingKind) -> Resources {
+    match kind {
+        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10, ..Default::default() },
+        BuildingKind::House => Resources { wood: 10, gold: 15, ..Default::default() },
+        BuildingKind::Warehouse => Resources { wood: 20, gold: 30, ..Default::default() },
+        BuildingKind::Forester => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::StoneQuarry => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::ClayPit => Resources { wood: 10, gold: 10, ..Default::default() },
+        BuildingKind::Kiln => Resources { wood: 15, gold: 15, ..Default::default() },
+        BuildingKind::WheatField => Resources { wood: 5, gold: 5, ..Default::default() },
+        BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
+        BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
+        BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
+        BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
+        BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Citizen {
     pub pos: IVec2,      // текущая клетка
@@ -57,7 +76,6 @@ pub struct Citizen {
     pub progress: f32,   // 0..1 прогресс между клетками
     pub carrying_log: bool,
     pub assigned_job: Option<u64>,
-    pub deliver_to: IVec2,
     // анти-залипание: таймер ожидания у цели (мс)
     pub idle_timer_ms: i32,
     // суточный цикл и работа
@@ -127,8 +145,7 @@ pub enum ResourceKind {
     IronIngot,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DepositKind { Clay, Stone, Iron }
+// удалено: DepositKind (не используется)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CitizenState {
@@ -144,3 +161,24 @@ pub enum CitizenState {
  
 
 
+// Подсчёт суммарного дерева на складах
+pub fn warehouses_total_wood(warehouses: &Vec<WarehouseStore>) -> i32 {
+    warehouses.iter().map(|w| w.wood).sum()
+}
+
+// Потратить дерево с учётом складов; если складов нет — тратим из общих ресурсов
+pub fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, mut amount: i32) -> bool {
+    if amount <= 0 { return true; }
+    if warehouses.is_empty() {
+        if resources.wood >= amount { resources.wood -= amount; return true; } else { return false; }
+    }
+    let total: i32 = warehouses_total_wood(warehouses);
+    if total < amount { return false; }
+    for w in warehouses.iter_mut() {
+        if amount == 0 { break; }
+        let take = amount.min(w.wood);
+        w.wood -= take;
+        amount -= take;
+    }
+    true
+}

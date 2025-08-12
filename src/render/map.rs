@@ -1,0 +1,184 @@
+use glam::IVec2;
+
+use crate::atlas::{TileAtlas, RoadAtlas, building_sprite_index};
+use noise::NoiseFn;
+use crate::render::tiles;
+use crate::types::{Building, BuildingKind};
+use crate::palette::building_color;
+use crate::world::World;
+
+pub fn draw_terrain_and_overlays(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    world: &mut World,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    water_frame: usize,
+    show_grid: bool,
+    show_forest_overlay: bool,
+    tree_atlas: &Option<crate::atlas::TreeAtlas>,
+    road_atlas: &RoadAtlas,
+) {
+    for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+        let kind = world.get_tile(mx, my);
+        let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
+        // Масштабируем исходный PNG-тайл под ширину ромба; высота может быть больше ромба,
+        // поэтому сдвигаем верх так, чтобы низ PNG совпал с низом ромба (как было в main.rs)
+        let tile_w_px = atlas.half_w * 2 + 1;
+        let draw_w = tile_w_px;
+        let scale = tile_w_px as f32 / atlas.base_w.max(1) as f32;
+        let draw_h = (atlas.base_h as f32 * scale).round() as i32;
+        let top_left_x = screen_pos.x - draw_w / 2;
+        let top_left_y = screen_pos.y + atlas.half_h - draw_h; // нижний край PNG совпадает с нижней вершиной ромба
+        if atlas.base_loaded {
+            match kind {
+                crate::types::TileKind::Grass => {
+                    let idx = ((mx as i64 * 73856093 ^ my as i64 * 19349663) & 0x7fffffff) as usize;
+                    if !atlas.grass_variants.is_empty() {
+                        let spr = &atlas.grass_variants[idx % atlas.grass_variants.len()];
+                        tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                    } else {
+                        tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                    }
+                }
+                crate::types::TileKind::Forest => {
+                    tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                }
+                crate::types::TileKind::Water => {
+                    let land_n = world.get_tile(mx, my-1) != crate::types::TileKind::Water;
+                    let land_e = world.get_tile(mx+1, my) != crate::types::TileKind::Water;
+                    let land_s = world.get_tile(mx, my+1) != crate::types::TileKind::Water;
+                    let land_w = world.get_tile(mx-1, my) != crate::types::TileKind::Water;
+                    let land_ne = world.get_tile(mx+1, my-1) != crate::types::TileKind::Water;
+                    let land_nw = world.get_tile(mx-1, my-1) != crate::types::TileKind::Water;
+                    let land_se = world.get_tile(mx+1, my+1) != crate::types::TileKind::Water;
+                    let land_sw = world.get_tile(mx-1, my+1) != crate::types::TileKind::Water;
+                    if !atlas.water_edges.is_empty() && (land_n || land_e || land_s || land_w) {
+                        let idx_opt: Option<usize> = if land_n && land_e && !land_ne { Some(7) }
+                            else if land_n && land_w && !land_nw { Some(4) }
+                            else if land_s && land_e && !land_se { Some(5) }
+                            else if land_s && land_w && !land_sw { Some(6) }
+                            else if land_n { Some(0) } else if land_w { Some(1) } else if land_e { Some(2) } else if land_s { Some(3) } else { None };
+                        if let Some(mut idx) = idx_opt { if idx >= atlas.water_edges.len() { idx = atlas.water_edges.len()-1; }
+                            let spr = &atlas.water_edges[idx]; tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                        } else { tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h); }
+                    } else { tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h); }
+                }
+            }
+        } else { atlas.blit(frame, width, height, screen_pos.x, screen_pos.y, kind, water_frame); }
+        if show_grid { tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20,20,20,255]); }
+        // дороги (процедурный спрайт по маске соседей)
+        if world.is_road(IVec2::new(mx, my)) {
+            let nb = [ (0,-1,0b0001), (1,0,0b0010), (0,1,0b0100), (-1,0,0b1000) ];
+            let mut mask: u8 = 0;
+            for (dx,dy,bit) in nb { if world.is_road(IVec2::new(mx+dx, my+dy)) { mask |= bit; } }
+            let spr = &road_atlas.sprites[mask as usize];
+            let w = road_atlas.w; let h = road_atlas.h;
+            let top_left_x = screen_pos.x - atlas.half_w;
+            let top_left_y = screen_pos.y - atlas.half_h;
+            tiles::blit_sprite_alpha_noscale_tinted(frame, width, height, top_left_x, top_left_y, spr, w, h, 255);
+        }
+        if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v,50,50,255]); }
+        if world.has_tree(IVec2::new(mx, my)) {
+            let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+            if let Some(ta) = &tree_atlas { if !ta.sprites.is_empty() {
+                let idx = stage.min(ta.sprites.len()-1);
+                let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
+                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h + (atlas.half_h / 2);
+                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
+            } else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }} else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
+        }
+
+        // Оверлеи месторождений (поверх базового тайла)
+        let tp = IVec2::new(mx, my);
+        if kind != crate::types::TileKind::Water {
+            if atlas.base_loaded {
+                // Используем те же draw_w/draw_h/top_left_x/y, что и для базового PNG тайла
+                if world.has_clay_deposit(tp) {
+                    if !atlas.clay_variants.is_empty() {
+                        let idx = ((mx as i64 * 83492791 ^ my as i64 * 29765723) & 0x7fffffff) as usize;
+                        let spr = &atlas.clay_variants[idx % atlas.clay_variants.len()];
+                        tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                    } else {
+                        tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                    }
+                }
+                if world.has_stone_deposit(tp) {
+                    tiles::blit_sprite_alpha_scaled_tinted(frame, width, height, top_left_x, top_left_y, &atlas.base_stone, atlas.base_w, atlas.base_h, draw_w, draw_h, 220);
+                }
+                if world.has_iron_deposit(tp) {
+                    tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_iron, atlas.base_w, atlas.base_h, draw_w, draw_h, [200, 205, 220], 140, 240);
+                }
+            } else {
+                if world.has_clay_deposit(tp) { tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200,120,80,120]); }
+                if world.has_stone_deposit(tp) { tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200,200,200,120]); }
+                if world.has_iron_deposit(tp) { tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [150,140,220,140]); }
+            }
+        }
+    }}
+}
+
+pub fn draw_buildings(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    buildings: &Vec<Building>,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+) {
+    for b in buildings.iter() {
+        let mx = b.pos.x; let my = b.pos.y; if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
+        let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
+        if let Some(ba) = building_atlas {
+            if let Some(idx) = building_sprite_index(b.kind) {
+                if idx < ba.sprites.len() {
+                    let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ba.w as f32; let draw_w = (ba.w as f32 * scale).round() as i32; let draw_h = (ba.h as f32 * scale).round() as i32;
+                    // Привязка здания: нижний центр спрайта должен совпадать с нижней вершиной ромба
+                    // Доп. смещение вниз синхронно с подсветкой, чтобы визуальные базисы совпадали при разных масштабах
+                    let building_off = ((atlas.half_h as f32) * 0.7).round() as i32; // ~30px при max zoom
+                    let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y + atlas.half_h - draw_h + building_off;
+                    tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
+                    continue;
+                }
+            }
+        }
+        let color = building_color(b.kind);
+        tiles::draw_building(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
+    }
+}
+
+// индекс спрайта здания — см. atlas::building_sprite_index
+
+pub fn draw_citizens(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    citizens: &Vec<crate::types::Citizen>,
+    buildings: &Vec<Building>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+) {
+    for c in citizens.iter() {
+        let (fx, fy) = if c.moving { let dx = (c.target.x - c.pos.x) as f32; let dy = (c.target.y - c.pos.y) as f32; (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress) } else { (c.pos.x as f32, c.pos.y as f32) };
+        let sx = ((fx - fy) * atlas.half_w as f32).round() as i32; let sy = ((fx + fy) * atlas.half_h as f32).round() as i32;
+        let screen_pos = screen_center + IVec2::new(sx - cam_snap.x as i32, sy - cam_snap.y as i32);
+        let r = (atlas.half_w as f32 * 0.15).round() as i32;
+        let mut col = [255, 230, 120, 255];
+        if let Some(wp) = c.workplace { if let Some(b) = buildings.iter().find(|b| b.pos == wp) { col = building_color(b.kind); } }
+        tiles::draw_citizen_marker(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), col);
+    }
+}
+
+pub fn draw_debug_path(frame: &mut [u8], width: i32, height: i32, atlas: &TileAtlas, path: &Vec<IVec2>, screen_center: IVec2, cam_snap: glam::Vec2) {
+    for p in path.iter() {
+        let sp = world_to_screen(atlas, screen_center, cam_snap, p.x, p.y);
+        tiles::draw_iso_outline(frame, width, height, sp.x, sp.y, atlas.half_w, atlas.half_h, [50, 200, 240, 255]);
+    }
+}
+
+pub fn world_to_screen(atlas: &TileAtlas, screen_center: IVec2, cam_snap: glam::Vec2, mx: i32, my: i32) -> IVec2 {
+    // Эквивалент обратной проекции: screen_x = (x - y) * half_w, screen_y = (x + y) * half_h
+    let sx = (mx - my) * atlas.half_w - cam_snap.x as i32;
+    let sy = (mx + my) * atlas.half_h - cam_snap.y as i32;
+    screen_center + IVec2::new(sx, sy)
+}
+
+

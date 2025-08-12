@@ -148,6 +148,26 @@ pub struct RoadAtlas {
     half_h: i32,
 }
 
+// Единое соответствие вида здания индексу в `BuildingAtlas`
+pub fn building_sprite_index(kind: crate::types::BuildingKind) -> Option<usize> {
+    use crate::types::BuildingKind::*;
+    match kind {
+        Lumberjack => Some(0),
+        House => Some(1),
+        Warehouse => Some(2),
+        Forester => Some(3),
+        StoneQuarry => Some(4),
+        ClayPit => Some(5),
+        Kiln => Some(6),
+        WheatField => Some(7),
+        Mill => Some(8),
+        Bakery => Some(9),
+        Fishery => Some(10),
+        IronMine => Some(11),
+        Smelter => Some(12),
+    }
+}
+
 impl RoadAtlas {
     pub fn new() -> Self { Self { sprites: Vec::new(), w: 0, h: 0, zoom_px: -1, half_w: 0, half_h: 0 } }
 
@@ -162,7 +182,7 @@ impl RoadAtlas {
     fn build_sprite(&mut self, mask: u8) {
         let mut buf = vec![0u8; (self.w * self.h * 4) as usize];
         // базовая ромбическая заливка дороги
-        Self::draw_diamond(&mut buf, self.w, self.h, self.half_w, self.half_h, [120, 110, 90, 220]);
+        Self::draw_diamond(&mut buf, self.w, self.half_w, self.half_h, [120, 110, 90, 220]);
         // соединительные «полосы» — заранее заметные
         let col = [95, 85, 70, 255];
         let center = (self.half_w, self.half_h);
@@ -187,7 +207,7 @@ impl RoadAtlas {
         self.sprites[mask as usize] = buf;
     }
 
-    fn draw_diamond(buf: &mut [u8], w: i32, h: i32, half_w: i32, half_h: i32, color: [u8;4]) {
+    fn draw_diamond(buf: &mut [u8], w: i32, half_w: i32, half_h: i32, color: [u8;4]) {
         let tile_w = half_w * 2 + 1; let tile_h = half_h * 2 + 1;
         for dy in -half_h..=half_h {
             let t = dy.abs() as f32 / half_h.max(1) as f32;

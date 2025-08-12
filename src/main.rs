@@ -3,18 +3,23 @@ use glam::{IVec2, Vec2};
 mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
 mod world; use world::World;
 mod atlas; use atlas::{TileAtlas, BuildingAtlas};
-mod render { pub mod tiles; }
+mod render { pub mod tiles; pub mod utils; pub mod map; }
 mod ui;
 mod input;
+mod config;
+mod save;
 mod path;
 mod jobs;
+mod controls;
+mod ui_interaction;
+mod game;
+mod palette;
 use pixels::{Pixels, SurfaceTexture};
 use std::time::Instant;
-use noise::NoiseFn;
 use rand::{rngs::StdRng, Rng, SeedableRng};
  
-use std::fs;
-use std::path::Path;
+// use std::fs; // перенесено в config
+// use std::path::Path; // перенесено в config
 use serde::{Serialize, Deserialize};
 // use image::GenericImageView; // не нужен
 use winit::dpi::LogicalSize;
@@ -37,48 +42,11 @@ use winit::window::WindowBuilder;
 
 // --------------- Config / Save ---------------
 
-type Config = input::Config;
-
-type InputConfig = input::InputConfig;
+// типы конфига используются через модуль input/config
 
 // code_from_str перенесён в модуль input
 
-fn load_or_create_config(path: &str) -> Result<(Config, InputConfig)> {
-    if Path::new(path).exists() {
-        let data = fs::read_to_string(path)?;
-        #[derive(Deserialize)]
-        struct FileCfg { config: Config, input: InputConfig }
-        let parsed: FileCfg = toml::from_str(&data)?;
-        Ok((parsed.config, parsed.input))
-    } else {
-        let config = Config { base_step_ms: 33.0, ui_scale_base: 1.6 };
-        let input = InputConfig {
-            move_up: "W".into(),
-            move_down: "S".into(),
-            move_left: "A".into(),
-            move_right: "D".into(),
-            zoom_in: "E".into(),
-            zoom_out: "Q".into(),
-            toggle_pause: "SPACE".into(),
-            speed_0_5x: "DIGIT1".into(),
-            speed_1x: "DIGIT2".into(),
-            speed_2x: "DIGIT3".into(),
-            speed_3x: "DIGIT4".into(),
-            build_lumberjack: "Z".into(),
-            build_house: "X".into(),
-            toggle_road_mode: "R".into(),
-            reset_new_seed: "T".into(),
-            reset_same_seed: "N".into(),
-            save_game: "F5".into(),
-            load_game: "F9".into(),
-        };
-        #[derive(Serialize)]
-        struct FileCfg<'a> { config: &'a Config, input: &'a InputConfig }
-        let toml_text = toml::to_string_pretty(&FileCfg { config: &config, input: &input })?;
-        fs::write(path, toml_text)?;
-        Ok((config, input))
-    }
-}
+// переносено: загрузка/создание конфига в модуль config
 
 type ResolvedInput = input::ResolvedInput;
 
@@ -101,36 +69,9 @@ struct SaveBuilding { kind: BuildingKind, x: i32, y: i32, timer_ms: i32, #[serde
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct SaveTree { x: i32, y: i32, stage: u8, age_ms: i32 }
 
-impl SaveData {
-    fn from_runtime(seed: u64, res: &Resources, buildings: &Vec<Building>, cam_px: Vec2, zoom: f32, world: &world::World) -> Self {
-        let buildings = buildings
-            .iter()
-            .map(|b| SaveBuilding { kind: b.kind, x: b.pos.x, y: b.pos.y, timer_ms: b.timer_ms, workers_target: b.workers_target })
-            .collect();
-        let mut trees = Vec::new();
-        for (&(x, y), tr) in world.trees.iter() { trees.push(SaveTree { x, y, stage: tr.stage, age_ms: tr.age_ms }); }
-        SaveData { seed, resources: *res, buildings, cam_x: cam_px.x, cam_y: cam_px.y, zoom, trees }
-    }
+// перенос в save.rs
 
-    fn to_buildings(&self) -> Vec<Building> {
-        self.buildings
-            .iter()
-            .map(|s| Building { kind: s.kind, pos: IVec2::new(s.x, s.y), timer_ms: s.timer_ms, workers_target: if s.workers_target == 0 { match s.kind { BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Lumberjack => 0, _ => 1 } } else { s.workers_target } })
-            .collect()
-    }
-}
-
-fn save_game(data: &SaveData) -> Result<()> {
-    let txt = serde_json::to_string_pretty(data)?;
-    fs::write("save.json", txt)?;
-    Ok(())
-}
-
-fn load_game() -> Result<SaveData> {
-    let txt = fs::read_to_string("save.json")?;
-    let data: SaveData = serde_json::from_str(&txt)?;
-    Ok(data)
-}
+// перенос в save.rs
 
 fn main() -> Result<()> {
     run()
@@ -149,7 +90,7 @@ fn run() -> Result<()> {
     let mut pixels = Pixels::new(size.width, size.height, surface_texture)?;
 
     // Конфиг
-    let (config, input) = load_or_create_config("config.toml")?;
+    let (config, input) = config::load_or_create("config.toml")?;
     let input = ResolvedInput::from(&input);
 
     // Камера в пикселях мира (изометрических)
@@ -194,7 +135,7 @@ fn run() -> Result<()> {
         let (iw, ih) = img.dimensions();
         let cell_w = 32u32; let cell_h = 32u32;
         let cols = (iw / cell_w).max(1); let rows = (ih / cell_h).max(1);
-        let mut cell_rgba = |cx: u32, cy: u32| -> Vec<u8> {
+        let cell_rgba = |cx: u32, cy: u32| -> Vec<u8> {
             let x0 = cx * cell_w; let y0 = cy * cell_h;
             let mut out = vec![0u8; (cell_w * cell_h * 4) as usize];
             for y in 0..cell_h as usize {
@@ -315,9 +256,9 @@ fn run() -> Result<()> {
     let mut show_ui = true;
     let mut cursor_xy = IVec2::new(0, 0);
     let mut fps_ema: f32 = 60.0;
-    let mut show_ui = true;
+    // удалён дубликат переменной show_ui
     // выбранный житель для ручного назначения на работу (отключено)
-    let mut selected_citizen: Option<usize> = None; // больше не используется для назначения
+    let _selected_citizen: Option<usize> = None; // больше не используется для назначения
     // активная панель здания (по клику)
     let mut active_building_panel: Option<IVec2> = None;
 
@@ -352,23 +293,10 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.zoom_out) { zoom = (zoom * 0.9).max(0.5); }
                         if key == PhysicalKey::Code(input.zoom_in) { zoom = (zoom * 1.1).min(8.0); }
                         if key == PhysicalKey::Code(input.toggle_pause) { paused = !paused; }
-                        if key == PhysicalKey::Code(input.speed_0_5x) { speed_mult = 0.5; }
-                        if key == PhysicalKey::Code(input.speed_1x) { speed_mult = 1.0; }
-                        if key == PhysicalKey::Code(input.speed_2x) { speed_mult = 2.0; }
-                        if key == PhysicalKey::Code(input.speed_3x) { speed_mult = 3.0; }
-                        if key == PhysicalKey::Code(KeyCode::KeyG) { show_grid = !show_grid; }
-                        if key == PhysicalKey::Code(KeyCode::KeyH) { show_forest_overlay = !show_forest_overlay; }
-                        if key == PhysicalKey::Code(KeyCode::KeyJ) { show_tree_stage_overlay = !show_tree_stage_overlay; }
-                        if key == PhysicalKey::Code(KeyCode::KeyU) { show_ui = !show_ui; }
-                        if key == PhysicalKey::Code(input.toggle_road_mode) { road_mode = !road_mode; }
-                        if key == PhysicalKey::Code(KeyCode::KeyP) { path_debug_mode = !path_debug_mode; path_sel_a=None; path_sel_b=None; last_path=None; }
-                        if key == PhysicalKey::Code(input.build_lumberjack) { selected_building = BuildingKind::Lumberjack; }
-                        if key == PhysicalKey::Code(input.build_house) { selected_building = BuildingKind::House; }
-                        if key == PhysicalKey::Code(input.reset_new_seed) { seed = rng.random(); world.reset_noise(seed); buildings.clear(); buildings_dirty = true; citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
-                        if key == PhysicalKey::Code(input.reset_same_seed) { world.reset_noise(seed); buildings.clear(); buildings_dirty = true; citizens.clear(); population = 0; resources = Resources { wood: 20, gold: 100, ..Default::default() }; }
-                        if key == PhysicalKey::Code(input.save_game) { let _ = save_game(&SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom, &world)); }
+                        controls::handle_key_press(key, &input, &mut rng, &mut world, &mut buildings, &mut buildings_dirty, &mut citizens, &mut population, &mut resources, &mut selected_building, &mut show_grid, &mut show_forest_overlay, &mut show_tree_stage_overlay, &mut show_ui, &mut road_mode, &mut path_debug_mode, &mut path_sel_a, &mut path_sel_b, &mut last_path, &mut speed_mult, &mut seed);
+                        if key == PhysicalKey::Code(input.save_game) { let _ = save::save_game(&save::SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom, &world)); }
                         if key == PhysicalKey::Code(input.load_game) {
-                            if let Ok(save) = load_game() {
+                            if let Ok(save) = save::load_game() {
                                 seed = save.seed;
                                 world.reset_noise(seed);
                                 buildings = save.to_buildings(); buildings_dirty = true;
@@ -394,186 +322,26 @@ fn run() -> Result<()> {
                     hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h);
                 }
                 WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } => {
-                    // ЛКМ — попытка построить
                     if button == winit::event::MouseButton::Left {
                         if show_ui {
-                            let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
-                            let bar_h = ui::top_panel_height(ui_s);
-                            // нижняя панель UI
-                            let bottom_bar_h = ui::bottom_panel_height(ui_s);
-                            let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;
-                            // клик по категориям
-                            let mut cx = padb; let cy = by0 + padb;
-                            let cats = [
-                                (ui::UICategory::Housing, b"Housing".as_ref()),
-                                (ui::UICategory::Storage, b"Storage".as_ref()),
-                                (ui::UICategory::Forestry, b"Forestry".as_ref()),
-                                (ui::UICategory::Mining, b"Mining".as_ref()),
-                                (ui::UICategory::Food, b"Food".as_ref()),
-                                (ui::UICategory::Logistics, b"Logistics".as_ref()),
-                            ];
-                            for (cat, label) in cats.iter() {
-                                let bw = ui::button_w_for(label, ui_s);
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, cy, bw, btn_h) { ui_category = *cat; return; }
-                                cx += bw + 6 * ui_s;
-                            }
-                            // клик по зданиям выбранной категории
-                            let mut bx = padb; let by2 = cy + btn_h + 6 * ui_s;
-                             let buildings_for_cat: &[BuildingKind] = match ui_category {
-                                ui::UICategory::Housing => &[BuildingKind::House],
-                                 ui::UICategory::Storage => &[BuildingKind::Warehouse],
-                                 ui::UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
-                                 ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln],
-                                ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
-                                ui::UICategory::Logistics => &[],
-                            };
-                            for &bk in buildings_for_cat.iter() {
-                            let label = match bk {
-                                    BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
-                                    BuildingKind::House => b"House".as_ref(),
-                                    BuildingKind::Warehouse => b"Warehouse".as_ref(),
-                                    BuildingKind::Forester => b"Forester".as_ref(),
-                                    BuildingKind::StoneQuarry => b"Quarry".as_ref(),
-                                    BuildingKind::ClayPit => b"Clay Pit".as_ref(),
-                                    BuildingKind::Kiln => b"Kiln".as_ref(),
-                                    BuildingKind::WheatField => b"Wheat Field".as_ref(),
-                                    BuildingKind::Mill => b"Mill".as_ref(),
-                                    BuildingKind::Bakery => b"Bakery".as_ref(),
-                                     BuildingKind::Fishery => b"Fishery".as_ref(),
-                                     BuildingKind::IronMine => b"Iron Mine".as_ref(),
-                                     BuildingKind::Smelter => b"Smelter".as_ref(),
-                                };
-                                let bw = ui::button_w_for(label, ui_s);
-                                if bx + bw > width_i32 - padb { break; }
-                                if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { selected_building = bk; return; }
-                                bx += bw + 6 * ui_s;
-                            }
+                            if ui_interaction::handle_left_click(
+                                cursor_xy, width_i32, height_i32, &config, &atlas, hovered_tile,
+                                &mut ui_category, &mut selected_building, &mut active_building_panel,
+                                &mut world, &mut buildings, &mut buildings_dirty, &mut citizens, &mut population,
+                                &mut warehouses, &mut resources, &mut road_mode, &mut path_debug_mode,
+                                &mut path_sel_a, &mut path_sel_b, &mut last_path,
+                            ) { return; }
                         }
-                        // обработка клика по панели здания (+/-) — только если панель активна
-                        if let Some(p) = active_building_panel {
-                            let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
-                            let panel = ui::layout_building_panel(width_i32, height_i32, ui_s);
-                            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.minus_x, panel.minus_y, panel.minus_w, panel.minus_h) {
-                                if let Some(b) = buildings.iter_mut().find(|bb| bb.pos == p) { b.workers_target = (b.workers_target - 1).max(0); }
-                                return;
-                            }
-                            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.plus_x, panel.plus_y, panel.plus_w, panel.plus_h) {
-                                if let Some(b) = buildings.iter_mut().find(|bb| bb.pos == p) { b.workers_target = (b.workers_target + 1).min(9); }
-                                return;
-                            }
-                        }
+                        // остальная часть обработки ЛКМ остаётся прежней (клика по миру вне UI)
                         if let Some(tp) = hovered_tile {
-                            // клик по зданию — открыть/закрыть панель здания
                             if let Some(bh) = buildings.iter().find(|bb| bb.pos == tp) {
-                                active_building_panel = match active_building_panel {
-                                    Some(cur) if cur == bh.pos => None,
-                                    _ => Some(bh.pos),
-                                };
-                                return;
+                                active_building_panel = match active_building_panel { Some(cur) if cur == bh.pos => None, _ => Some(bh.pos) }; return;
                             }
-                            // отключили клики по гражданам и ручное назначение — всё через панель зданий
-                            if road_mode {
-                                // Переключение дороги по клику
-                                let on = !world.is_road(tp);
-                                world.set_road(tp, on);
+                            if road_mode { let on = !world.is_road(tp); world.set_road(tp, on); return; }
+                            if path_debug_mode {
+                                match (path_sel_a, path_sel_b) { (None, _) => { path_sel_a = Some(tp); last_path=None; }, (Some(_), None) => { path_sel_b = Some(tp); }, (Some(_), Some(_)) => { path_sel_a = Some(tp); path_sel_b=None; last_path=None; } }
+                                if let (Some(a), Some(b)) = (path_sel_a, path_sel_b) { last_path = crate::path::astar(&world, a, b, 20_000); }
                                 return;
-                            } else if path_debug_mode {
-                                // выбор двух точек для A*
-                                match (path_sel_a, path_sel_b) {
-                                    (None, _) => { path_sel_a = Some(tp); last_path=None; }
-                                    (Some(_), None) => { path_sel_b = Some(tp); }
-                                    (Some(_), Some(_)) => { path_sel_a = Some(tp); path_sel_b=None; last_path=None; }
-                                }
-                                if let (Some(a), Some(b)) = (path_sel_a, path_sel_b) {
-                                    // ограничим экспансии чтобы не зависнуть
-                                    last_path = crate::path::astar(&world, a, b, 20_000);
-                                }
-                                return;
-                            }
-                            // кликаем по тайлу под курсором, но убедимся, что используем те же snapped-пиксели камеры,
-                            // чтобы не было рассинхрона между рендером и хитом
-                            let tile_kind = world.get_tile(tp.x, tp.y);
-                            // дополнительные валидаторы по типу здания
-                            let mut allowed = !world.is_occupied(tp) && tile_kind != TileKind::Water;
-                            if allowed {
-                                match selected_building {
-                                    BuildingKind::Fishery => {
-                                        // должен быть рядом с водой
-                                        const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
-                                        allowed = NB.iter().any(|(dx,dy)| world.get_tile(tp.x+dx, tp.y+dy) == TileKind::Water);
-                                    }
-                                    BuildingKind::WheatField => {
-                                        allowed = tile_kind == TileKind::Grass;
-                                    }
-                                    BuildingKind::StoneQuarry => {
-                                        // Требуем spot камня
-                                        allowed = world.has_stone_deposit(tp);
-                                    }
-                                    BuildingKind::ClayPit => {
-                                        // Требуем spot глины
-                                        allowed = world.has_clay_deposit(tp);
-                                    }
-                                    BuildingKind::IronMine => {
-                                        // Требуем spot железа
-                                        allowed = world.has_iron_deposit(tp);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            if allowed {
-                                let cost = building_cost(selected_building);
-                                if resources.gold >= cost.gold && spend_wood(&mut warehouses, &mut resources, cost.wood) {
-                                    resources.gold -= cost.gold;
-                                    world.occupy(tp);
-                                    let default_workers = match selected_building {
-                                        BuildingKind::House | BuildingKind::Warehouse => 0,
-                                        _ => 1,
-                                    };
-                                    buildings.push(Building { kind: selected_building, pos: tp, timer_ms: 0, workers_target: default_workers });
-                                    buildings_dirty = true;
-                                     if selected_building == BuildingKind::House {
-                                        // Простой спавн одного жителя на дом
-                                        citizens.push(Citizen {
-                                            pos: tp,
-                                            target: tp,
-                                            moving: false,
-                                            progress: 0.0,
-                                            carrying_log: false,
-                                            assigned_job: None,
-                                            deliver_to: tp,
-                                            idle_timer_ms: 0,
-                                            home: tp,
-                                            workplace: None,
-                                            state: CitizenState::Idle,
-                                            work_timer_ms: 0,
-                                            carrying: None,
-                                            pending_input: None,
-                                            path: Vec::new(),
-                                            path_index: 0,
-                                             fed_today: true,
-                                             manual_workplace: false,
-                                        });
-                                        population += 1;
-                                      } else if selected_building == BuildingKind::Warehouse {
-                                          warehouses.push(WarehouseStore { pos: tp, wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0, iron_ore: 0, iron_ingots: 0 });
-                                          // Переложим остатки ресурсов (кроме золота) в только что построенный склад
-                                          if let Some(w) = warehouses.last_mut() {
-                                              if resources.wood > 0 { w.wood += resources.wood; resources.wood = 0; }
-                                              if resources.stone > 0 { w.stone += resources.stone; resources.stone = 0; }
-                                              if resources.clay > 0 { w.clay += resources.clay; resources.clay = 0; }
-                                              if resources.bricks > 0 { w.bricks += resources.bricks; resources.bricks = 0; }
-                                              if resources.wheat > 0 { w.wheat += resources.wheat; resources.wheat = 0; }
-                                              if resources.flour > 0 { w.flour += resources.flour; resources.flour = 0; }
-                                              if resources.bread > 0 { w.bread += resources.bread; resources.bread = 0; }
-                                               if resources.fish > 0 { w.fish += resources.fish; resources.fish = 0; }
-                                               if resources.iron_ore > 0 { w.iron_ore += resources.iron_ore; resources.iron_ore = 0; }
-                                              // золото хранится в казне (resources.gold)
-                                          }
-                                     } else if selected_building == BuildingKind::Forester {
-                                         // просто добавим здание, логика в simulate()
-                                    }
-                                    println!("Построено {:?} на {:?}. Ресурсы: wood={}, gold={}", selected_building, tp, resources.wood, resources.gold);
-                                }
                             }
                         }
                     }
@@ -610,172 +378,31 @@ fn run() -> Result<()> {
                     // Интегрируем готовые чанки (non-blocking)
                     world.integrate_ready_chunks();
 
-                    // Рисуем тайлы быстрым блитом
-                    let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
-                    for my in min_ty..=max_ty {
-                        for mx in min_tx..=max_tx {
-                            let kind = world.get_tile(mx, my);
-                            let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
-                            let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
-                            let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                            if atlas.base_loaded {
-                                // рисуем PNG-тайл целиком (чтобы детали могли выступать за ромб)
-                                let tile_w_px = atlas.half_w * 2 + 1;
-                                let draw_w = tile_w_px;
-                                let scale = tile_w_px as f32 / atlas.base_w.max(1) as f32;
-                                let draw_h = (atlas.base_h as f32 * scale).round() as i32;
-                                let diamond_h = atlas.half_h * 2 + 1;
-                                let extra_h = (draw_h - diamond_h).max(0);
-                                let top_left_x = screen_pos.x - draw_w / 2;
-                                let top_left_y = screen_pos.y - atlas.half_h - extra_h;
-                                match kind {
-                                    TileKind::Grass => {
-                                        // хэш по координате для вариативности
-                                        let idx = ((mx as i64 * 73856093 ^ my as i64 * 19349663) & 0x7fffffff) as usize;
-                                        if !atlas.grass_variants.is_empty() {
-                                            let spr = &atlas.grass_variants[idx % atlas.grass_variants.len()];
-                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                        } else {
-                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                        }
-                                    }
-                                    TileKind::Forest => {
-                                        render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                    }
-                                    TileKind::Water => {
-                                        // Автоберег: по соседям суши выбираем подходящий edge-спрайт, иначе — чистая вода
-                                        let land_n = world.get_tile(mx, my-1) != TileKind::Water;
-                                        let land_e = world.get_tile(mx+1, my) != TileKind::Water;
-                                        let land_s = world.get_tile(mx, my+1) != TileKind::Water;
-                                        let land_w = world.get_tile(mx-1, my) != TileKind::Water;
-                                        // Диагонали, чтобы отличить «выпуклый» угол от шва двух прямых
-                                        let land_ne = world.get_tile(mx+1, my-1) != TileKind::Water;
-                                        let land_nw = world.get_tile(mx-1, my-1) != TileKind::Water;
-                                        let land_se = world.get_tile(mx+1, my+1) != TileKind::Water;
-                                        let land_sw = world.get_tile(mx-1, my+1) != TileKind::Water;
-                                        if !atlas.water_edges.is_empty() && (land_n || land_e || land_s || land_w) {
-                                            // Приоритет: сначала «выпуклые» углы (когда диагональ — вода), затем прямые стороны
-                                            let idx_opt: Option<usize> =
-                                                if land_n && land_e && !land_ne { Some(7) } // top-right (N|E)
-                                                else if land_n && land_w && !land_nw { Some(4) } // top-left (N|W)
-                                                else if land_s && land_e && !land_se { Some(5) } // bottom-right (S|E)
-                                                else if land_s && land_w && !land_sw { Some(6) } // bottom-left (S|W)
-                                                else if land_n { Some(0) }
-                                                else if land_w { Some(1) }
-                                                else if land_e { Some(2) }
-                                                else if land_s { Some(3) }
-                                                else { None };
-                                            if let Some(mut idx) = idx_opt {
-                                                if idx >= atlas.water_edges.len() { idx = atlas.water_edges.len()-1; }
-                                                let spr = &atlas.water_edges[idx];
-                                                render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                            } else {
-                                                render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                            }
-                                        } else {
-                                            render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                                        }
-                                    }
-                                }
-                            } else {
-                                // процедурный ромб
-                            atlas.blit(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, kind, water_frame);
-                            }
-
-                            // сетка
-                            if show_grid { render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20, 20, 20, 255]); }
-
-                            // дороги (процедурный спрайт по маске соседей)
-                            if world.is_road(IVec2::new(mx, my)) {
-                                let nb = [ (0,-1,0b0001), (1,0,0b0010), (0,1,0b0100), (-1,0,0b1000) ];
-                                let mut mask: u8 = 0;
-                                for (dx,dy,bit) in nb { if world.is_road(IVec2::new(mx+dx, my+dy)) { mask |= bit; } }
-                                let spr = &road_atlas.sprites[mask as usize];
-                                let w = road_atlas.w; let h = road_atlas.h;
-                                let top_left_x = screen_pos.x - atlas.half_w;
-                                let top_left_y = screen_pos.y - atlas.half_h;
-                                render::tiles::blit_sprite_alpha_noscale_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, spr, w, h, 255);
-                            }
-
-                            // оверлей плотности леса (простая функция от шума)
-                            if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v, 50, 50, 255]); }
-
-                              // деревья на лесных клетках как отдельные сущности
-                              if world.has_tree(IVec2::new(mx, my)) {
-                                  let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
-                                  if let Some(ta) = &tree_atlas { if !ta.sprites.is_empty() {
-                                      let idx = stage.min(ta.sprites.len()-1);
-                                      // Масштаб спрайта дерева под текущий тайл
-                                      let tile_w_px = atlas.half_w * 2 + 1;
-                                      let scale = tile_w_px as f32 / ta.w as f32;
-                                      let draw_w = (ta.w as f32 * scale).round() as i32;
-                                      let draw_h = (ta.h as f32 * scale).round() as i32;
-                                      let top_left_x = screen_pos.x - draw_w / 2;
-                                      let top_left_y = screen_pos.y - atlas.half_h - draw_h + (atlas.half_h/2);
-                                      render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
-                                  } else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }}
-                                  else { render::tiles::draw_tree(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
-                                  if show_tree_stage_overlay {
-                                      let col = match stage { 0 => [80,160,220,200], 1 => [220,200,80,200], _ => [220,80,80,220] };
-                                      render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, col);
-                                  }
-                              }
-                            // оверлеи месторождений (поверх)
-                              let tp = IVec2::new(mx, my);
-                              if world.get_tile(mx, my) != TileKind::Water {
-                                  // если загружен базовый атлас — используем PNG-спрайт ячейки депозита поверх травы (полный спрайт)
-                                  if atlas.base_loaded {
-                                      let tile_w_px = atlas.half_w * 2 + 1;
-                                      let draw_w = tile_w_px;
-                                      let scale = tile_w_px as f32 / atlas.base_w.max(1) as f32;
-                                      let draw_h = (atlas.base_h as f32 * scale).round() as i32;
-                                      let diamond_h = atlas.half_h * 2 + 1;
-                                      let extra_h = (draw_h - diamond_h).max(0);
-                                      let top_left_x = screen_pos.x - draw_w / 2;
-                                      let top_left_y = screen_pos.y - atlas.half_h - extra_h;
-                                      if world.has_clay_deposit(tp) {
-                                           // выбор варианта глины по координате
-                                           if !atlas.clay_variants.is_empty() {
-                                               let idx = ((mx as i64 * 83492791 ^ my as i64 * 29765723) & 0x7fffffff) as usize;
-                                               let spr = &atlas.clay_variants[idx % atlas.clay_variants.len()];
-                                               render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
-                                           } else {
-                                               render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
-                                           }
-                                      }
-                                      if world.has_stone_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_scaled_tinted(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_stone, atlas.base_w, atlas.base_h, draw_w, draw_h, 220);
-                                      }
-                                      if world.has_iron_deposit(tp) {
-                                           render::tiles::blit_sprite_alpha_scaled_color_tint(frame, width_i32, height_i32, top_left_x, top_left_y, &atlas.base_iron, atlas.base_w, atlas.base_h, draw_w, draw_h, [200, 205, 220], 140, 240);
-                                      }
-                                  } else {
-                                      if world.has_clay_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 120, 80, 120]); }
-                                      if world.has_stone_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200, 200, 200, 120]); }
-                                      if world.has_iron_deposit(tp) { render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [150, 140, 220, 140]); }
-                                  }
-                              }
-                        }
-                    }
+                    let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
+                    render::map::draw_terrain_and_overlays(frame, width_i32, height_i32, &atlas, &mut world, min_tx, min_ty, max_tx, max_ty, screen_center, cam_snap, water_frame, show_grid, show_forest_overlay, &tree_atlas, &road_atlas);
 
                     // Поленья на земле
                     for li in &logs_on_ground {
                         if li.carried { continue; }
                         let mx = li.pos.x; let my = li.pos.y;
                         if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
-                        let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
-                        let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
-                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
+                        let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, mx, my);
                         render::tiles::draw_log(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/4, atlas.half_w, atlas.half_h);
                     }
 
-                    // Подсветка ховера
-                    if let Some(tp) = hovered_tile {
-                        let world_x = (tp.x - tp.y) * atlas.half_w - cam_snap.x as i32;
-                        let world_y = (tp.x + tp.y) * atlas.half_h - cam_snap.y as i32;
-                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                        render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
+                    // Подсветка ховера (заливка + контур) — пересчёт под актуальную камеру
+                    if let Some(tp) = screen_to_tile_px(cursor_xy.x, cursor_xy.y, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h) {
+                        let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, tp.x, tp.y);
+                        let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32; // ~30px при max zoom
+                        // мягкая внутренняя подсветка
+                        render::tiles::draw_iso_tile_tinted(
+                            frame, width_i32, height_i32,
+                            screen_pos.x, screen_pos.y + hover_off,
+                            atlas.half_w, atlas.half_h,
+                            [240, 230, 80, 70],
+                        );
+                        render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
                     }
 
                     // Отрисуем здания по глубине
@@ -783,81 +410,9 @@ fn run() -> Result<()> {
                     buildings.sort_by_key(|b| b.pos.x + b.pos.y);
                         buildings_dirty = false;
                     }
-                    for b in buildings.iter() {
-                        let mx = b.pos.x;
-                        let my = b.pos.y;
-                        if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
-                        let world_x = (mx - my) * atlas.half_w - cam_snap.x as i32;
-                        let world_y = (mx + my) * atlas.half_h - cam_snap.y as i32;
-                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                        if let Some(ba) = &building_atlas {
-                            if let Some(idx) = building_sprite_index(b.kind) {
-                                if idx < ba.sprites.len() {
-                                    // Масштаб спрайта по текущей ширине тайла
-                                    let tile_w_px = atlas.half_w * 2 + 1;
-                                    let scale = tile_w_px as f32 / ba.w as f32;
-                                    let draw_w = (ba.w as f32 * scale).round() as i32;
-                                    let draw_h = (ba.h as f32 * scale).round() as i32;
-                                    let top_left_x = screen_pos.x - draw_w / 2;
-                                    // Привязываем нижний центр спрайта к нижней вершине ромба тайла
-                                    let top_left_y = screen_pos.y + atlas.half_h - draw_h;
-                                    render::tiles::blit_sprite_alpha_scaled(frame, width_i32, height_i32, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
-                                    continue;
-                                }
-                            }
-                        }
-                        let color = match b.kind {
-                            BuildingKind::Lumberjack => [140, 90, 40, 255],
-                            BuildingKind::House => [180, 180, 180, 255],
-                            BuildingKind::Warehouse => [150, 120, 80, 255],
-                            BuildingKind::Forester => [90, 140, 90, 255],
-                            BuildingKind::StoneQuarry => [120, 120, 120, 255],
-                            BuildingKind::ClayPit => [150, 90, 70, 255],
-                            BuildingKind::Kiln => [160, 60, 40, 255],
-                            BuildingKind::WheatField => [200, 180, 80, 255],
-                            BuildingKind::Mill => [210, 210, 180, 255],
-                            BuildingKind::Bakery => [200, 160, 120, 255],
-                            BuildingKind::Fishery => [100, 140, 200, 255],
-                            BuildingKind::IronMine => [90, 90, 110, 255],
-                            BuildingKind::Smelter => [190, 190, 210, 255],
-                        };
-                        render::tiles::draw_building(frame, width_i32, height_i32, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
-                    }
+                    render::map::draw_buildings(frame, width_i32, height_i32, &atlas, &buildings, &building_atlas, screen_center, cam_snap, min_tx, min_ty, max_tx, max_ty);
 
-                    // Рендер жителей (кружок) с интерполяцией между клетками
-                    for c in &citizens {
-                        let (fx, fy) = if c.moving {
-                            let dx = (c.target.x - c.pos.x) as f32;
-                            let dy = (c.target.y - c.pos.y) as f32;
-                            (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress)
-                        } else { (c.pos.x as f32, c.pos.y as f32) };
-                        let world_x = ((fx - fy) * atlas.half_w as f32).round() as i32 - cam_snap.x as i32;
-                        let world_y = ((fx + fy) * atlas.half_h as f32).round() as i32 - cam_snap.y as i32;
-                        let screen_pos = screen_center + IVec2::new(world_x, world_y);
-                        let r = (atlas.half_w as f32 * 0.15).round() as i32; // масштаб от тайла
-                        // цвет по месту работы
-                        let mut col = [255, 230, 120, 255];
-                        if let Some(wp) = c.workplace {
-                            if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
-                                col = match b.kind {
-                                    BuildingKind::Lumberjack => [140, 90, 40, 255],
-                                    BuildingKind::Forester => [90, 140, 90, 255],
-                                    BuildingKind::StoneQuarry => [120, 120, 120, 255],
-                                    BuildingKind::ClayPit => [150, 90, 70, 255],
-                                    BuildingKind::Kiln => [160, 60, 40, 255],
-                                    BuildingKind::WheatField => [200, 180, 80, 255],
-                                    BuildingKind::Mill => [210, 210, 180, 255],
-                                    BuildingKind::Bakery => [200, 160, 120, 255],
-                                    BuildingKind::Fishery => [100, 140, 200, 255],
-                                    BuildingKind::IronMine => [90, 90, 110, 255],
-                                    BuildingKind::Smelter => [190, 190, 210, 255],
-                                    BuildingKind::Warehouse => [150, 120, 80, 255],
-                                    BuildingKind::House => [180, 180, 180, 255],
-                                };
-                            }
-                        }
-                        render::tiles::draw_citizen_marker(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), col);
-                    }
+                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap);
 
                     // Оверлей день/ночь
                     let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
@@ -869,12 +424,7 @@ fn run() -> Result<()> {
 
                     // Отрисовка найденного пути в дебаг-режиме
                     if let (true, Some(path)) = (path_debug_mode, &last_path) {
-                        for p in path.iter() {
-                            let world_x = (p.x - p.y) * atlas.half_w - cam_snap.x as i32;
-                            let world_y = (p.x + p.y) * atlas.half_h - cam_snap.y as i32;
-                            let sp = screen_center + IVec2::new(world_x, world_y);
-                            render::tiles::draw_iso_outline(frame, width_i32, height_i32, sp.x, sp.y, atlas.half_w, atlas.half_h, [50, 200, 240, 255]);
-                        }
+                        render::map::draw_debug_path(frame, width_i32, height_i32, &atlas, path, screen_center, cam_snap);
                     }
 
                     // UI наложение
@@ -959,7 +509,7 @@ fn run() -> Result<()> {
                         // Подтянем готовые чанки перед генерацией задач, чтобы деревья из новых чанков
                         // были видны логике (особенно если камера сдвинулась).
                         world.integrate_ready_chunks();
-                        simulate(&mut buildings, &mut world, &mut resources, &mut warehouses, step_ms as i32);
+                        game::simulate(&mut buildings, &mut world, &mut resources, &mut warehouses, step_ms as i32);
                         world.grow_trees(step_ms as i32);
                         world_clock_ms = (world_clock_ms + step_ms) % DAY_LENGTH_MS;
 
@@ -968,21 +518,8 @@ fn run() -> Result<()> {
                         let angle = t * std::f32::consts::TAU;
                         let daylight = 0.5 - 0.5 * angle.cos();
                         let is_day = daylight > 0.25; // простой порог
-                        // На рассвете (переход ночь→день) сбрасываем флаг кормления и пытаемся накормить каждого
-                        if !prev_is_day_flag && is_day {
-                            for c in citizens.iter_mut() { c.fed_today = false; }
-                            // Одна попытка на жителя: хлеб приоритетнее, из складов затем из глобала
-                            for c in citizens.iter_mut() {
-                                let mut consumed = false;
-                                for w in warehouses.iter_mut() { if w.bread > 0 { w.bread -= 1; consumed = true; break; } }
-                                if !consumed { for w in warehouses.iter_mut() { if w.fish > 0 { w.fish -= 1; consumed = true; break; } } }
-                                if !consumed {
-                                    if resources.bread > 0 { resources.bread -= 1; consumed = true; }
-                                    else if resources.fish > 0 { resources.fish -= 1; consumed = true; }
-                                }
-                                if consumed { c.fed_today = true; resources.gold += 1; }
-                            }
-                        }
+                        // На рассвете (переход ночь→день) — кормление и доход
+                        if !prev_is_day_flag && is_day { game::new_day_feed_and_income(&mut citizens, &mut resources, &mut warehouses); }
                         prev_is_day_flag = is_day;
 
                         // Ночная рутина: идём домой и спим, сбрасываем работу
@@ -993,7 +530,7 @@ fn run() -> Result<()> {
                                 c.carrying_log = false;
                                 if c.state != CitizenState::Sleeping {
                                     if c.pos != c.home && !c.moving {
-                                        plan_path(&world, c, c.home);
+                                        game::plan_path(&world, c, c.home);
                                         c.state = CitizenState::GoingHome;
                                     }
                                     if !c.moving && c.pos == c.home {
@@ -1020,7 +557,7 @@ fn run() -> Result<()> {
                             }
                             // направим вручную закреплённых к месту работы
                             for c in citizens.iter_mut() {
-                                if c.manual_workplace { if let Some(wp) = c.workplace { if !c.moving { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; } } }
+                                if c.manual_workplace { if let Some(wp) = c.workplace { if !c.moving { game::plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; } } }
                             }
                         }
 
@@ -1043,7 +580,7 @@ fn run() -> Result<()> {
                                                 if matches!(c.state, CitizenState::Sleeping) && c.pos != c.home { continue; }
                                                 c.workplace = Some(b.pos);
                                                 c.target = b.pos;
-                                            plan_path(&world, c, b.pos);
+                                            game::plan_path(&world, c, b.pos);
                                                 c.moving = true;
                                                 c.progress = 0.0;
                                                 c.state = CitizenState::GoingToWork;
@@ -1089,7 +626,7 @@ fn run() -> Result<()> {
                                     let active_tasks_here = jobs.iter().filter(|j| match j.kind { JobKind::ChopWood { pos } => (pos.x - b.pos.x).abs() + (pos.y - b.pos.y).abs() <= 48, _ => false }).count() as i32;
                                     if active_tasks_here >= workers_here { continue; }
                                     // ищем ближайшее зрелое дерево; если нет в радиусе 24, расширяем до 32
-                                    let mut search = |rad: i32| -> Option<IVec2> {
+                                    let search = |rad: i32| -> Option<IVec2> {
                                     let mut best: Option<(i32, IVec2)> = None;
                                         for dy in -rad..=rad { for dx in -rad..=rad {
                                         let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
@@ -1101,9 +638,9 @@ fn run() -> Result<()> {
                                         best.map(|(_,p)| p)
                                     };
                                     // посчитаем количество stage2 в базовом радиусе для дебага
-                                    let mut stage2_cnt = 0;
+                                    let mut _stage2_cnt = 0;
                                     for dy in -24..=24 { for dx in -24..=24 {
-                                        if matches!(world.tree_stage(IVec2::new(b.pos.x+dx, b.pos.y+dy)), Some(2)) { stage2_cnt += 1; }
+                                        if matches!(world.tree_stage(IVec2::new(b.pos.x+dx, b.pos.y+dy)), Some(2)) { _stage2_cnt += 1; }
                                     }}
                                     if let Some(np) = search(24).or_else(|| search(32)).or_else(|| search(48)).or_else(|| search(64)) {
                                         let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
@@ -1167,7 +704,7 @@ fn run() -> Result<()> {
                                                 }
                                             }
                                             // возвращаемся к работе
-                                            if let Some(wp) = c.workplace { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
+                                            if let Some(wp) = c.workplace { game::plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
                                         }
                                     }
                                     CitizenState::GoingToFetch => {
@@ -1189,7 +726,7 @@ fn run() -> Result<()> {
                                                 };
                                                 if taken {
                                                     c.carrying = Some((req, 1));
-                                                    if let Some(wp) = c.workplace { plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
+                                                    if let Some(wp) = c.workplace { game::plan_path(&world, c, wp); c.state = CitizenState::GoingToWork; }
                                                 } else {
                                                     c.state = CitizenState::Working; // ресурса нет
                                                 }
@@ -1208,18 +745,18 @@ fn run() -> Result<()> {
                                     else { c.moving = false; c.progress = 0.0; }
                                 } else {
                                     // скорость шага зависит от целевой клетки: дорога быстрее, трава медленнее, лес ещё медленнее
-                                    let mut step_time_ms: f32 = 300.0; // базовая скорость (нравится на дорогах)
+                                    let mut _step_time_ms: f32 = 300.0; // базовая скорость (нравится на дорогах)
                                     if world.is_road(c.target) {
-                                        step_time_ms = 300.0;
+                                        _step_time_ms = 300.0;
                                     } else {
                                         use crate::types::TileKind::*;
                                         match world.get_tile(c.target.x, c.target.y) {
-                                            Grass => step_time_ms = 450.0,
-                                            Forest => step_time_ms = 600.0,
-                                            Water => step_time_ms = 300.0,
+                                            Grass => _step_time_ms = 450.0,
+                                            Forest => _step_time_ms = 600.0,
+                                            Water => _step_time_ms = 300.0,
                                         }
                                     }
-                                    c.progress += (step_ms / step_time_ms) as f32;
+                                    c.progress += (step_ms / _step_time_ms) as f32;
                                     if c.progress >= 1.0 { c.pos = c.target; c.progress = 0.0; }
                                 }
                             }
@@ -1240,7 +777,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Stone, 1));
-                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                    game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -1249,7 +786,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Clay, 1));
-                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                    game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -1258,7 +795,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::IronOre, 1));
-                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                    game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -1267,7 +804,7 @@ fn run() -> Result<()> {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Wheat, 1));
-                                                    plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                    game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                 }
                                             }
                                         }
@@ -1288,7 +825,7 @@ fn run() -> Result<()> {
                                                     c.carrying = None;
                                                     if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                         c.carrying = Some((ResourceKind::Flour, 1));
-                                                        plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                        game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                     }
                                                 }
                                             }
@@ -1316,7 +853,7 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // глину потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::Bricks, 1));
-                                                         plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                         game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1344,7 +881,7 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // муку потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::Bread, 1));
-                                                            plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                             game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1371,7 +908,7 @@ fn run() -> Result<()> {
                                                         c.carrying = None; // руду потратили
                                                         if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                             c.carrying = Some((ResourceKind::IronIngot, 1));
-                                                            plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                             game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                         }
                                                     }
                                                 }
@@ -1384,7 +921,7 @@ fn run() -> Result<()> {
                                                     c.work_timer_ms = 0;
                                                     if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                         c.carrying = Some((ResourceKind::Fish, 1));
-                                                        plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
+                                                        game::plan_path(&world, c, dst); c.state = CitizenState::GoingToDeposit;
                                                     }
                                                 }
                                             }
@@ -1448,10 +985,7 @@ fn overlay_tint(frame: &mut [u8], fw: i32, fh: i32, [r,g,b,a]: [u8;4]) {
     }
 }
 
-fn sat_mul_add(a: i32, b: i32, c: i32) -> i32 {
-    let v = (a as i64) * (b as i64) + (c as i64);
-    if v > i32::MAX as i64 { i32::MAX } else if v < i32::MIN as i64 { i32::MIN } else { v as i32 }
-}
+// удалено: sat_mul_add (не используется)
 
 // удалено: draw_iso_tile (перенесено в модуль render)
 
@@ -1461,25 +995,7 @@ fn sat_mul_add(a: i32, b: i32, c: i32) -> i32 {
 
 // удалено: draw_line (перенесено в модуль render)
 
-// удалено: draw_building (перенесено в модуль render)
-
-fn building_sprite_index(kind: BuildingKind) -> Option<usize> {
-    match kind {
-        BuildingKind::Lumberjack => Some(0),
-        BuildingKind::House => Some(1),
-        BuildingKind::Warehouse => Some(2),
-        BuildingKind::Forester => Some(3),
-        BuildingKind::StoneQuarry => Some(4),
-        BuildingKind::ClayPit => Some(5),
-        BuildingKind::Kiln => Some(6),
-        BuildingKind::WheatField => Some(7),
-        BuildingKind::Mill => Some(8),
-        BuildingKind::Bakery => Some(9),
-        BuildingKind::Fishery => Some(10),
-        BuildingKind::IronMine => Some(11),
-        BuildingKind::Smelter => Some(12),
-    }
-}
+// см. atlas::building_sprite_index
 
 // удалено: blit_sprite_alpha (перенесено в модуль render)
 
@@ -1541,92 +1057,9 @@ fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i
     (min_tx - 2, min_ty - 2, max_tx + 2, max_ty + 2)
 }
 
-fn building_cost(kind: BuildingKind) -> Resources {
-    match kind {
-        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10, ..Default::default() },
-        BuildingKind::House => Resources { wood: 10, gold: 15, ..Default::default() },
-        BuildingKind::Warehouse => Resources { wood: 20, gold: 30, ..Default::default() },
-        BuildingKind::Forester => Resources { wood: 15, gold: 20, ..Default::default() },
-        BuildingKind::StoneQuarry => Resources { wood: 10, gold: 10, ..Default::default() },
-        BuildingKind::ClayPit => Resources { wood: 10, gold: 10, ..Default::default() },
-        BuildingKind::Kiln => Resources { wood: 15, gold: 15, ..Default::default() },
-        BuildingKind::WheatField => Resources { wood: 5, gold: 5, ..Default::default() },
-        BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
-        BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
-        BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
-        BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
-        BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
-    }
-}
+// удалено: локальный `building_cost` — используем `types::building_cost`
 
-fn warehouses_total_wood(warehouses: &Vec<WarehouseStore>) -> i32 { warehouses.iter().map(|w| w.wood).sum() }
+// удалено: локальные warehouses_total_wood/spend_wood — используем функции из types
 
-fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, mut amount: i32) -> bool {
-    if amount <= 0 { return true; }
-    if warehouses.is_empty() {
-        if resources.wood >= amount { resources.wood -= amount; return true; } else { return false; }
-    }
-    let total = warehouses_total_wood(warehouses);
-    if total < amount { return false; }
-    for w in warehouses.iter_mut() {
-        if amount == 0 { break; }
-        let take = amount.min(w.wood);
-        w.wood -= take;
-        amount -= take;
-    }
-    true
-}
-
-fn simulate(
-    buildings: &mut Vec<Building>,
-    world: &mut World,
-    resources: &mut Resources,
-    warehouses: &mut Vec<WarehouseStore>,
-    dt_ms: i32,
-) {
-    for b in buildings.iter_mut() {
-        b.timer_ms += dt_ms;
-        match b.kind {
-            BuildingKind::Lumberjack => { /* Производство выполняют жители через систему задач */ }
-            BuildingKind::House => { /* Питание обрабатываем на рассвете, дом тут ничего не делает */ }
-            BuildingKind::Warehouse => { /* пока пассивный */ }
-            BuildingKind::Forester => { /* Производство выполняют жители */ }
-            BuildingKind::StoneQuarry => { /* Производство выполняют жители */ }
-            BuildingKind::ClayPit => { /* Производство выполняют жители */ }
-            BuildingKind::Kiln => { /* Производство выполняют жители */ }
-            BuildingKind::WheatField => { /* Производство выполняют жители */ }
-            BuildingKind::Mill => { /* Производство выполняют жители */ }
-            BuildingKind::Bakery => { /* Производство выполняют жители */ }
-            BuildingKind::Fishery => { /* Производство выполняют жители */ }
-            BuildingKind::IronMine => { /* Производство выполняют жители */ }
-            BuildingKind::Smelter => { /* Производство выполняют жители */ }
-        }
-    }
-}
-
-fn has_adjacent_forest(p: IVec2, world: &mut World) -> bool {
-    const NB: [(i32, i32); 4] = [(1,0),(-1,0),(0,1),(0,-1)];
-    for (dx, dy) in NB {
-        let x = p.x + dx;
-        let y = p.y + dy;
-        if world.get_tile(x, y) == TileKind::Forest { return true; }
-    }
-    false
-}
-
-fn plan_path(world: &World, c: &mut Citizen, goal: IVec2) {
-    c.target = goal;
-    if let Some(path) = crate::path::astar(world, c.pos, goal, 50_000) {
-        c.path = path; c.path_index = 1;
-        if c.path_index < c.path.len() { c.target = c.path[c.path_index]; c.moving = true; c.progress = 0.0; }
-        else { c.moving = false; }
-    } else {
-        // не смогли сразу построить путь (чанки ещё не готовы) — сделаем один шаг по направлению к цели
-        c.path.clear(); c.path_index = 0;
-        let dx = (goal.x - c.pos.x).signum();
-        let dy = (goal.y - c.pos.y).signum();
-        let next = if dx != 0 { IVec2::new(c.pos.x + dx, c.pos.y) } else { IVec2::new(c.pos.x, c.pos.y + dy) };
-        c.target = next; c.moving = true; c.progress = 0.0;
-    }
-}
+// удалено: локальные simulate/plan_path — вынесены в модуль game
 

@@ -46,7 +46,7 @@ pub fn assign_jobs_nearest_worker(citizens: &mut Vec<Citizen>, jobs: &mut Vec<Jo
             let c = &mut citizens[cid];
             job.taken = true;
             c.assigned_job = Some(job.id);
-            super::plan_path(world, c, target);
+            crate::game::plan_path(world, c, target);
             c.moving = true;
             c.progress = 0.0;
         }
@@ -58,8 +58,8 @@ pub fn process_jobs(
     jobs: &mut Vec<Job>,
     logs_on_ground: &mut Vec<LogItem>,
     warehouses: &mut Vec<WarehouseStore>,
-    resources: &mut Resources,
-    buildings: &Vec<Building>,
+    _resources: &mut Resources,
+    _buildings: &Vec<Building>,
     world: &mut World,
     next_job_id: &mut u64,
 ) {
@@ -90,7 +90,7 @@ pub fn process_jobs(
                         c.assigned_job = None;
                     } else if !c.moving {
                         // планируем путь к дереву, если ещё не двигаемся
-                        super::plan_path(world, c, pos);
+                        crate::game::plan_path(world, c, pos);
                     }
                 }
                 JobKind::HaulWood { from, to } => {
@@ -101,7 +101,7 @@ pub fn process_jobs(
                                 logs_on_ground.remove(idx);
                                 c.carrying_log = true;
                             // планируем путь до склада
-                            super::plan_path(world, c, to);
+                            crate::game::plan_path(world, c, to);
                             } else {
                                 jobs[jid].done = true;
                                 c.assigned_job = None;

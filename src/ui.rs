@@ -1,10 +1,11 @@
-use crate::types::{Resources, BuildingKind};
+use crate::types::{Resources, BuildingKind, building_cost, ResourceKind};
+use crate::palette::resource_color;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics }
 
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
-pub fn ui_bar_height(fh: i32, s: i32) -> i32 { ((fh as f32 * 0.06).max(24.0) as i32) * s }
+// удалено: ui_bar_height (не используется)
 pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; padb * 2 + btn_h * 2 + 6 * s }
 pub fn top_panel_height(s: i32) -> i32 {
     let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px;
@@ -71,7 +72,7 @@ pub fn draw_building_panel(
     fill_rect(frame, fw, fh, layout.x + 2 * s, layout.y + 2 * s, layout.w, layout.h, [0,0,0,100]);
     fill_rect(frame, fw, fh, layout.x, layout.y, layout.w, layout.h, [0,0,0,160]);
     let pad = 8 * s; let px = 2 * s; let icon = 10 * s;
-    let mut cx = layout.x + pad;
+    let cx = layout.x + pad;
     // название
     let title = match kind {
         BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
@@ -166,9 +167,9 @@ pub fn draw_ui(
     x = num_x_gold + reserved_w + gap;
 
     // Рассчитаем занятый справа блок (TIME/FPS/SPEED), чтобы не наезжать на него слева
-    let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
+    let px = 2 * s; let gap_info = 2 * px; let _y_info = 8 * s; let pad_right = 8 * s;
     let mut minutes_tmp = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
-    let hours_tmp = (minutes_tmp / 60) as u32; minutes_tmp = minutes_tmp % 60; let _minutes_u_tmp = minutes_tmp as u32;
+    let _hours_tmp = (minutes_tmp / 60) as u32; minutes_tmp = minutes_tmp % 60; let _minutes_u_tmp = minutes_tmp as u32;
     let fps_n_tmp = fps.round() as u32;
     let fps_w_tmp = text_w(b"FPS", s) + gap_info + number_w(fps_n_tmp, s);
     let speed_w_tmp = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
@@ -196,7 +197,7 @@ pub fn draw_ui(
     entry_stat(frame, &mut sx, [120, 120, 120, 255], citizens_sleeping, b"Sleeping", s);
     entry_stat(frame, &mut sx, [210, 150, 70, 255], citizens_hauling, b"Hauling", s);
     entry_stat(frame, &mut sx, [80, 200, 200, 255], citizens_fetching, b"Fetching", s);
-    x = sx + 6 * s;
+    let _ = sx; // x больше не используется, не присваиваем
 
     // верх: больше не рисуем кнопки строительства — они в нижней панели
 
@@ -237,13 +238,13 @@ pub fn draw_ui(
 
     // Вторая строка: ресурсы — сразу под первой строкой
     // Панель дополнительных ресурсов (камень, глина, кирпич, пшеница, мука, хлеб, рыба)
-    let mut rx = pad;
+    let rx = pad;
     let ry = pad + icon_size + 6 * s;
-    let mut entry = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, label: &[u8], s: i32| {
+    let mut entry = |frame: &mut [u8], x: &mut i32, _label_color: [u8;4], val: i32, label: &[u8], s: i32, kind: ResourceKind| {
         let px = 2 * s; let reserve_digits = 4; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
         let need_w = icon_size + 4 + reserved_w + gap;
         if *x + need_w > right_x0 { return; }
-        fill_rect(frame, fw, fh, *x, ry, icon_size, icon_size, label_color);
+        fill_rect(frame, fw, fh, *x, ry, icon_size, icon_size, resource_color(kind));
         let num_x = *x + icon_size + 4;
         draw_number(frame, fw, fh, num_x, ry, val.max(0) as u32, [255,255,255,255], s);
         if point_in_rect(cursor_x, cursor_y, *x, ry, icon_size, icon_size) {
@@ -258,17 +259,17 @@ pub fn draw_ui(
     };
     let mut xcur = rx;
     // Дерево (из складов или видимое общее)
-    entry(frame, &mut xcur, [110,70,30,255], total_wood, b"Wood", s);
-    entry(frame, &mut xcur, [120,120,120,255], resources.stone, b"Stone", s);
-    entry(frame, &mut xcur, [150,90,70,255], resources.clay, b"Clay", s);
-    entry(frame, &mut xcur, [180,120,90,255], resources.bricks, b"Bricks", s);
-    entry(frame, &mut xcur, [200,180,80,255], resources.wheat, b"Wheat", s);
-    entry(frame, &mut xcur, [210,210,180,255], resources.flour, b"Flour", s);
-    entry(frame, &mut xcur, [200,160,120,255], resources.bread, b"Bread", s);
-    entry(frame, &mut xcur, [100,140,200,255], resources.fish, b"Fish", s);
+    entry(frame, &mut xcur, [0,0,0,0], total_wood, b"Wood", s, ResourceKind::Wood);
+    entry(frame, &mut xcur, [0,0,0,0], resources.stone, b"Stone", s, ResourceKind::Stone);
+    entry(frame, &mut xcur, [0,0,0,0], resources.clay, b"Clay", s, ResourceKind::Clay);
+    entry(frame, &mut xcur, [0,0,0,0], resources.bricks, b"Bricks", s, ResourceKind::Bricks);
+    entry(frame, &mut xcur, [0,0,0,0], resources.wheat, b"Wheat", s, ResourceKind::Wheat);
+    entry(frame, &mut xcur, [0,0,0,0], resources.flour, b"Flour", s, ResourceKind::Flour);
+    entry(frame, &mut xcur, [0,0,0,0], resources.bread, b"Bread", s, ResourceKind::Bread);
+    entry(frame, &mut xcur, [0,0,0,0], resources.fish, b"Fish", s, ResourceKind::Fish);
     // металлургия
-    entry(frame, &mut xcur, [90,90,110,255], resources.iron_ore, b"Iron Ore", s);
-    entry(frame, &mut xcur, [190,190,210,255], resources.iron_ingots, b"Iron Ingot", s);
+    entry(frame, &mut xcur, [0,0,0,0], resources.iron_ore, b"Iron Ore", s, ResourceKind::IronOre);
+    entry(frame, &mut xcur, [0,0,0,0], resources.iron_ingots, b"Iron Ingot", s, ResourceKind::IronIngot);
 
     // Рисуем tooltip, если есть
     if let Some((anchor_x, text)) = tooltip.take() {
@@ -318,26 +319,12 @@ pub fn draw_ui(
         UICategory::Logistics => &[],
     };
     for &bk in buildings_for_cat.iter() {
-        let label = match bk {
-            BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
-            BuildingKind::House => b"House".as_ref(),
-            BuildingKind::Warehouse => b"Warehouse".as_ref(),
-            BuildingKind::Forester => b"Forester".as_ref(),
-            BuildingKind::StoneQuarry => b"Quarry".as_ref(),
-            BuildingKind::ClayPit => b"Clay Pit".as_ref(),
-            BuildingKind::Kiln => b"Kiln".as_ref(),
-            BuildingKind::IronMine => b"Iron Mine".as_ref(),
-            BuildingKind::WheatField => b"Wheat Field".as_ref(),
-            BuildingKind::Mill => b"Mill".as_ref(),
-            BuildingKind::Bakery => b"Bakery".as_ref(),
-            BuildingKind::Fishery => b"Fishery".as_ref(),
-            BuildingKind::Smelter => b"Smelter".as_ref(),
-        };
+        let label = label_for_building(bk);
         let active = selected == bk;
         let bw = button_w_for(label, s);
         if bx + bw > fw - padb { break; }
         // Отрисовка с учётом доступности по стоимости
-        let cost = building_cost_ui(bk);
+        let cost = building_cost(bk);
         // Доступность считаем по сумме: ресурсы на руках + на складах (в верхней панели уже передан суммарный Resources)
         let can_afford = resources.gold >= cost.gold && resources.wood >= cost.wood;
         let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
@@ -346,7 +333,7 @@ pub fn draw_ui(
         // Тултип по наведению: стоимость и требования
         if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
             // Построим тултип с иконками стоимости и описанием производства
-            let px = 2 * s; let char_w = 4 * px; let pad = 5 * s; let gap = 6 * s;
+            let px = 2 * s; let pad = 5 * s; let gap = 6 * s;
             let icon = 10 * s;
             let cost_w = {
                 let w_wood = icon + 4 + number_w(cost.wood.max(0) as u32, s);
@@ -354,21 +341,7 @@ pub fn draw_ui(
                 w_wood + gap + w_gold
             };
             // Описание производства
-            let (prod_label, prod_color, note) = match bk {
-                BuildingKind::Lumberjack => (b"Produces: Wood".as_ref(), [110,70,30,255], None),
-                BuildingKind::Forester => (b"Plants trees".as_ref(), [90,140,90,255], None),
-                BuildingKind::StoneQuarry => (b"Produces: Stone".as_ref(), [120,120,120,255], None),
-                BuildingKind::ClayPit => (b"Produces: Clay".as_ref(), [150,90,70,255], None),
-                BuildingKind::Kiln => (b"Produces: Bricks".as_ref(), [180,120,90,255], Some(b"Uses Clay + Wood".as_ref())),
-                BuildingKind::WheatField => (b"Produces: Wheat".as_ref(), [200,180,80,255], None),
-                BuildingKind::Mill => (b"Produces: Flour".as_ref(), [210,210,180,255], Some(b"Uses Wheat".as_ref())),
-                BuildingKind::Bakery => (b"Produces: Bread".as_ref(), [200,160,120,255], Some(b"Uses Flour + Wood".as_ref())),
-                BuildingKind::Fishery => (b"Produces: Fish".as_ref(), [100,140,200,255], Some(b"Near water".as_ref())),
-                BuildingKind::Warehouse => (b"Stores resources".as_ref(), [150,120,80,255], None),
-                BuildingKind::House => (b"Generates: Gold".as_ref(), [220,180,60,255], Some(b"Consumes Bread/Fish".as_ref())),
-                BuildingKind::IronMine => (b"Produces: Iron Ore".as_ref(), [90,90,110,255], None),
-                BuildingKind::Smelter => (b"Produces: Iron Ingot".as_ref(), [190, 190, 210,255], Some(b"Uses Iron Ore + Wood".as_ref())),
-            };
+            let (prod_label, prod_color, note) = production_info(bk);
             let prod_w = icon + 4 + text_w(prod_label, s);
             let note_w = note.map(|t| text_w(t, s)).unwrap_or(0);
             let tip_w = (cost_w.max(prod_w).max(note_w)) + 2 * pad;
@@ -423,24 +396,43 @@ fn draw_button(
     draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
 }
 
-// Косты для UI: дублируем из игровой логики для отображения
-fn building_cost_ui(kind: BuildingKind) -> Resources {
-    match kind {
-        BuildingKind::Lumberjack => Resources { wood: 5, gold: 10, ..Default::default() },
-        BuildingKind::House => Resources { wood: 10, gold: 15, ..Default::default() },
-        BuildingKind::Warehouse => Resources { wood: 20, gold: 30, ..Default::default() },
-        BuildingKind::Forester => Resources { wood: 15, gold: 20, ..Default::default() },
-        BuildingKind::StoneQuarry => Resources { wood: 10, gold: 10, ..Default::default() },
-        BuildingKind::ClayPit => Resources { wood: 10, gold: 10, ..Default::default() },
-        BuildingKind::Kiln => Resources { wood: 15, gold: 15, ..Default::default() },
-        BuildingKind::WheatField => Resources { wood: 5, gold: 5, ..Default::default() },
-        BuildingKind::Mill => Resources { wood: 20, gold: 20, ..Default::default() },
-        BuildingKind::Bakery => Resources { wood: 20, gold: 25, ..Default::default() },
-        BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
-        BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
-        BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
+fn label_for_building(bk: BuildingKind) -> &'static [u8] {
+    match bk {
+        BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
+        BuildingKind::House => b"House".as_ref(),
+        BuildingKind::Warehouse => b"Warehouse".as_ref(),
+        BuildingKind::Forester => b"Forester".as_ref(),
+        BuildingKind::StoneQuarry => b"Quarry".as_ref(),
+        BuildingKind::ClayPit => b"Clay Pit".as_ref(),
+        BuildingKind::Kiln => b"Kiln".as_ref(),
+        BuildingKind::IronMine => b"Iron Mine".as_ref(),
+        BuildingKind::WheatField => b"Wheat Field".as_ref(),
+        BuildingKind::Mill => b"Mill".as_ref(),
+        BuildingKind::Bakery => b"Bakery".as_ref(),
+        BuildingKind::Fishery => b"Fishery".as_ref(),
+        BuildingKind::Smelter => b"Smelter".as_ref(),
     }
 }
+
+fn production_info(bk: BuildingKind) -> (&'static [u8], [u8;4], Option<&'static [u8]>) {
+    match bk {
+        BuildingKind::Lumberjack => (b"Produces: Wood".as_ref(), [110,70,30,255], None),
+        BuildingKind::Forester => (b"Plants trees".as_ref(), [90,140,90,255], None),
+        BuildingKind::StoneQuarry => (b"Produces: Stone".as_ref(), [120,120,120,255], None),
+        BuildingKind::ClayPit => (b"Produces: Clay".as_ref(), [150,90,70,255], None),
+        BuildingKind::Kiln => (b"Produces: Bricks".as_ref(), [180,120,90,255], Some(b"Uses Clay + Wood".as_ref())),
+        BuildingKind::WheatField => (b"Produces: Wheat".as_ref(), [200,180,80,255], None),
+        BuildingKind::Mill => (b"Produces: Flour".as_ref(), [210,210,180,255], Some(b"Uses Wheat".as_ref())),
+        BuildingKind::Bakery => (b"Produces: Bread".as_ref(), [200,160,120,255], Some(b"Uses Flour + Wood".as_ref())),
+        BuildingKind::Fishery => (b"Produces: Fish".as_ref(), [100,140,200,255], Some(b"Near water".as_ref())),
+        BuildingKind::Warehouse => (b"Stores resources".as_ref(), [150,120,80,255], None),
+        BuildingKind::House => (b"Generates: Gold".as_ref(), [220,180,60,255], Some(b"Consumes Bread/Fish".as_ref())),
+        BuildingKind::IronMine => (b"Produces: Iron Ore".as_ref(), [90,90,110,255], None),
+        BuildingKind::Smelter => (b"Produces: Iron Ingot".as_ref(), [190, 190, 210,255], Some(b"Uses Iron Ore + Wood".as_ref())),
+    }
+}
+
+// удалено: building_cost_ui — используем общий `types::building_cost`
 
 pub fn draw_tooltip(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, text: &[u8], s: i32) {
     // ширина глифа = 4*px, где px = 2*s → 8*s на символ
