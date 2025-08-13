@@ -171,7 +171,9 @@ fn run() -> Result<()> {
         atlas.base_w = cell_w as i32;
         atlas.base_h = cell_h as i32;
         atlas.base_grass = def0;
-        atlas.base_forest = def1; // временно вторую траву используем как forest-базу
+        // Лесная трава: 4-я линия, 8-й спрайт (1-based) → cy=3, cx=7 (0-based)
+        let forest_tile = if rows > 3 && cols > 7 { cell_rgba(7, 3) } else { def1.clone() };
+        atlas.base_forest = forest_tile;
         atlas.base_water = def2;
         // депозит-маркер: 6-я строка, 7-й спрайт (1-based) → cy=5, cx=6 (0-based); с защитой границ
         let dep_row = 5u32.min(rows-1);

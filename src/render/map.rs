@@ -74,7 +74,7 @@ pub fn draw_terrain_and_overlays(
             if let Some(ta) = &tree_atlas { if !ta.sprites.is_empty() {
                 let idx = stage.min(ta.sprites.len()-1);
                 let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
-                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h + (atlas.half_h / 2);
+                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
                 tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
             } else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }} else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
         }
