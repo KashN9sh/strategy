@@ -184,8 +184,6 @@ fn run() -> Result<()> {
         atlas.grass_variants = grass_variants_raw;
         atlas.clay_variants = clay_variants_raw;
         atlas.water_edges = water_edges_raw;
-        // Дорога: 1-я строка, 10-й спрайт (1-based) → cy=0, cx=9 (0-based). Если не хватает колонок — оставим пусто.
-        if cols > 9 { atlas.base_road = cell_rgba(9, 0); } else { atlas.base_road = Vec::new(); }
         // заглушки для deposits из старого tiles.png отсутствуют — оставим пустыми, оверлеи не обязательны
     } else if let Ok(img) = image::open("assets/tiles.png") {
         // Старый путь: 6 тайлов в строку: grass, forest, water, clay, stone, iron
