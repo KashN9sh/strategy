@@ -74,7 +74,7 @@ impl World {
 
     pub fn is_occupied(&self, t: IVec2) -> bool { self.occupied.contains(&(t.x, t.y)) }
     pub fn occupy(&mut self, t: IVec2) { self.occupied.insert((t.x, t.y)); }
-    pub fn set_road(&mut self, t: IVec2, on: bool) { if on { self.roads.insert((t.x, t.y)); } else { self.roads.remove(&(t.x, t.y)); } }
+    pub fn set_road(&mut self, t: IVec2, on: bool) { if on { self.roads.insert((t.x+1, t.y+1)); } else { self.roads.remove(&(t.x+1, t.y+1)); } }
     pub fn is_road(&self, t: IVec2) -> bool { self.roads.contains(&(t.x, t.y)) }
 
     pub fn integrate_ready_chunks(&mut self) {

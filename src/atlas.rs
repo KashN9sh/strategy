@@ -18,6 +18,8 @@ pub struct TileAtlas {
     pub clay: Vec<u8>,
     pub stone: Vec<u8>,
     pub iron: Vec<u8>,
+    // базовый PNG-спрайт дороги (10-й спрайт из 1-й строки спрайтшита)
+    pub base_road: Vec<u8>,
     pub base_loaded: bool,
     pub base_w: i32,
     pub base_h: i32,
@@ -31,7 +33,7 @@ pub struct TileAtlas {
 
 impl TileAtlas {
     pub fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay_variants: Vec::new(), water_edges: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
+        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay_variants: Vec::new(), water_edges: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_road: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
     }
 
     pub fn ensure_zoom(&mut self, zoom: f32) {

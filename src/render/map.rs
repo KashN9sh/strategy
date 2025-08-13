@@ -67,16 +67,27 @@ pub fn draw_terrain_and_overlays(
             }
         } else { atlas.blit(frame, width, height, screen_pos.x, screen_pos.y, kind, water_frame); }
         if show_grid { tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20,20,20,255]); }
-        // дороги (процедурный спрайт по маске соседей)
+        // дорога: используем 10-й спрайт из 1-й строки PNG, если доступен; иначе — процедурный атлас по маске
         if world.is_road(IVec2::new(mx, my)) {
-            let nb = [ (0,-1,0b0001), (1,0,0b0010), (0,1,0b0100), (-1,0,0b1000) ];
-            let mut mask: u8 = 0;
-            for (dx,dy,bit) in nb { if world.is_road(IVec2::new(mx+dx, my+dy)) { mask |= bit; } }
-            let spr = &road_atlas.sprites[mask as usize];
-            let w = road_atlas.w; let h = road_atlas.h;
-            let top_left_x = screen_pos.x - atlas.half_w;
-            let top_left_y = screen_pos.y - atlas.half_h;
-            tiles::blit_sprite_alpha_noscale_tinted(frame, width, height, top_left_x, top_left_y, spr, w, h, 255);
+            if atlas.base_loaded && !atlas.base_road.is_empty() {
+                let top_left_x = screen_pos.x - draw_w / 2;
+                let road_off = ((atlas.half_h as f32) * 0.25).round() as i32; // чуть приподнять
+                let top_left_y = screen_pos.y + atlas.half_h - draw_h - road_off;
+                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_road, atlas.base_w, atlas.base_h, draw_w, draw_h);
+            } else {
+                let nb = [ (0,-1,0b0001), (1,0,0b0010), (0,1,0b0100), (-1,0,0b1000) ];
+                let mut mask: u8 = 0;
+                for (dx,dy,bit) in nb { if world.is_road(IVec2::new(mx+dx, my+dy)) { mask |= bit; } }
+                let spr = &road_atlas.sprites[mask as usize];
+                let w = road_atlas.w; let h = road_atlas.h;
+                // Базовая заливка дороги в ромбе тайла, чтобы не было «обрезки»
+                tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [120, 110, 90, 220]);
+                // Дорога совпадает с ромбом тайла: центр по X, низ ровно к нижней вершине ромба
+                // (без дополнительного смещения, в отличие от высоких спрайтов зданий)
+                let top_left_x = screen_pos.x - w / 2;
+                let top_left_y = screen_pos.y + atlas.half_h - h;
+                tiles::blit_sprite_alpha_noscale_tinted(frame, width, height, top_left_x, top_left_y, spr, w, h, 255);
+            }
         }
         if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v,50,50,255]); }
         if world.has_tree(IVec2::new(mx, my)) {
