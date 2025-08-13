@@ -69,15 +69,6 @@ pub fn draw_terrain_and_overlays(
         if show_grid { tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20,20,20,255]); }
         // дороги — рисуем отдельным проходом после цикла по тайлам (см. ниже)
         if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v,50,50,255]); }
-        if world.has_tree(IVec2::new(mx, my)) {
-            let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
-            if let Some(ta) = &tree_atlas { if !ta.sprites.is_empty() {
-                let idx = stage.min(ta.sprites.len()-1);
-                let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
-                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
-                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
-            } else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }} else { tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8); }
-        }
 
         // Оверлеи месторождений (поверх базового тайла)
         let tp = IVec2::new(mx, my);
@@ -129,6 +120,23 @@ pub fn draw_terrain_and_overlays(
             let top_left_x = screen_pos.x - w / 2;
             let top_left_y = screen_pos.y + atlas.half_h - h + hover_off;
             tiles::blit_sprite_alpha_noscale_tinted(frame, width, height, top_left_x, top_left_y, spr, w, h, 255);
+        }
+    }}
+
+    // Третий проход: деревья поверх дорог (z-index выше дорог)
+    for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+        if !world.has_tree(IVec2::new(mx, my)) { continue; }
+        let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
+        let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+        if let Some(ta) = tree_atlas { if !ta.sprites.is_empty() {
+            let idx = stage.min(ta.sprites.len()-1);
+            let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
+            let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
+            tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
+        } else {
+            tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
+        }} else {
+            tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
         }
     }}
 }

@@ -182,3 +182,39 @@ pub fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resource
     }
     true
 }
+
+// Суммарное золото на складах
+pub fn warehouses_total_gold(warehouses: &Vec<WarehouseStore>) -> i32 {
+    warehouses.iter().map(|w| w.gold).sum()
+}
+
+// Проверка возможности постройки: учитываем ресурсы и склады вместе (wood + gold)
+pub fn can_afford_building(warehouses: &Vec<WarehouseStore>, resources: &Resources, cost: &Resources) -> bool {
+    let total_wood = warehouses_total_wood(warehouses) + resources.wood;
+    let total_gold = warehouses_total_gold(warehouses) + resources.gold;
+    total_wood >= cost.wood && total_gold >= cost.gold
+}
+
+// Списать ресурсы на постройку, забирая сначала со складов, затем из общих ресурсов
+pub fn spend_building_cost(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, cost: &Resources) -> bool {
+    if !can_afford_building(warehouses, resources, cost) { return false; }
+    // Дерево
+    let mut need_wood = cost.wood;
+    for w in warehouses.iter_mut() {
+        if need_wood == 0 { break; }
+        let take = need_wood.min(w.wood);
+        w.wood -= take;
+        need_wood -= take;
+    }
+    if need_wood > 0 { resources.wood -= need_wood; }
+    // Золото
+    let mut need_gold = cost.gold;
+    for w in warehouses.iter_mut() {
+        if need_gold == 0 { break; }
+        let take = need_gold.min(w.gold);
+        w.gold -= take;
+        need_gold -= take;
+    }
+    if need_gold > 0 { resources.gold -= need_gold; }
+    true
+}

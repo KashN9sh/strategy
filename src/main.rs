@@ -936,7 +936,7 @@ fn run() -> Result<()> {
                                                 for dy in -R..=R { for dx in -R..=R {
                                                     let p = IVec2::new(b.pos.x+dx, b.pos.y+dy);
                                                     let tk = world.get_tile(p.x, p.y);
-                                                    if tk != TileKind::Water && !world.has_tree(p) && !world.is_occupied(p) && !world.is_road(p) {
+                                                    if tk != TileKind::Water && !world.has_tree(p) && !world.is_occupied(p) && !world.is_road(p) && !world.is_road(IVec2::new(p.x-1, p.y-1)) {
                                                         let d = dx.abs() + dy.abs();
                                                         if best.map(|(bd,_)| d < bd).unwrap_or(true) { best = Some((d, p)); }
                                                     }

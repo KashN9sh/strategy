@@ -132,11 +132,15 @@ pub fn handle_left_click(
         }
         if allowed {
             let cost = building_cost(*selected_building);
-            if resources.gold >= cost.gold && spend_wood(warehouses, resources, cost.wood) {
-                resources.gold -= cost.gold;
+            if crate::types::can_afford_building(warehouses, resources, &cost) {
+                let _ = crate::types::spend_building_cost(warehouses, resources, &cost);
                 world.occupy(tp);
                 let default_workers = match *selected_building { BuildingKind::House | BuildingKind::Warehouse => 0, _ => 1 };
                 buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers });
+                // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
+                if *selected_building == BuildingKind::Warehouse {
+                    warehouses.push(WarehouseStore { pos: tp, ..Default::default() });
+                }
                 *buildings_dirty = true;
                 if *selected_building == BuildingKind::House {
                     citizens.push(Citizen {
