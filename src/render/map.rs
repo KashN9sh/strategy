@@ -16,6 +16,7 @@ pub fn draw_terrain_and_overlays(
     water_frame: usize,
     show_grid: bool,
     show_forest_overlay: bool,
+    draw_trees_in_this_pass: bool,
     tree_atlas: &Option<crate::atlas::TreeAtlas>,
     road_atlas: &RoadAtlas,
 ) {
@@ -123,22 +124,24 @@ pub fn draw_terrain_and_overlays(
         }
     }}
 
-    // Третий проход: деревья поверх дорог (z-index выше дорог)
-    for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
-        if !world.has_tree(IVec2::new(mx, my)) { continue; }
-        let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
-        let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
-        if let Some(ta) = tree_atlas { if !ta.sprites.is_empty() {
-            let idx = stage.min(ta.sprites.len()-1);
-            let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
-            let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
-            tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
-        } else {
-            tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
-        }} else {
-            tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
-        }
-    }}
+    // Третий проход (опционально): деревья поверх дорог
+    if draw_trees_in_this_pass {
+        for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+            if !world.has_tree(IVec2::new(mx, my)) { continue; }
+            let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
+            let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+            if let Some(ta) = tree_atlas { if !ta.sprites.is_empty() {
+                let idx = stage.min(ta.sprites.len()-1);
+                let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
+                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
+                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
+            } else {
+                tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
+            }} else {
+                tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
+            }
+        }}
+    }
 }
 
 pub fn draw_buildings(
@@ -171,6 +174,160 @@ pub fn draw_buildings(
 }
 
 // индекс спрайта здания — см. atlas::building_sprite_index
+
+/// Нарисовать одно дерево (спрайт или примитив) в координатах тайла
+pub fn draw_tree_at(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    tree_atlas: &Option<crate::atlas::TreeAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    mx: i32, my: i32, stage: usize,
+) {
+    let screen_pos = world_to_screen(atlas, screen_center, cam_snap, mx, my);
+    if let Some(ta) = tree_atlas { if !ta.sprites.is_empty() {
+        let idx = stage.min(ta.sprites.len()-1);
+        let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ta.w as f32; let draw_w = (ta.w as f32 * scale).round() as i32; let draw_h = (ta.h as f32 * scale).round() as i32;
+        let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y - atlas.half_h - draw_h;
+        tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ta.sprites[idx], ta.w, ta.h, draw_w, draw_h);
+    } else {
+        tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
+    }} else {
+        tiles::draw_tree(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h, atlas.half_w, atlas.half_h, stage as u8);
+    }
+}
+
+/// Нарисовать одно здание
+pub fn draw_building_at(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    b: &Building,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+) {
+    let screen_pos = world_to_screen(atlas, screen_center, cam_snap, b.pos.x, b.pos.y);
+    if let Some(ba) = building_atlas {
+        if let Some(idx) = building_sprite_index(b.kind) {
+            if idx < ba.sprites.len() {
+                let tile_w_px = atlas.half_w * 2 + 1; let scale = tile_w_px as f32 / ba.w as f32; let draw_w = (ba.w as f32 * scale).round() as i32; let draw_h = (ba.h as f32 * scale).round() as i32;
+                let building_off = ((atlas.half_h as f32) * 0.7).round() as i32;
+                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = screen_pos.y + atlas.half_h - draw_h + building_off;
+                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h);
+                return;
+            }
+        }
+    }
+    let color = building_color(b.kind);
+    tiles::draw_building(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
+}
+
+/// Объединённый проход: деревья и здания, отсортированные по глубине (x+y)
+pub fn draw_structures_sorted(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    world: &World,
+    buildings: &Vec<Building>,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+    tree_atlas: &Option<crate::atlas::TreeAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+) {
+    #[derive(Clone, Copy)]
+    enum ItemKind { Building(usize), Tree { x: i32, y: i32, stage: usize } }
+    let mut items: Vec<(i32, i32, i32, ItemKind)> = Vec::new();
+    // здания
+    for (i, b) in buildings.iter().enumerate() {
+        let mx = b.pos.x; let my = b.pos.y;
+        if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
+        // Классический порядок изометрии: по диагонали (x+y), затем по x (запад→восток)
+        items.push((mx + my, mx, 1, ItemKind::Building(i)));
+    }
+    // деревья
+    for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+        if world.has_tree(IVec2::new(mx, my)) {
+            let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+            items.push((mx + my, mx, 0, ItemKind::Tree { x: mx, y: my, stage }));
+        }
+    }}
+    // Сортировка: (x+y) → x → pri (дерево до здания)
+    items.sort_by_key(|(z, x, pri, _)| (*z, *x, *pri));
+    for (_, _, _, it) in items {
+        match it {
+            ItemKind::Building(i) => {
+                let b = &buildings[i];
+                draw_building_at(frame, width, height, atlas, b, building_atlas, screen_center, cam_snap);
+            }
+            ItemKind::Tree { x, y, stage } => {
+                draw_tree_at(frame, width, height, atlas, tree_atlas, screen_center, cam_snap, x, y, stage);
+            }
+        }
+    }
+}
+
+/// Последовательный проход по тайлам (my→mx): на каждом тайле рисуем дерево и/или здание.
+/// Это даёт корректный painter's order для высоких спрайтов без сложной сортировки.
+pub fn draw_structures_scanned(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    world: &World,
+    buildings: &Vec<Building>,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+    tree_atlas: &Option<crate::atlas::TreeAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+) {
+    use std::collections::HashMap;
+    let mut by_pos: HashMap<(i32,i32), usize> = HashMap::new();
+    for (i, b) in buildings.iter().enumerate() {
+        by_pos.insert((b.pos.x, b.pos.y), i);
+    }
+    for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+        // дерево на этой клетке
+        if world.has_tree(IVec2::new(mx, my)) {
+            let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+            draw_tree_at(frame, width, height, atlas, tree_atlas, screen_center, cam_snap, mx, my, stage);
+        }
+        // здание на этой клетке
+        if let Some(&bi) = by_pos.get(&(mx, my)) {
+            let b = &buildings[bi];
+            draw_building_at(frame, width, height, atlas, b, building_atlas, screen_center, cam_snap);
+        }
+    }}
+}
+
+/// Диагональный проход (по сумме координат x+y): корректный порядок для изометрии.
+pub fn draw_structures_diagonal_scan(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    world: &World,
+    buildings: &Vec<Building>,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+    tree_atlas: &Option<crate::atlas::TreeAtlas>,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+) {
+    use std::collections::HashMap;
+    let mut by_pos: HashMap<(i32,i32), usize> = HashMap::new();
+    for (i, b) in buildings.iter().enumerate() {
+        by_pos.insert((b.pos.x, b.pos.y), i);
+    }
+    let min_s = min_tx + min_ty;
+    let max_s = max_tx + max_ty;
+    for s in min_s..=max_s {
+        for mx in min_tx..=max_tx {
+            let my = s - mx;
+            if my < min_ty || my > max_ty { continue; }
+            // дерево: рисуем раньше, чтобы здание при необходимости его перекрывало на этой же диагонали
+            if world.has_tree(IVec2::new(mx, my)) {
+                let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+                draw_tree_at(frame, width, height, atlas, tree_atlas, screen_center, cam_snap, mx, my, stage);
+            }
+            if let Some(&bi) = by_pos.get(&(mx, my)) {
+                let b = &buildings[bi];
+                draw_building_at(frame, width, height, atlas, b, building_atlas, screen_center, cam_snap);
+            }
+        }
+    }
+}
 
 pub fn draw_citizens(
     frame: &mut [u8], width: i32, height: i32,

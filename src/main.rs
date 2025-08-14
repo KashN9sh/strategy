@@ -382,7 +382,17 @@ fn run() -> Result<()> {
 
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
                     let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
-                    render::map::draw_terrain_and_overlays(frame, width_i32, height_i32, &atlas, &mut world, min_tx, min_ty, max_tx, max_ty, screen_center, cam_snap, water_frame, show_grid, show_forest_overlay, &tree_atlas, &road_atlas);
+                    render::map::draw_terrain_and_overlays(
+                        frame, width_i32, height_i32, &atlas, &mut world,
+                        min_tx, min_ty, max_tx, max_ty,
+                        screen_center, cam_snap,
+                        water_frame,
+                        show_grid,
+                        show_forest_overlay,
+                        false, // деревья рисуем вместе со зданиями после сортировки
+                        &tree_atlas,
+                        &road_atlas,
+                    );
 
                     // Поленья на земле
                     for li in &logs_on_ground {
@@ -407,12 +417,20 @@ fn run() -> Result<()> {
                         render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
                     }
 
-                    // Отрисуем здания по глубине
+                    // Отрисуем здания и деревья вместе, отсортировав по глубине
                     if buildings_dirty {
-                    buildings.sort_by_key(|b| b.pos.x + b.pos.y);
+                        buildings.sort_by_key(|b| b.pos.x + b.pos.y);
                         buildings_dirty = false;
                     }
-                    render::map::draw_buildings(frame, width_i32, height_i32, &atlas, &buildings, &building_atlas, screen_center, cam_snap, min_tx, min_ty, max_tx, max_ty);
+                    // Диагональный проход (x+y): обеспечивает правильный painter's order
+                    render::map::draw_structures_diagonal_scan(
+                        frame, width_i32, height_i32, &atlas,
+                        &world,
+                        &buildings, &building_atlas,
+                        &tree_atlas,
+                        screen_center, cam_snap,
+                        min_tx, min_ty, max_tx, max_ty,
+                    );
 
                     render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap);
 
