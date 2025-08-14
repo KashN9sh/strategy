@@ -120,8 +120,12 @@ pub fn handle_left_click(
         if allowed {
             match *selected_building {
                 BuildingKind::Fishery => {
-                    const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
-                    allowed = NB.iter().any(|(dx,dy)| world.get_tile(tp.x+dx, tp.y+dy) == crate::types::TileKind::Water);
+                    // Требуем: клетка суши и не занята, и хотя бы один из 8 соседей — вода
+                    const NB8: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+                    let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x+dx, tp.y+dy) == crate::types::TileKind::Water);
+                    allowed = !world.is_occupied(tp)
+                        && world.get_tile(tp.x, tp.y) != crate::types::TileKind::Water
+                        && near_water;
                 }
                 BuildingKind::WheatField => { allowed = tile_kind == crate::types::TileKind::Grass; }
                 BuildingKind::StoneQuarry => { allowed = world.has_stone_deposit(tp); }
