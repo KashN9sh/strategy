@@ -152,7 +152,7 @@ pub fn handle_left_click(
                     });
                     *population += 1;
                 }
-                *active_building_panel = Some(tp);
+                // Не открываем панель автоматически после постройки
                 return true;
             }
         }
