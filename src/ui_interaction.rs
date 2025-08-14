@@ -122,15 +122,13 @@ pub fn handle_left_click(
                 BuildingKind::Fishery => {
                     // Требуем: клетка суши и не занята, и хотя бы один из 8 соседей — вода
                     const NB8: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
-                    let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x+dx, tp.y+dy) == crate::types::TileKind::Water);
-                    allowed = !world.is_occupied(tp)
-                        && world.get_tile(tp.x, tp.y) != crate::types::TileKind::Water
-                        && near_water;
+                    let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x + 1 + dx, tp.y + 1 + dy) == crate::types::TileKind::Water);
+                    allowed = !world.is_occupied(tp) && near_water;
                 }
                 BuildingKind::WheatField => { allowed = tile_kind == crate::types::TileKind::Grass; }
-                BuildingKind::StoneQuarry => { allowed = world.has_stone_deposit(tp); }
-                BuildingKind::ClayPit => { allowed = world.has_clay_deposit(tp); }
-                BuildingKind::IronMine => { allowed = world.has_iron_deposit(tp); }
+                BuildingKind::StoneQuarry => { allowed = world.has_stone_deposit(tp + IVec2::new(1, 1)); }
+                BuildingKind::ClayPit => { allowed = world.has_clay_deposit(tp + IVec2::new(1, 1)); }
+                BuildingKind::IronMine => { allowed = world.has_iron_deposit(tp + IVec2::new(1, 1)); }
                 _ => {}
             }
         }
