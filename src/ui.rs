@@ -141,7 +141,8 @@ pub struct EconomyLayout { pub x:i32, pub y:i32, pub w:i32, pub h:i32, pub tax_m
 pub fn layout_economy_panel(fw: i32, fh: i32, s: i32) -> EconomyLayout {
     let padb = 8 * s; let btn_h = 18 * s; let bottom_h = bottom_panel_height(s); let by0 = fh - bottom_h;
     let x = padb; let y = by0 + padb + btn_h + 6 * s; let w = (fw - 2 * padb).max(0); let h = bottom_h - (y - by0) - padb;
-    let minus_w = 14 * s; let minus_h = 14 * s; let plus_w = 14 * s; let plus_h = 14 * s;
+    // размеры и стиль как у кнопок в меню строительства
+    let minus_w = button_w_for(b"-", s); let minus_h = btn_h; let plus_w = button_w_for(b"+", s); let plus_h = btn_h;
     // Tax label width influences button positions
     let tax_label_w = text_w(b"TAX", s) + 6 * s; // запас под ':'
     let tax_minus_x = x + tax_label_w + 8 * s; let tax_minus_y = y;
@@ -151,9 +152,9 @@ pub fn layout_economy_panel(fw: i32, fh: i32, s: i32) -> EconomyLayout {
     let policy_label_w = text_w(b"FOOD POLICY", s);
     let policy_label_x = tax_plus_x + plus_w + 8 * s + reserved_num_w + 20 * s; // старт позиции метки
     let policy_bal_x = policy_label_x + policy_label_w + 8 * s; let policy_bal_y = y;
-    let policy_bal_w = button_w_for(b"Balanced", s); let policy_bal_h = 14 * s;
-    let policy_bread_x = policy_bal_x + policy_bal_w + 6 * s; let policy_bread_y = policy_bal_y; let policy_bread_w = button_w_for(b"Bread", s); let policy_bread_h = 14 * s;
-    let policy_fish_x = policy_bread_x + policy_bread_w + 6 * s; let policy_fish_y = policy_bal_y; let policy_fish_w = button_w_for(b"Fish", s); let policy_fish_h = 14 * s;
+    let policy_bal_w = button_w_for(b"Balanced", s); let policy_bal_h = btn_h;
+    let policy_bread_x = policy_bal_x + policy_bal_w + 6 * s; let policy_bread_y = policy_bal_y; let policy_bread_w = button_w_for(b"Bread", s); let policy_bread_h = btn_h;
+    let policy_fish_x = policy_bread_x + policy_bread_w + 6 * s; let policy_fish_y = policy_bal_y; let policy_fish_w = button_w_for(b"Fish", s); let policy_fish_h = btn_h;
     EconomyLayout { x, y, w, h, tax_minus_x, tax_minus_y, tax_minus_w: minus_w, tax_minus_h: minus_h, tax_plus_x, tax_plus_y, tax_plus_w: plus_w, tax_plus_h: plus_h, policy_bal_x, policy_bal_y, policy_bal_w, policy_bal_h, policy_bread_x, policy_bread_y, policy_bread_w, policy_bread_h, policy_fish_x, policy_fish_y, policy_fish_w, policy_fish_h }
 }
 
@@ -407,40 +408,37 @@ pub fn draw_ui(
     } else {
         // Economy panel
         let lay = layout_economy_panel(fw, fh, s);
+        // Вертикальное выравнивание лейблов по центру кнопок
+        let px = 2 * s; let btn_h = 18 * s; let text_h = 5 * px; let label_y = lay.y + (btn_h - text_h) / 2;
         // Tax controls (ряд под вкладками, слева направо)
-        draw_text_mini(frame, fw, fh, lay.x, lay.y, b"TAX", [200,200,200,255], s);
-        // -/+ кнопки
-        fill_rect(frame, fw, fh, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h, [120, 100, 80, 220]);
-        fill_rect(frame, fw, fh, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h, [120, 100, 80, 220]);
-        // знаки
-        let px = 2 * s;
-        fill_rect(frame, fw, fh, lay.tax_minus_x + 3 * s, lay.tax_minus_y + lay.tax_minus_h/2 - s, lay.tax_minus_w - 6 * s, 2 * s, [230,230,230,255]);
-        let cxp = lay.tax_plus_x + lay.tax_plus_w/2; let cyp = lay.tax_plus_y + lay.tax_plus_h/2;
-        fill_rect(frame, fw, fh, cxp - (lay.tax_plus_w/2 - 3 * s), cyp - s, lay.tax_plus_w - 6 * s, 2 * s, [230,230,230,255]);
-        fill_rect(frame, fw, fh, cxp - s, cyp - (lay.tax_plus_h/2 - 3 * s), 2 * s, lay.tax_plus_h - 6 * s, [230,230,230,255]);
-        // значение налога
-        // налог показываем как монетки/жителя/день
-        let taxp = (tax_rate.round().max(0.0)) as u32; draw_number(frame, fw, fh, lay.tax_plus_x + lay.tax_plus_w + 8 * s, lay.y, taxp, [255,255,255,255], s);
+        draw_text_mini(frame, fw, fh, lay.x, label_y, b"TAX", [200,200,200,255], s);
+        // -/+ кнопки как в меню строительства
+        let hovered_minus = point_in_rect(cursor_x, cursor_y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h);
+        let hovered_plus  = point_in_rect(cursor_x, cursor_y, lay.tax_plus_x,  lay.tax_plus_y,  lay.tax_plus_w,  lay.tax_plus_h);
+        draw_button(frame, fw, fh, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h, false, hovered_minus, true, b"-", [230,230,230,255], s);
+        draw_button(frame, fw, fh, lay.tax_plus_x,  lay.tax_plus_y,  lay.tax_plus_w,  lay.tax_plus_h,  false, hovered_plus,  true, b"+", [230,230,230,255], s);
+        // значение налога (по центру вертикали строки)
+        let taxp = (tax_rate.round().max(0.0)) as u32; draw_number(frame, fw, fh, lay.tax_plus_x + lay.tax_plus_w + 8 * s, label_y, taxp, [255,255,255,255], s);
         // Policy label и кнопки справа
-        draw_text_mini(frame, fw, fh, lay.policy_bal_x - (text_w(b"FOOD", s) + 8 * s), lay.policy_bal_y, b"FOOD", [200,200,200,255], s);
-        let draw_toggle = |frame: &mut [u8], x:i32,y:i32,w:i32,h:i32, active:bool, label:&[u8]| {
-            let col = if active { [185,140,95,220] } else { [140,105,75,180] };
-            fill_rect(frame, fw, fh, x, y, w, h, col);
-            draw_text_mini(frame, fw, fh, x + 4 * s, y + 2 * s, label, [230,230,230,255], s);
+        draw_text_mini(frame, fw, fh, lay.policy_bal_x - (text_w(b"FOOD", s) + 8 * s), label_y, b"FOOD", [200,200,200,255], s);
+        let draw_toggle = |frame: &mut [u8], x:i32,y:i32,w:i32,h:i32, active:bool, label:&[u8], hovered: bool| {
+            draw_button(frame, fw, fh, x, y, w, h, active, hovered, true, label, [220,220,220,255], s);
         };
-        draw_toggle(frame, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h, food_policy == FoodPolicy::Balanced, b"Balanced");
-        draw_toggle(frame, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h, food_policy == FoodPolicy::BreadFirst, b"Bread");
-        draw_toggle(frame, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h, food_policy == FoodPolicy::FishFirst, b"Fish");
-        // Housing: used/capacity (справа от net)
-        let mut info_x = lay.x;
+        let by = lay.y; // выравнивание по базовой линии текста
+        draw_toggle(frame, lay.policy_bal_x, by, lay.policy_bal_w, lay.policy_bal_h, food_policy == FoodPolicy::Balanced, b"Balanced", point_in_rect(cursor_x, cursor_y, lay.policy_bal_x, by, lay.policy_bal_w, lay.policy_bal_h));
+        draw_toggle(frame, lay.policy_bread_x, by, lay.policy_bread_w, lay.policy_bread_h, food_policy == FoodPolicy::BreadFirst, b"Bread", point_in_rect(cursor_x, cursor_y, lay.policy_bread_x, by, lay.policy_bread_w, lay.policy_bread_h));
+        draw_toggle(frame, lay.policy_fish_x, by, lay.policy_fish_w, lay.policy_fish_h, food_policy == FoodPolicy::FishFirst, b"Fish", point_in_rect(cursor_x, cursor_y, lay.policy_fish_x, by, lay.policy_fish_w, lay.policy_fish_h));
+        // Вторая строка: Housing слева, как TAX; справа — при наличии net-статистика
+        let line2_y = lay.y + 20 * s;
+        let housing_text = format!("HOUSING {} / {}", housing_used.max(0), housing_cap.max(0));
+        draw_text_mini(frame, fw, fh, lay.x, line2_y, housing_text.as_bytes(), [200,220,220,255], s);
+        // после Housing — дополнительная информация доход/расход, если есть
         if last_income != 0 || last_upkeep != 0 {
-            let net = last_income - last_upkeep; let info = format!("+{}  -{}  = {}", last_income.max(0), last_upkeep.max(0), net).into_bytes();
-            draw_text_mini(frame, fw, fh, info_x, lay.y + 20 * s, &info, [220,220,200,255], s);
-            info_x += text_w(&info, s) + 12 * s;
+            let mut info_x = lay.x + text_w(housing_text.as_bytes(), s) + 12 * s;
+            let net = last_income - last_upkeep;
+            let info = format!("  |  +{}  -{}  = {}", last_income.max(0), last_upkeep.max(0), net).into_bytes();
+            draw_text_mini(frame, fw, fh, info_x, line2_y, &info, [220,220,200,255], s);
         }
-        // Покажем жильё всегда — это полезная метрика
-        let htxt = format!("  |  Housing {} / {}", housing_used.max(0), housing_cap.max(0));
-        draw_text_mini(frame, fw, fh, info_x, lay.y + 20 * s, htxt.as_bytes(), [200,220,220,255], s);
     }
 }
 
@@ -459,10 +457,19 @@ fn draw_button(
     let bg_disabled = [115, 95, 75, 150];
     let bg = if !enabled { bg_disabled } else if active { bg_active } else if hovered { bg_hover } else { bg_base };
     fill_rect(frame, fw, fh, x, y, w, h, bg);
-    // лёгкая верхняя кромка (блик) и нижняя тень для объёма
-    fill_rect(frame, fw, fh, x, y, w, (2 * s).max(2), [255, 255, 255, 45]);
-    fill_rect(frame, fw, fh, x, y + h - (2 * s).max(2), w, (2 * s).max(2), [0, 0, 0, 40]);
-    draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
+    // верхний блик и нижняя тень для объёма (чуть сильнее, чтобы быть заметнее на тёмной плашке)
+    let band = (2 * s).max(2);
+    fill_rect(frame, fw, fh, x, y, w, band, [255, 255, 255, 70]);
+    fill_rect(frame, fw, fh, x, y + h - band, w, band, [0, 0, 0, 60]);
+    // Центрируем однобуквенные служебные ярлыки ("+"/"-") по кнопке,
+    // а обычные — оставляем с левым отступом как в строительном меню
+    if label == b"+" || label == b"-" {
+        let px = 2 * s; let text_w = 4 * px; let text_h = 5 * px;
+        let cx = x + (w - text_w) / 2; let cy = y + (h - text_h) / 2;
+        draw_text_mini(frame, fw, fh, cx, cy, label, col, s);
+    } else {
+        draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
+    }
 }
 
 fn label_for_building(bk: BuildingKind) -> &'static [u8] {
@@ -545,7 +552,7 @@ fn draw_text_mini(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, text: &[u8
     let mut cx = x; let cy = y;
     for &ch in text {
         if ch == b' ' { cx += 4 * px; continue; }
-        if ch == b'[' || ch == b']' || ch == b'/' || ch == b'\\' || (ch >= b'0' && ch <= b'9') || (ch >= b'A' && ch <= b'Z') || (ch >= b'a' && ch <= b'z') {
+        if ch == b'[' || ch == b']' || ch == b'/' || ch == b'\\' || ch == b'+' || ch == b'-' || (ch >= b'0' && ch <= b'9') || (ch >= b'A' && ch <= b'Z') || (ch >= b'a' && ch <= b'z') {
             draw_glyph_3x5(frame, fw, fh, cx, cy, ch, color, px);
             cx += 4 * px;
         } else { cx += 4 * px; }
@@ -590,6 +597,9 @@ fn draw_glyph_3x5(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, ch: u8, co
         b'Y' => [1,0,1, 1,0,1, 0,1,0, 0,1,0, 0,1,0],
         b'Z' => [1,1,1, 0,0,1, 0,1,0, 1,0,0, 1,1,1],
         b'X' => [1,0,1, 1,0,1, 0,1,0, 1,0,1, 1,0,1],
+        // Симметричные, ровные глифы для + и -
+        b'+' => [0,0,0, 0,1,0, 1,1,1, 0,1,0, 0,0,0],
+        b'-' => [0,0,0, 0,0,0, 1,1,1, 0,0,0, 0,0,0],
         b'[' => [1,1,0, 1,0,0, 1,0,0, 1,0,0, 1,1,0],
         b']' => [0,1,1, 0,0,1, 0,0,1, 0,0,1, 0,1,1],
         b'/' => [0,0,1, 0,1,0, 0,1,0, 1,0,0, 1,0,0],
