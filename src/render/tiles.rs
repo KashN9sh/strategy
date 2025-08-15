@@ -165,20 +165,38 @@ pub fn draw_emote_on_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, 
     let t = (r / 4).max(1);
     let eye_dx = (r / 2).max(2);
     let eye_y = cy - t;
-    // draw 2x2 (or t x t) eyes
+    // измеряем локальную яркость в местах глаз и рта, чтобы выбрать контрастную палитру
+    let sample = [
+        get_px(frame, width, height, cx - eye_dx, eye_y),
+        get_px(frame, width, height, cx + eye_dx, eye_y),
+        get_px(frame, width, height, cx, cy),
+    ];
+    let avg_lum: u16 = sample.iter().map(|p| luminance_u8(p[0], p[1], p[2]) as u16).sum::<u16>() / (sample.len() as u16);
+    let use_dark = avg_lum > 140; // если фон светлый — рисуем тёмным
+
+    let white = [255,255,255,255];
+    let black = [10,10,10,255];
+    let eye_col = if use_dark { black } else { white };
+    let mouth_cols = match kind {
+        2 => if use_dark { [180, 160, 0, 255] } else { [255, 255, 0, 255] },    // happy
+        0 => if use_dark { [180, 100, 100, 255] } else { [255, 160, 160, 255] }, // sad
+        _ => if use_dark { [160, 160, 160, 255] } else { [220, 220, 220, 255] }, // neutral
+    };
+
+    // глаза (t x t)
     for dy in 0..t { for dx in 0..t {
-        set_px(frame, width, height, cx - eye_dx + dx, eye_y + dy, [255,255,255,255]);
-        set_px(frame, width, height, cx + eye_dx - dx, eye_y + dy, [255,255,255,255]);
+        set_px(frame, width, height, cx - eye_dx + dx, eye_y + dy, eye_col);
+        set_px(frame, width, height, cx + eye_dx - dx, eye_y + dy, eye_col);
     }}
-    // mouth
-    let mouth_w = (r as f32 * 1.2).round() as i32; // slightly wider
+    // рот
+    let mouth_w = (r as f32 * 1.2).round() as i32;
     let mx0 = cx - mouth_w/2; let mx1 = cx + mouth_w/2;
-    let my = cy + t; // baseline inside circle
-    let (col, up) = match kind { 2 => ([255,255,0,255], 1), 0 => ([255,160,160,255], -1), _ => ([220,220,220,255], 0) };
-    for yoff in 0..t { for x in mx0..=mx1 { set_px(frame, width, height, x, my + yoff, col); }}
-    // curve hint at corners
+    let my = cy + t;
+    for yoff in 0..t { for x in mx0..=mx1 { set_px(frame, width, height, x, my + yoff, mouth_cols); }}
+    // намёк на кривизну
+    let up = match kind { 2 => 1, 0 => -1, _ => 0 };
     if up != 0 {
-        for k in 0..=t { set_px(frame, width, height, mx0, my - up * (t - k), col); set_px(frame, width, height, mx1, my - up * (t - k), col); }
+        for k in 0..=t { set_px(frame, width, height, mx0, my - up * (t - k), mouth_cols); set_px(frame, width, height, mx1, my - up * (t - k), mouth_cols); }
     }
 }
 
@@ -219,5 +237,17 @@ fn set_px(frame: &mut [u8], w: i32, h: i32, x: i32, y: i32, rgba: [u8; 4]) {
     if x < 0 || y < 0 || x >= w || y >= h { return; }
     let i = ((y * w + x) * 4) as usize;
     frame[i..i+4].copy_from_slice(&rgba);
+}
+
+fn get_px(frame: &[u8], w: i32, h: i32, x: i32, y: i32) -> [u8; 4] {
+    if x < 0 || y < 0 || x >= w || y >= h { return [0,0,0,0]; }
+    let i = ((y * w + x) * 4) as usize;
+    [frame[i], frame[i+1], frame[i+2], frame[i+3]]
+}
+
+fn luminance_u8(r: u8, g: u8, b: u8) -> u8 {
+    // ITU-R BT.601 approx: 0.299 R + 0.587 G + 0.114 B
+    let r = r as u16; let g = g as u16; let b = b as u16;
+    (((77*r + 150*g + 29*b) >> 8) as u8)
 }
 
