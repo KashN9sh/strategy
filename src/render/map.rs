@@ -335,17 +335,29 @@ pub fn draw_citizens(
     citizens: &Vec<crate::types::Citizen>,
     buildings: &Vec<Building>,
     screen_center: IVec2, cam_snap: glam::Vec2,
+    citizen_sprite: &Option<(Vec<u8>, i32, i32)>,
 ) {
     for c in citizens.iter() {
         let (fx, fy) = if c.moving { let dx = (c.target.x - c.pos.x) as f32; let dy = (c.target.y - c.pos.y) as f32; (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress) } else { (c.pos.x as f32, c.pos.y as f32) };
         let sx = ((fx - fy) * atlas.half_w as f32).round() as i32; let sy = ((fx + fy) * atlas.half_h as f32).round() as i32;
         let screen_pos = screen_center + IVec2::new(sx - cam_snap.x as i32, sy - cam_snap.y as i32);
-        let r = (atlas.half_w as f32 * 0.15).round() as i32;
+        let r = (atlas.half_w as f32 * 0.24).round() as i32; // увеличенный размер маркера
         let mut col = [255, 230, 120, 255];
         if let Some(wp) = c.workplace { if let Some(b) = buildings.iter().find(|b| b.pos == wp) { col = building_color(b.kind); } }
         let base_y = screen_pos.y - atlas.half_h/3;
         let rr = r.max(2);
-        tiles::draw_citizen_marker(frame, width, height, screen_pos.x, base_y, rr, col);
+        if let Some((spr, sw, sh)) = citizen_sprite {
+            let draw_w = rr * 2 + 1; let draw_h = rr * 2 + 1;
+            let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = base_y - draw_h / 2;
+            tiles::blit_sprite_alpha_scaled_color_tint(
+                frame, width, height,
+                top_left_x, top_left_y,
+                spr, *sw, *sh, draw_w, draw_h,
+                [col[0], col[1], col[2]], 180, 255,
+            );
+        } else {
+            tiles::draw_citizen_marker(frame, width, height, screen_pos.x, base_y, rr, col);
+        }
         // мини-эмоция поверх маркера: рисуем “по кружку” более жирной линией
         let mood = if c.happiness as i32 >= 66 { 2 } else if c.happiness as i32 <= 33 { 0 } else { 1 };
         tiles::draw_emote_on_marker(frame, width, height, screen_pos.x, base_y, rr, mood);

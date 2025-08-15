@@ -126,6 +126,7 @@ fn run() -> Result<()> {
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
     let mut road_atlas = atlas::RoadAtlas::new();
+    let mut citizen_sprite: Option<(Vec<u8>, i32, i32)> = None;
     let mut road_mode = false;
     let mut path_debug_mode = false;
     let mut path_sel_a: Option<IVec2> = None;
@@ -254,6 +255,12 @@ fn run() -> Result<()> {
             sprites.push(out);
         }
         tree_atlas = Some(atlas::TreeAtlas { sprites, w: base_w as i32, h: ih as i32 });
+    }
+    // citizen.png: одиночный спрайт (квадратный предпочтительно), масштабируется под радиус маркера
+    if let Ok(img) = image::open("assets/citizen.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        citizen_sprite = Some((img.to_vec(), iw as i32, ih as i32));
     }
     let mut water_anim_time: f32 = 0.0;
     // Экономика: вчерашние итоги
@@ -442,7 +449,7 @@ fn run() -> Result<()> {
                         min_tx, min_ty, max_tx, max_ty,
                     );
 
-                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap);
+                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap, &citizen_sprite);
 
                     // Оверлей день/ночь
                     let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);

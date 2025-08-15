@@ -42,6 +42,57 @@ pub fn draw_line(frame: &mut [u8], width: i32, height: i32, mut x0: i32, mut y0:
     }
 }
 
+fn draw_pixel_circle_outline(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, r: i32, color: [u8; 4]) {
+    if r <= 0 { return; }
+    let mut x = r;
+    let mut y = 0;
+    let mut err = 1 - x; // midpoint circle
+    while x >= y {
+        // 8 octants
+        set_px(frame, width, height, cx + x, cy + y, color);
+        set_px(frame, width, height, cx + y, cy + x, color);
+        set_px(frame, width, height, cx - y, cy + x, color);
+        set_px(frame, width, height, cx - x, cy + y, color);
+        set_px(frame, width, height, cx - x, cy - y, color);
+        set_px(frame, width, height, cx - y, cy - x, color);
+        set_px(frame, width, height, cx + y, cy - x, color);
+        set_px(frame, width, height, cx + x, cy - y, color);
+
+        y += 1;
+        if err < 0 {
+            err += 2 * y + 1;
+        } else {
+            x -= 1;
+            err += 2 * (y - x) + 1;
+        }
+    }
+}
+
+fn draw_hspan(frame: &mut [u8], width: i32, height: i32, x0: i32, x1: i32, y: i32, color: [u8; 4]) {
+    if y < 0 || y >= height { return; }
+    let mut xa = x0.min(x1);
+    let mut xb = x0.max(x1);
+    if xb < 0 || xa >= width { return; }
+    xa = xa.max(0);
+    xb = xb.min(width - 1);
+    for x in xa..=xb { set_px(frame, width, height, x, y, color); }
+}
+
+fn draw_pixel_circle_filled(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, r: i32, color: [u8; 4]) {
+    if r <= 0 { return; }
+    let mut x = r;
+    let mut y = 0;
+    let mut err = 1 - x;
+    while x >= y {
+        draw_hspan(frame, width, height, cx - x, cx + x, cy + y, color);
+        draw_hspan(frame, width, height, cx - x, cx + x, cy - y, color);
+        draw_hspan(frame, width, height, cx - y, cx + y, cy + x, color);
+        draw_hspan(frame, width, height, cx - y, cx + y, cy - x, color);
+        y += 1;
+        if err < 0 { err += 2 * y + 1; } else { x -= 1; err += 2 * (y - x) + 1; }
+    }
+}
+
 pub fn draw_building(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32, color: [u8; 4]) {
     let bw = (half_w as f32 * 1.2) as i32; let bh = (half_h as f32 * 1.8) as i32;
     let x0 = (cx - bw / 2).clamp(0, width - 1); let x1 = (cx + bw / 2).clamp(0, width - 1);
@@ -49,17 +100,34 @@ pub fn draw_building(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32
     for y in y0..=y1 { for x in x0..=x1 { let idx = ((y as usize) * (width as usize) + (x as usize)) * 4; frame[idx..idx + 4].copy_from_slice(&color); } }
 }
 
+fn darken_color(color: [u8; 4], factor_num: u16, factor_den: u16) -> [u8; 4] {
+    let r = (color[0] as u16 * factor_num / factor_den).min(255) as u8;
+    let g = (color[1] as u16 * factor_num / factor_den).min(255) as u8;
+    let b = (color[2] as u16 * factor_num / factor_den).min(255) as u8;
+    [r, g, b, 255]
+}
+
+fn lighten_color(color: [u8; 4], delta: i16) -> [u8; 4] {
+    let add = |c: u8| -> u8 { let v = c as i16 + delta; if v < 0 { 0 } else if v > 255 { 255 } else { v as u8 } };
+    [add(color[0]), add(color[1]), add(color[2]), 255]
+}
+
+fn inside_octagon(dx: i32, dy: i32, r: i32) -> bool {
+    // Аппроксимация круга октагоном: m + 3/8*n <= r, где m=max(|dx|,|dy|), n=min(|dx|,|dy|)
+    let ax = dx.abs(); let ay = dy.abs();
+    let m = ax.max(ay);
+    let n = ax.min(ay);
+    // Умножаем на 8 для целочисленной арифметики
+    (m * 8 + n * 3) <= r * 8
+}
+
 pub fn draw_citizen_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, radius: i32, color: [u8;4]) {
-    let r = radius.max(1).min(12);
-    let r2 = r * r;
+    // Упрощённый «менее гладкий» вид: октагональная аппроксимация круга без эффектов
+    let r = radius.max(1);
     for dy in -r..=r {
         for dx in -r..=r {
-            if dx*dx + dy*dy <= r2 {
-                let x = cx + dx; let y = cy + dy;
-                if x >= 0 && y >= 0 && x < width && y < height {
-                    let idx = ((y as usize) * (width as usize) + (x as usize)) * 4;
-                    frame[idx..idx+4].copy_from_slice(&color);
-                }
+            if inside_octagon(dx, dy, r) {
+                set_px(frame, width, height, cx + dx, cy + dy, color);
             }
         }
     }
