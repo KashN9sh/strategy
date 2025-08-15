@@ -22,6 +22,8 @@ pub struct SaveBuilding {
     pub timer_ms: i32,
     #[serde(default)]
     pub workers_target: i32,
+    #[serde(default)]
+    pub capacity: i32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -49,6 +51,7 @@ impl SaveData {
                 y: b.pos.y,
                 timer_ms: b.timer_ms,
                 workers_target: b.workers_target,
+                capacity: b.capacity,
             })
             .collect();
         let mut trees = Vec::new();
@@ -66,6 +69,7 @@ impl SaveData {
                 pos: glam::IVec2::new(sb.x, sb.y),
                 timer_ms: sb.timer_ms,
                 workers_target: sb.workers_target,
+                capacity: sb.capacity,
             })
             .collect()
     }

@@ -1,12 +1,15 @@
-use crate::types::{Resources, BuildingKind, building_cost, ResourceKind};
+use crate::types::{Resources, BuildingKind, building_cost, ResourceKind, FoodPolicy};
 use crate::palette::resource_color;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UITab { Build, Economy }
 
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 // удалено: ui_bar_height (не используется)
-pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; padb * 2 + btn_h * 2 + 6 * s }
+pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; // Tabs + Categories + Items (межстрочный отступ один)
+    padb * 2 + btn_h * 3 + 6 * s * 2 }
 pub fn top_panel_height(s: i32) -> i32 {
     let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px;
     // Две строки контента (иконки/цифры) + отступ между ними
@@ -132,12 +135,38 @@ pub fn draw_building_panel(
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct EconomyLayout { pub x:i32, pub y:i32, pub w:i32, pub h:i32, pub tax_minus_x:i32, pub tax_minus_y:i32, pub tax_minus_w:i32, pub tax_minus_h:i32, pub tax_plus_x:i32, pub tax_plus_y:i32, pub tax_plus_w:i32, pub tax_plus_h:i32, pub policy_bal_x:i32, pub policy_bal_y:i32, pub policy_bal_w:i32, pub policy_bal_h:i32, pub policy_bread_x:i32, pub policy_bread_y:i32, pub policy_bread_w:i32, pub policy_bread_h:i32, pub policy_fish_x:i32, pub policy_fish_y:i32, pub policy_fish_w:i32, pub policy_fish_h:i32 }
+
+pub fn layout_economy_panel(fw: i32, fh: i32, s: i32) -> EconomyLayout {
+    let padb = 8 * s; let btn_h = 18 * s; let bottom_h = bottom_panel_height(s); let by0 = fh - bottom_h;
+    let x = padb; let y = by0 + padb + btn_h + 6 * s; let w = (fw - 2 * padb).max(0); let h = bottom_h - (y - by0) - padb;
+    let minus_w = 14 * s; let minus_h = 14 * s; let plus_w = 14 * s; let plus_h = 14 * s;
+    // Tax label width influences button positions
+    let tax_label_w = text_w(b"TAX", s) + 6 * s; // запас под ':'
+    let tax_minus_x = x + tax_label_w + 8 * s; let tax_minus_y = y;
+    let tax_plus_x = tax_minus_x + minus_w + 6 * s; let tax_plus_y = y;
+    // Политики — справа от блока налога (в одну строку)
+    let reserved_num_w = number_w(100, s); // до 100%
+    let policy_label_w = text_w(b"FOOD POLICY", s);
+    let policy_label_x = tax_plus_x + plus_w + 8 * s + reserved_num_w + 20 * s; // старт позиции метки
+    let policy_bal_x = policy_label_x + policy_label_w + 8 * s; let policy_bal_y = y;
+    let policy_bal_w = button_w_for(b"Balanced", s); let policy_bal_h = 14 * s;
+    let policy_bread_x = policy_bal_x + policy_bal_w + 6 * s; let policy_bread_y = policy_bal_y; let policy_bread_w = button_w_for(b"Bread", s); let policy_bread_h = 14 * s;
+    let policy_fish_x = policy_bread_x + policy_bread_w + 6 * s; let policy_fish_y = policy_bal_y; let policy_fish_w = button_w_for(b"Fish", s); let policy_fish_h = 14 * s;
+    EconomyLayout { x, y, w, h, tax_minus_x, tax_minus_y, tax_minus_w: minus_w, tax_minus_h: minus_h, tax_plus_x, tax_plus_y, tax_plus_w: plus_w, tax_plus_h: plus_h, policy_bal_x, policy_bal_y, policy_bal_w, policy_bal_h, policy_bread_x, policy_bread_y, policy_bread_w, policy_bread_h, policy_fish_x, policy_fish_y, policy_fish_w, policy_fish_h }
+}
+
 pub fn draw_ui(
     frame: &mut [u8], fw: i32, fh: i32,
     resources: &Resources, total_wood: i32, population: i32, selected: BuildingKind,
     fps: f32, speed: f32, paused: bool, base_scale_k: f32, category: UICategory, day_progress_01: f32,
     citizens_idle: i32, citizens_working: i32, citizens_sleeping: i32, citizens_hauling: i32, citizens_fetching: i32,
     cursor_x: i32, cursor_y: i32,
+    avg_happiness: f32, tax_rate: f32,
+    ui_tab: UITab, food_policy: FoodPolicy,
+    last_income: i32, last_upkeep: i32,
+    housing_used: i32, housing_cap: i32,
 ) {
     let s = ui_scale(fh, base_scale_k);
     let bar_h = top_panel_height(s);
@@ -162,9 +191,24 @@ pub fn draw_ui(
     let num_x_gold = x + icon_size + 4;
     draw_number(frame, fw, fh, num_x_gold, pad, resources.gold.max(0) as u32, [255,255,255,255], s);
     if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) {
+        // Простой тултип: золото. В будущем можно добавить доход/апкип за последний день
         tooltip = Some((x + icon_size / 2, b"Gold".to_vec()));
     }
     x = num_x_gold + reserved_w + gap;
+    // среднее счастье
+    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [220, 120, 160, 255]);
+    let num_x_hap = x + icon_size + 4;
+    let hap = avg_happiness.round().clamp(0.0, 100.0) as u32;
+    draw_number(frame, fw, fh, num_x_hap, pad, hap, [255,255,255,255], s);
+    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Happiness".to_vec())); }
+    x = num_x_hap + reserved_w + gap;
+    // налоговая ставка (в процентах)
+    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [200, 180, 90, 255]);
+    let num_x_tax = x + icon_size + 4;
+    let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
+    draw_number(frame, fw, fh, num_x_tax, pad, taxp, [255,255,255,255], s);
+    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Tax %  [ [ ] to change ]".to_vec())); }
+    x = num_x_tax + reserved_w + gap;
 
     // Рассчитаем занятый справа блок (TIME/FPS/SPEED), чтобы не наезжать на него слева
     let px = 2 * s; let gap_info = 2 * px; let _y_info = 8 * s; let pad_right = 8 * s;
@@ -285,93 +329,118 @@ pub fn draw_ui(
     fill_rect(frame, fw, fh, 0, pb_y, fw, pb_h, [0, 0, 0, 120]);
     fill_rect(frame, fw, fh, 0, pb_y, pb_w, pb_h, [220, 200, 120, 200]);
 
-    // Нижняя панель с категориями/зданиями
+    // Нижняя панель с вкладками
     let bottom_h = bottom_panel_height(s); // компактная высота под 2 строки кнопок
     let by0 = fh - bottom_h;
     fill_rect(frame, fw, fh, 0, by0, fw, bottom_h, [0, 0, 0, 160]);
     let padb = 8 * s; let btn_h = 18 * s;
-    // Категории (верхняя строка нижней панели)
-    let mut cx = padb;
-    let cats: &[(UICategory, &[u8])] = &[
-        (UICategory::Housing, b"Housing"),
-        (UICategory::Storage, b"Storage"),
-        (UICategory::Forestry, b"Forestry"),
-        (UICategory::Mining, b"Mining"),
-        (UICategory::Food, b"Food"),
-        (UICategory::Logistics, b"Logistics"),
-    ];
-    for (cat, label) in cats.iter() {
-        let active = *cat == category;
-        let bw = button_w_for(label, s);
-        let hovered = point_in_rect(cursor_x, cursor_y, cx, by0 + padb, bw, btn_h);
-        draw_button(frame, fw, fh, cx, by0 + padb, bw, btn_h, active, hovered, true, label, [200,200,200,255], s);
-        cx += bw + 6 * s;
-    }
-    // Здания по выбранной категории (нижняя строка)
-    let mut bx = padb;
-    let by = by0 + padb + btn_h + 6 * s;
-    let buildings_for_cat: &[BuildingKind] = match category {
-        UICategory::Housing => &[BuildingKind::House],
-        UICategory::Storage => &[BuildingKind::Warehouse],
-        UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
-        UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln, BuildingKind::Smelter],
-        UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
-        UICategory::Logistics => &[],
-    };
-    for &bk in buildings_for_cat.iter() {
-        let label = label_for_building(bk);
-        let active = selected == bk;
-        let bw = button_w_for(label, s);
-        if bx + bw > fw - padb { break; }
-        // Отрисовка с учётом доступности по стоимости
-        let cost = building_cost(bk);
-        // Доступность считаем по сумме: ресурсы на руках + на складах (в верхней панели уже передан суммарный Resources)
-        let can_afford = resources.gold >= cost.gold && resources.wood >= cost.wood;
-        let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
-        let hovered_btn = point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h);
-        draw_button(frame, fw, fh, bx, by, bw, btn_h, active, hovered_btn, can_afford, label, text_col, s);
-        // Тултип по наведению: стоимость и требования
-        if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
-            // Построим тултип с иконками стоимости и описанием производства
-            let px = 2 * s; let pad = 5 * s; let gap = 6 * s;
-            let icon = 10 * s;
-            let cost_w = {
-                let w_wood = icon + 4 + number_w(cost.wood.max(0) as u32, s);
-                let w_gold = icon + 4 + number_w(cost.gold.max(0) as u32, s);
-                w_wood + gap + w_gold
-            };
-            // Описание производства
-            let (prod_label, prod_color, note) = production_info(bk);
-            let prod_w = icon + 4 + text_w(prod_label, s);
-            let note_w = note.map(|t| text_w(t, s)).unwrap_or(0);
-            let tip_w = (cost_w.max(prod_w).max(note_w)) + 2 * pad;
-            let line_h = icon.max(5 * px) + 2 * s;
-            let lines = if note.is_some() { 3 } else { 2 };
-            let tip_h = lines * line_h + 2 * s;
-            // Позиция над панелью
-            let tx_mid = bx + bw / 2;
-            let x_tip = (tx_mid - tip_w / 2).clamp(8 * s, fw - tip_w - 8 * s);
-            let y_tip = by0 - tip_h - 4 * s;
-            // Фон
-            fill_rect(frame, fw, fh, x_tip + 2 * s, y_tip + 2 * s, tip_w, tip_h, [0,0,0,100]);
-            fill_rect(frame, fw, fh, x_tip, y_tip, tip_w, tip_h, [0,0,0,160]);
-            // Строка 1: Cost (иконки + числа)
-            let mut cx = x_tip + pad; let cy = y_tip + s + (line_h - icon) / 2;
-            // wood
-            fill_rect(frame, fw, fh, cx, cy, icon, icon, [110,70,30,255]);
-            cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.wood.max(0) as u32, [230,230,230,255], s);
-            cx += number_w(cost.wood.max(0) as u32, s) + gap;
-            // gold
-            fill_rect(frame, fw, fh, cx, cy, icon, icon, [220,180,60,255]);
-            cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.gold.max(0) as u32, [230,230,230,255], s);
-            // Строка 2: Produces
-            let cy2 = y_tip + line_h + s + (line_h - icon) / 2; let mut cx2 = x_tip + pad;
-            fill_rect(frame, fw, fh, cx2, cy2, icon, icon, prod_color);
-            cx2 += icon + 4; draw_text_mini(frame, fw, fh, cx2, cy2 - (icon - 5*px)/2, prod_label, [230,230,230,255], s);
-            // Строка 3: note (если есть)
-            if let Some(t) = note { let cy3 = y_tip + 2*line_h + s + (line_h - 5*px)/2; draw_text_mini(frame, fw, fh, x_tip + pad, cy3, t, [200,200,200,255], s); }
+    // Вкладки: Build | Economy
+    let tabs = [(b"Build".as_ref(), ui_tab == UITab::Build), (b"Economy".as_ref(), ui_tab == UITab::Economy)];
+    let mut tx = padb;
+    for (label, active) in tabs { let bw = button_w_for(label, s); draw_button(frame, fw, fh, tx, by0 + padb, bw, btn_h, active, point_in_rect(cursor_x, cursor_y, tx, by0 + padb, bw, btn_h), true, label, [220,220,220,255], s); tx += bw + 6 * s; }
+    if ui_tab == UITab::Build {
+        // Категории (верхняя строка нижней панели)
+        let mut cx = padb;
+        let cats: &[(UICategory, &[u8])] = &[
+            (UICategory::Housing, b"Housing"),
+            (UICategory::Storage, b"Storage"),
+            (UICategory::Forestry, b"Forestry"),
+            (UICategory::Mining, b"Mining"),
+            (UICategory::Food, b"Food"),
+            (UICategory::Logistics, b"Logistics"),
+        ];
+        // Рисуем двумя колонками в 2 строки, чтобы не упираться в ширину
+        let row_y = [by0 + padb + btn_h + 6 * s, by0 + padb + (btn_h + 6 * s) * 2];
+        let mut row = 0; cx = padb;
+        for (idx, (cat, label)) in cats.iter().enumerate() {
+            let active = *cat == category; let bw = button_w_for(label, s);
+            if cx + bw > fw - padb { row += 1; cx = padb; }
+            if row > 0 && row as usize >= row_y.len() { break; }
+            let y = row_y[row as usize];
+            let hovered = point_in_rect(cursor_x, cursor_y, cx, y, bw, btn_h);
+            draw_button(frame, fw, fh, cx, y, bw, btn_h, active, hovered, true, label, [200,200,200,255], s);
+            cx += bw + 6 * s;
         }
-        bx += bw + 6 * s;
+        // Здания по выбранной категории (нижняя строка)
+        let mut bx = padb;
+        let by = by0 + padb + (btn_h + 6 * s) * 2;
+        let buildings_for_cat: &[BuildingKind] = match category {
+            UICategory::Housing => &[BuildingKind::House],
+            UICategory::Storage => &[BuildingKind::Warehouse],
+            UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
+            UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln, BuildingKind::Smelter],
+            UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
+            UICategory::Logistics => &[],
+        };
+        for &bk in buildings_for_cat.iter() {
+            let label = label_for_building(bk);
+            let active = selected == bk;
+            let bw = button_w_for(label, s);
+            if bx + bw > fw - padb { break; }
+            let cost = building_cost(bk);
+            let can_afford = resources.gold >= cost.gold && resources.wood >= cost.wood;
+            let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
+            let hovered_btn = point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h);
+            draw_button(frame, fw, fh, bx, by, bw, btn_h, active, hovered_btn, can_afford, label, text_col, s);
+            if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
+                let px = 2 * s; let pad = 5 * s; let gap = 6 * s; let icon = 10 * s;
+                let cost_w = { let w_wood = icon + 4 + number_w(cost.wood.max(0) as u32, s); let w_gold = icon + 4 + number_w(cost.gold.max(0) as u32, s); w_wood + gap + w_gold };
+                let (prod_label, prod_color, note) = production_info(bk);
+                let prod_w = icon + 4 + text_w(prod_label, s);
+                let note_w = note.map(|t| text_w(t, s)).unwrap_or(0);
+                let tip_w = (cost_w.max(prod_w).max(note_w)) + 2 * pad;
+                let line_h = icon.max(5 * px) + 2 * s;
+                let lines = if note.is_some() { 3 } else { 2 };
+                let tip_h = lines * line_h + 2 * s;
+                let tx_mid = bx + bw / 2; let x_tip = (tx_mid - tip_w / 2).clamp(8 * s, fw - tip_w - 8 * s); let y_tip = by0 - tip_h - 4 * s;
+                fill_rect(frame, fw, fh, x_tip + 2 * s, y_tip + 2 * s, tip_w, tip_h, [0,0,0,100]);
+                fill_rect(frame, fw, fh, x_tip, y_tip, tip_w, tip_h, [0,0,0,160]);
+                let mut cx = x_tip + pad; let cy = y_tip + s + (line_h - icon) / 2;
+                fill_rect(frame, fw, fh, cx, cy, icon, icon, [110,70,30,255]); cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.wood.max(0) as u32, [230,230,230,255], s); cx += number_w(cost.wood.max(0) as u32, s) + gap;
+                fill_rect(frame, fw, fh, cx, cy, icon, icon, [220,180,60,255]); cx += icon + 4; draw_number(frame, fw, fh, cx, cy - (icon - 5*px)/2, cost.gold.max(0) as u32, [230,230,230,255], s);
+                let cy2 = y_tip + line_h + s + (line_h - icon) / 2; let mut cx2 = x_tip + pad;
+                fill_rect(frame, fw, fh, cx2, cy2, icon, icon, prod_color); cx2 += icon + 4; draw_text_mini(frame, fw, fh, cx2, cy2 - (icon - 5*px)/2, prod_label, [230,230,230,255], s);
+                if let Some(t) = note { let cy3 = y_tip + 2*line_h + s + (line_h - 5*px)/2; draw_text_mini(frame, fw, fh, x_tip + pad, cy3, t, [200,200,200,255], s); }
+            }
+            bx += bw + 6 * s;
+        }
+    } else {
+        // Economy panel
+        let lay = layout_economy_panel(fw, fh, s);
+        // Tax controls (ряд под вкладками, слева направо)
+        draw_text_mini(frame, fw, fh, lay.x, lay.y, b"TAX", [200,200,200,255], s);
+        // -/+ кнопки
+        fill_rect(frame, fw, fh, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h, [120, 100, 80, 220]);
+        fill_rect(frame, fw, fh, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h, [120, 100, 80, 220]);
+        // знаки
+        let px = 2 * s;
+        fill_rect(frame, fw, fh, lay.tax_minus_x + 3 * s, lay.tax_minus_y + lay.tax_minus_h/2 - s, lay.tax_minus_w - 6 * s, 2 * s, [230,230,230,255]);
+        let cxp = lay.tax_plus_x + lay.tax_plus_w/2; let cyp = lay.tax_plus_y + lay.tax_plus_h/2;
+        fill_rect(frame, fw, fh, cxp - (lay.tax_plus_w/2 - 3 * s), cyp - s, lay.tax_plus_w - 6 * s, 2 * s, [230,230,230,255]);
+        fill_rect(frame, fw, fh, cxp - s, cyp - (lay.tax_plus_h/2 - 3 * s), 2 * s, lay.tax_plus_h - 6 * s, [230,230,230,255]);
+        // значение налога
+        // налог показываем как монетки/жителя/день
+        let taxp = (tax_rate.round().max(0.0)) as u32; draw_number(frame, fw, fh, lay.tax_plus_x + lay.tax_plus_w + 8 * s, lay.y, taxp, [255,255,255,255], s);
+        // Policy label и кнопки справа
+        draw_text_mini(frame, fw, fh, lay.policy_bal_x - (text_w(b"FOOD", s) + 8 * s), lay.policy_bal_y, b"FOOD", [200,200,200,255], s);
+        let draw_toggle = |frame: &mut [u8], x:i32,y:i32,w:i32,h:i32, active:bool, label:&[u8]| {
+            let col = if active { [185,140,95,220] } else { [140,105,75,180] };
+            fill_rect(frame, fw, fh, x, y, w, h, col);
+            draw_text_mini(frame, fw, fh, x + 4 * s, y + 2 * s, label, [230,230,230,255], s);
+        };
+        draw_toggle(frame, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h, food_policy == FoodPolicy::Balanced, b"Balanced");
+        draw_toggle(frame, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h, food_policy == FoodPolicy::BreadFirst, b"Bread");
+        draw_toggle(frame, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h, food_policy == FoodPolicy::FishFirst, b"Fish");
+        // Housing: used/capacity (справа от net)
+        let mut info_x = lay.x;
+        if last_income != 0 || last_upkeep != 0 {
+            let net = last_income - last_upkeep; let info = format!("+{}  -{}  = {}", last_income.max(0), last_upkeep.max(0), net).into_bytes();
+            draw_text_mini(frame, fw, fh, info_x, lay.y + 20 * s, &info, [220,220,200,255], s);
+            info_x += text_w(&info, s) + 12 * s;
+        }
+        // Покажем жильё всегда — это полезная метрика
+        let htxt = format!("  |  Housing {} / {}", housing_used.max(0), housing_cap.max(0));
+        draw_text_mini(frame, fw, fh, info_x, lay.y + 20 * s, htxt.as_bytes(), [200,220,220,255], s);
     }
 }
 

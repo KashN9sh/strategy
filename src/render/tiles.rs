@@ -65,6 +65,55 @@ pub fn draw_citizen_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, c
     }
 }
 
+pub fn draw_emote(frame: &mut [u8], width: i32, height: i32, x: i32, y: i32, kind: u8, s: i32) {
+    // kind: 0 sad, 1 neutral, 2 happy
+    let px = s.max(1);
+    match kind {
+        0 => { // sad face
+            // eyes
+            set_px(frame, width, height, x - 2*px, y, [255,255,255,255]);
+            set_px(frame, width, height, x + 2*px, y, [255,255,255,255]);
+            // mouth frown
+            for dx in -2*px..=2*px { set_px(frame, width, height, x + dx, y + 3*px, [255,200,200,255]); }
+            set_px(frame, width, height, x - 3*px, y + 2*px, [255,200,200,255]);
+            set_px(frame, width, height, x + 3*px, y + 2*px, [255,200,200,255]);
+        }
+        2 => { // happy
+            set_px(frame, width, height, x - 2*px, y, [255,255,255,255]);
+            set_px(frame, width, height, x + 2*px, y, [255,255,255,255]);
+            for dx in -2*px..=2*px { set_px(frame, width, height, x + dx, y + 2*px, [255,255,0,255]); }
+            set_px(frame, width, height, x - 3*px, y + 1*px, [255,255,0,255]);
+            set_px(frame, width, height, x + 3*px, y + 1*px, [255,255,0,255]);
+        }
+        _ => { // neutral
+            set_px(frame, width, height, x - 2*px, y, [255,255,255,255]);
+            set_px(frame, width, height, x + 2*px, y, [255,255,255,255]);
+            for dx in -2*px..=2*px { set_px(frame, width, height, x + dx, y + 2*px, [220,220,220,255]); }
+        }
+    }
+}
+
+pub fn draw_emote_on_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, r: i32, kind: u8) {
+    let t = (r / 4).max(1);
+    let eye_dx = (r / 2).max(2);
+    let eye_y = cy - t;
+    // draw 2x2 (or t x t) eyes
+    for dy in 0..t { for dx in 0..t {
+        set_px(frame, width, height, cx - eye_dx + dx, eye_y + dy, [255,255,255,255]);
+        set_px(frame, width, height, cx + eye_dx - dx, eye_y + dy, [255,255,255,255]);
+    }}
+    // mouth
+    let mouth_w = (r as f32 * 1.2).round() as i32; // slightly wider
+    let mx0 = cx - mouth_w/2; let mx1 = cx + mouth_w/2;
+    let my = cy + t; // baseline inside circle
+    let (col, up) = match kind { 2 => ([255,255,0,255], 1), 0 => ([255,160,160,255], -1), _ => ([220,220,220,255], 0) };
+    for yoff in 0..t { for x in mx0..=mx1 { set_px(frame, width, height, x, my + yoff, col); }}
+    // curve hint at corners
+    if up != 0 {
+        for k in 0..=t { set_px(frame, width, height, mx0, my - up * (t - k), col); set_px(frame, width, height, mx1, my - up * (t - k), col); }
+    }
+}
+
 pub fn draw_log(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32) {
     // маленький прямоугольник как полено
     let w = (half_w as f32 * 0.4) as i32; let h = (half_h as f32 * 0.3) as i32;

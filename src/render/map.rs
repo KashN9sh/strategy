@@ -343,7 +343,12 @@ pub fn draw_citizens(
         let r = (atlas.half_w as f32 * 0.15).round() as i32;
         let mut col = [255, 230, 120, 255];
         if let Some(wp) = c.workplace { if let Some(b) = buildings.iter().find(|b| b.pos == wp) { col = building_color(b.kind); } }
-        tiles::draw_citizen_marker(frame, width, height, screen_pos.x, screen_pos.y - atlas.half_h/3, r.max(2), col);
+        let base_y = screen_pos.y - atlas.half_h/3;
+        let rr = r.max(2);
+        tiles::draw_citizen_marker(frame, width, height, screen_pos.x, base_y, rr, col);
+        // мини-эмоция поверх маркера: рисуем “по кружку” более жирной линией
+        let mood = if c.happiness as i32 >= 66 { 2 } else if c.happiness as i32 <= 33 { 0 } else { 1 };
+        tiles::draw_emote_on_marker(frame, width, height, screen_pos.x, base_y, rr, mood);
     }
 }
 

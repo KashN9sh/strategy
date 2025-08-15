@@ -4,6 +4,7 @@ use crate::atlas::TileAtlas;
 use crate::input::Config;
 use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, CitizenState, building_cost, spend_wood};
 use crate::ui;
+use crate::types::FoodPolicy;
 use crate::world::World;
 
 pub fn handle_left_click(
@@ -14,6 +15,9 @@ pub fn handle_left_click(
     _atlas: &TileAtlas,
     hovered_tile: Option<IVec2>,
     ui_category: &mut ui::UICategory,
+    ui_tab: &mut ui::UITab,
+    tax_rate: &mut f32,
+    food_policy: &mut FoodPolicy,
     selected_building: &mut BuildingKind,
     active_building_panel: &mut Option<IVec2>,
     world: &mut World,
@@ -34,8 +38,23 @@ pub fn handle_left_click(
     // нижняя панель UI
     let bottom_bar_h = ui::bottom_panel_height(ui_s);
     let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;
-    // клик по категориям
-    let mut cx = padb; let cy = by0 + padb;
+    // Вкладки
+    let s = ui_s; let padb = 8 * s; let btn_h = 18 * s; let by0 = height_i32 - bottom_bar_h;
+    let build_w = ui::button_w_for(b"Build", s); let econ_w = ui::button_w_for(b"Economy", s);
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb, by0 + padb, build_w, btn_h) { *ui_tab = ui::UITab::Build; return true; }
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb + build_w + 6 * s, by0 + padb, econ_w, btn_h) { *ui_tab = ui::UITab::Economy; return true; }
+
+    // Если вкладка Economy — клики по её контролам
+    if *ui_tab == ui::UITab::Economy {
+        let lay = ui::layout_economy_panel(width_i32, height_i32, s);
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h) { *tax_rate = (*tax_rate - config.tax_step).max(config.tax_min); return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h) { *tax_rate = (*tax_rate + config.tax_step).min(config.tax_max); return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h) { *food_policy = FoodPolicy::Balanced; return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h) { *food_policy = FoodPolicy::BreadFirst; return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h) { *food_policy = FoodPolicy::FishFirst; return true; }
+    }
+
+    // клик по категориям (Build): 2-я строка, с переносом
     let cats = [
         (ui::UICategory::Housing, b"Housing".as_ref()),
         (ui::UICategory::Storage, b"Storage".as_ref()),
@@ -44,13 +63,17 @@ pub fn handle_left_click(
         (ui::UICategory::Food, b"Food".as_ref()),
         (ui::UICategory::Logistics, b"Logistics".as_ref()),
     ];
+    let row_y = [by0 + padb + btn_h + 6 * s, by0 + padb + (btn_h + 6 * s) * 2];
+    let mut row: usize = 0; let mut cx = padb;
     for (cat, label) in cats.iter() {
-        let bw = ui::button_w_for(label, ui_s);
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, cy, bw, btn_h) { *ui_category = *cat; return true; }
-        cx += bw + 6 * ui_s;
+        let bw = ui::button_w_for(label, s);
+        if cx + bw > width_i32 - padb { row = (row + 1).min(row_y.len()-1); cx = padb; }
+        let y = row_y[row];
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, y, bw, btn_h) { *ui_category = *cat; return true; }
+        cx += bw + 6 * s;
     }
-    // клик по зданиям выбранной категории
-    let mut bx = padb; let by2 = cy + btn_h + 6 * ui_s;
+    // клик по зданиям выбранной категории — 3-я строка
+    let mut bx = padb; let by2 = by0 + padb + (btn_h + 6 * s) * 2;
     let buildings_for_cat: &[BuildingKind] = match *ui_category {
         ui::UICategory::Housing => &[BuildingKind::House],
         ui::UICategory::Storage => &[BuildingKind::Warehouse],
@@ -138,7 +161,8 @@ pub fn handle_left_click(
                 let _ = crate::types::spend_building_cost(warehouses, resources, &cost);
                 world.occupy(tp);
                 let default_workers = match *selected_building { BuildingKind::House | BuildingKind::Warehouse => 0, _ => 1 };
-                buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers });
+                let capacity = match *selected_building { BuildingKind::House => 2, _ => 0 };
+                buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers, capacity });
                 // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
                 if *selected_building == BuildingKind::Warehouse {
                     warehouses.push(WarehouseStore { pos: tp, ..Default::default() });
@@ -149,6 +173,7 @@ pub fn handle_left_click(
                         pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None,
                         idle_timer_ms: 0, home: tp, workplace: None, state: CitizenState::Idle, work_timer_ms: 0,
                         carrying: None, pending_input: None, path: Vec::new(), path_index: 0, fed_today: true, manual_workplace: false,
+                        happiness: 50, last_food_mask: 0,
                     });
                     *population += 1;
                 }

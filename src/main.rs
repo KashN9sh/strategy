@@ -99,6 +99,8 @@ fn run() -> Result<()> {
     let mut last_frame = Instant::now();
     let mut accumulator_ms: f32 = 0.0;
     let mut paused = false;
+    // Экономика: налог (монет/жителя/день)
+    let mut tax_rate: f32 = 2.0;
     let mut speed_mult: f32 = 1.0; // 0.5, 1, 2, 3
 
     // Процедурная генерация: бесконечный мир чанков
@@ -110,6 +112,8 @@ fn run() -> Result<()> {
     let mut hovered_tile: Option<IVec2> = None;
     let mut selected_building: BuildingKind = BuildingKind::Lumberjack;
     let mut ui_category: ui::UICategory = ui::UICategory::Forestry;
+    let mut ui_tab: ui::UITab = ui::UITab::Build;
+    let mut food_policy: crate::types::FoodPolicy = crate::types::FoodPolicy::Balanced;
     let mut buildings: Vec<Building> = Vec::new();
     let mut buildings_dirty: bool = true;
     let mut citizens: Vec<Citizen> = Vec::new();
@@ -252,6 +256,9 @@ fn run() -> Result<()> {
         tree_atlas = Some(atlas::TreeAtlas { sprites, w: base_w as i32, h: ih as i32 });
     }
     let mut water_anim_time: f32 = 0.0;
+    // Экономика: вчерашние итоги
+    let mut last_tax_income: i32 = 0;
+    let mut last_upkeep_cost: i32 = 0;
     let mut show_grid = false;
     let mut show_forest_overlay = false;
     let mut show_tree_stage_overlay = false;
@@ -295,6 +302,8 @@ fn run() -> Result<()> {
                         if key == PhysicalKey::Code(input.zoom_out) { zoom = (zoom * 0.9).max(0.5); }
                         if key == PhysicalKey::Code(input.zoom_in) { zoom = (zoom * 1.1).min(8.0); }
                         if key == PhysicalKey::Code(input.toggle_pause) { paused = !paused; }
+                        if key == PhysicalKey::Code(input.tax_up) { tax_rate = (tax_rate + config.tax_step).min(config.tax_max); }
+                        if key == PhysicalKey::Code(input.tax_down) { tax_rate = (tax_rate - config.tax_step).max(config.tax_min); }
                         controls::handle_key_press(key, &input, &mut rng, &mut world, &mut buildings, &mut buildings_dirty, &mut citizens, &mut population, &mut resources, &mut selected_building, &mut show_grid, &mut show_forest_overlay, &mut show_tree_stage_overlay, &mut show_ui, &mut road_mode, &mut path_debug_mode, &mut path_sel_a, &mut path_sel_b, &mut last_path, &mut speed_mult, &mut seed);
                         if key == PhysicalKey::Code(input.save_game) { let _ = save::save_game(&save::SaveData::from_runtime(seed, &resources, &buildings, cam_px, zoom, &world)); }
                         if key == PhysicalKey::Code(input.load_game) {
@@ -328,7 +337,8 @@ fn run() -> Result<()> {
                         if show_ui {
                             if ui_interaction::handle_left_click(
                                 cursor_xy, width_i32, height_i32, &config, &atlas, hovered_tile,
-                                &mut ui_category, &mut selected_building, &mut active_building_panel,
+                                &mut ui_category, &mut ui_tab, &mut tax_rate, &mut food_policy,
+                                &mut selected_building, &mut active_building_panel,
                                 &mut world, &mut buildings, &mut buildings_dirty, &mut citizens, &mut population,
                                 &mut warehouses, &mut resources, &mut road_mode, &mut path_debug_mode,
                                 &mut path_sel_a, &mut path_sel_b, &mut last_path,
@@ -479,7 +489,22 @@ fn run() -> Result<()> {
                             }
                         }
                         let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                        ui::draw_ui(frame, width_i32, height_i32, &visible, total_visible_wood, population, selected_building, fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress, idle, working, sleeping, hauling, fetching, cursor_xy.x, cursor_xy.y);
+                        // среднее счастье
+                        let avg_hap: f32 = if citizens.is_empty() { 50.0 } else { citizens.iter().map(|c| c.happiness as i32).sum::<i32>() as f32 / citizens.len() as f32 };
+                        // Жилищная вместимость/занятость
+                        let mut housing_cap = 0; let mut housing_used = 0;
+                        for b in &buildings { if b.kind == BuildingKind::House { housing_cap += b.capacity; } }
+                        for c in &citizens { if buildings.iter().any(|b| b.kind == BuildingKind::House && b.pos == c.home) { housing_used += 1; } }
+                        let pop_show = citizens.len() as i32;
+                        ui::draw_ui(
+                            frame, width_i32, height_i32,
+                            &visible, total_visible_wood, pop_show, selected_building,
+                            fps_ema, speed_mult, paused, config.ui_scale_base, ui_category, day_progress,
+                            idle, working, sleeping, hauling, fetching, cursor_xy.x, cursor_xy.y,
+                            avg_hap, tax_rate, ui_tab, food_policy,
+                            last_tax_income, last_upkeep_cost,
+                            housing_used, housing_cap,
+                        );
                         // Если выбрана панель здания — рисуем её
                         if let Some(p) = active_building_panel {
                             if let Some(b) = buildings.iter().find(|bb| bb.pos == p) {
@@ -539,7 +564,11 @@ fn run() -> Result<()> {
                         let daylight = 0.5 - 0.5 * angle.cos();
                         let is_day = daylight > 0.25; // простой порог
                         // На рассвете (переход ночь→день) — кормление и доход
-                        if !prev_is_day_flag && is_day { game::new_day_feed_and_income(&mut citizens, &mut resources, &mut warehouses); }
+                        if !prev_is_day_flag && is_day {
+                            let (income_y, upkeep_y) = game::economy_new_day(&mut citizens, &mut resources, &mut warehouses, &buildings, tax_rate, &config, food_policy);
+                            last_tax_income = income_y;
+                            last_upkeep_cost = upkeep_y;
+                        }
                         prev_is_day_flag = is_day;
 
                         // Ночная рутина: идём домой и спим, сбрасываем работу

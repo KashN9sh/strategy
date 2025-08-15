@@ -31,6 +31,8 @@ pub struct Building {
     pub pos: IVec2, // координаты тайла
     pub timer_ms: i32,
     pub workers_target: i32,
+    // Для домов: вместимость жильцов (у остальных 0)
+    pub capacity: i32,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
@@ -94,6 +96,10 @@ pub struct Citizen {
     pub fed_today: bool,
     // ручное закрепление за рабочим местом (не пере назначать автоматически)
     pub manual_workplace: bool,
+    // Счастье 0..100
+    pub happiness: u8,
+    // Маска потреблённой еды в недавние дни (бит0=bread, бит1=fish), для бонуса разнообразия
+    pub last_food_mask: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +134,13 @@ impl Default for WarehouseStore {
     fn default() -> Self {
         Self { pos: IVec2::new(0,0), wood: 0, stone: 0, clay: 0, bricks: 0, wheat: 0, flour: 0, bread: 0, fish: 0, gold: 0, iron_ore: 0, iron_ingots: 0 }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FoodPolicy {
+    Balanced,   // выбирать более доступный ресурс
+    BreadFirst, // сначала хлеб
+    FishFirst,  // сначала рыба
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

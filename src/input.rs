@@ -1,8 +1,40 @@
 use serde::{Serialize, Deserialize};
 use winit::keyboard::KeyCode;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Config { pub base_step_ms: f32, pub ui_scale_base: f32 }
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct Config {
+    pub base_step_ms: f32,
+    pub ui_scale_base: f32,
+    // Экономика — параметры по умолчанию можно тюнить через config.toml
+    pub tax_min: f32,   // минимальный налог в монетах на жителя в день
+    pub tax_max: f32,   // максимальный налог в монетах на жителя в день
+    pub tax_step: f32,  // шаг изменения (кнопками/ползунком)
+    pub happy_feed_bonus: i32,
+    pub happy_variety_bonus: i32,
+    pub happy_house_bonus: i32,
+    pub happy_starving_penalty: i32,
+    pub migration_join_threshold: f32,
+    pub migration_leave_threshold: f32,
+    // коэффициенты налоговой формулы: income = tax_rate * pop * (tax_income_base + tax_income_happy_scale * happiness_avg/100)
+    pub tax_income_base: f32,
+    pub tax_income_happy_scale: f32,
+    pub tax_income_per_capita: f32,
+    // Апкип зданий (золотом за день)
+    pub upkeep_house: i32,
+    pub upkeep_warehouse: i32,
+    pub upkeep_lumberjack: i32,
+    pub upkeep_forester: i32,
+    pub upkeep_stone_quarry: i32,
+    pub upkeep_clay_pit: i32,
+    pub upkeep_iron_mine: i32,
+    pub upkeep_wheat_field: i32,
+    pub upkeep_mill: i32,
+    pub upkeep_bakery: i32,
+    pub upkeep_kiln: i32,
+    pub upkeep_fishery: i32,
+    pub upkeep_smelter: i32,
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -25,6 +57,9 @@ pub struct InputConfig {
     pub reset_same_seed: String,
     pub save_game: String,
     pub load_game: String,
+    // Экономика
+    pub tax_up: String,
+    pub tax_down: String,
 }
 
 pub struct ResolvedInput {
@@ -46,6 +81,8 @@ pub struct ResolvedInput {
     pub reset_same_seed: KeyCode,
     pub save_game: KeyCode,
     pub load_game: KeyCode,
+    pub tax_up: KeyCode,
+    pub tax_down: KeyCode,
 }
 
 fn code_from_str(s: &str) -> KeyCode {
@@ -55,6 +92,7 @@ fn code_from_str(s: &str) -> KeyCode {
         "Q" => KeyQ, "E" => KeyE, "SPACE" => Space,
         "DIGIT1" | "1" => Digit1, "DIGIT2" | "2" => Digit2, "DIGIT3" | "3" => Digit3, "DIGIT4" | "4" => Digit4,
         "Z" => KeyZ, "X" => KeyX, "R" => KeyR, "T" => KeyT, "N" => KeyN, "F5" => F5, "F9" => F9,
+        "[" | "BRACKETLEFT" => BracketLeft, "]" | "BRACKETRIGHT" => BracketRight,
         _ => KeyCode::Escape,
     }
 }
@@ -80,6 +118,8 @@ impl ResolvedInput {
             reset_same_seed: code_from_str(&cfg.reset_same_seed),
             save_game: code_from_str(&cfg.save_game),
             load_game: code_from_str(&cfg.load_game),
+            tax_up: code_from_str(&cfg.tax_up),
+            tax_down: code_from_str(&cfg.tax_down),
         }
     }
 }
