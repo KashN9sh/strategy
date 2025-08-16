@@ -20,6 +20,7 @@ pub fn draw_terrain_and_overlays(
     draw_trees_in_this_pass: bool,
     tree_atlas: &Option<crate::atlas::TreeAtlas>,
     road_atlas: &RoadAtlas,
+    render_biome_tint: bool,
 ) {
     for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
         let kind = world.get_tile(mx, my);
@@ -42,22 +43,24 @@ pub fn draw_terrain_and_overlays(
                     } else {
                         tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h);
                     }
-                    // оттенок по биому (усилим, чтобы было явнее видно)
-                    let biome = world.biome(IVec2::new(mx, my));
-                    match biome {
-                        BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h, [50, 110, 70], 90, 255),
-                        BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h, [150, 150, 150], 90, 255),
-                        _ => {}
+                    if render_biome_tint {
+                        let biome = world.biome(IVec2::new(mx, my));
+                        match biome {
+                            BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.grass_swamp, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h),
+                            BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.grass_rocky, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h),
+                            _ => {}
+                        }
                     }
                 }
                 crate::types::TileKind::Forest => {
                     tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
-                    // оттенок по биому и для леса, чтобы зоны читались
-                    let biome = world.biome(IVec2::new(mx, my));
-                    match biome {
-                        BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h, [50, 110, 70], 80, 255),
-                        BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h, [150, 150, 150], 80, 255),
-                        _ => {}
+                    if render_biome_tint {
+                        let biome = world.biome(IVec2::new(mx, my));
+                        match biome {
+                            BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.forest_swamp, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h),
+                            BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.forest_rocky, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h),
+                            _ => {}
+                        }
                     }
                 }
                 crate::types::TileKind::Water => {
@@ -102,19 +105,19 @@ pub fn draw_terrain_and_overlays(
             if atlas.base_loaded {
                 // Используем те же draw_w/draw_h/top_left_x/y, что и для базового PNG тайла
                 if world.has_clay_deposit(tp) {
-                    if !atlas.clay_variants.is_empty() {
+                    if !atlas.clay_variants_tinted.is_empty() {
                         let idx = ((mx as i64 * 83492791 ^ my as i64 * 29765723) & 0x7fffffff) as usize;
-                        let spr = &atlas.clay_variants[idx % atlas.clay_variants.len()];
-                        tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                        let spr = &atlas.clay_variants_tinted[idx % atlas.clay_variants_tinted.len()];
+                        tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, spr, atlas.base_w, atlas.base_h, draw_w, draw_h);
                     } else {
-                        tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_clay, atlas.base_w, atlas.base_h, draw_w, draw_h, [170, 100, 80], 120, 230);
+                        tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.clay_tinted, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h);
                     }
                 }
                 if world.has_stone_deposit(tp) {
-                    tiles::blit_sprite_alpha_scaled_tinted(frame, width, height, top_left_x, top_left_y, &atlas.base_stone, atlas.base_w, atlas.base_h, draw_w, draw_h, 220);
+                    tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.stone_tinted, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h);
                 }
                 if world.has_iron_deposit(tp) {
-                    tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_iron, atlas.base_w, atlas.base_h, draw_w, draw_h, [200, 205, 220], 140, 240);
+                    tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.iron_tinted, atlas.half_w * 2 + 1, atlas.half_h * 2 + 1, draw_w, draw_h);
                 }
             } else {
                 if world.has_clay_deposit(tp) { tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [200,120,80,120]); }

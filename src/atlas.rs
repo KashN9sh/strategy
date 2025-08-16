@@ -29,11 +29,20 @@ pub struct TileAtlas {
     pub base_clay: Vec<u8>,
     pub base_stone: Vec<u8>,
     pub base_iron: Vec<u8>,
+    // Предтюненные варианты для производительности
+    pub grass_swamp: Vec<u8>,
+    pub grass_rocky: Vec<u8>,
+    pub forest_swamp: Vec<u8>,
+    pub forest_rocky: Vec<u8>,
+    pub clay_tinted: Vec<u8>,
+    pub stone_tinted: Vec<u8>,
+    pub iron_tinted: Vec<u8>,
+    pub clay_variants_tinted: Vec<Vec<u8>>,
 }
 
 impl TileAtlas {
     pub fn new() -> Self {
-        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay_variants: Vec::new(), water_edges: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_road: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new() }
+        Self { zoom_px: -1, half_w: 0, half_h: 0, grass: Vec::new(), forest: Vec::new(), water_frames: Vec::new(), grass_variants: Vec::new(), clay_variants: Vec::new(), water_edges: Vec::new(), clay: Vec::new(), stone: Vec::new(), iron: Vec::new(), base_road: Vec::new(), base_loaded: false, base_w: 0, base_h: 0, base_grass: Vec::new(), base_forest: Vec::new(), base_water: Vec::new(), base_clay: Vec::new(), base_stone: Vec::new(), base_iron: Vec::new(), grass_swamp: Vec::new(), grass_rocky: Vec::new(), forest_swamp: Vec::new(), forest_rocky: Vec::new(), clay_tinted: Vec::new(), stone_tinted: Vec::new(), iron_tinted: Vec::new(), clay_variants_tinted: Vec::new() }
     }
 
     pub fn ensure_zoom(&mut self, zoom: f32) {
@@ -54,12 +63,33 @@ impl TileAtlas {
             self.clay = Self::scale_and_mask_or_empty(&self.base_clay, self.base_w, self.base_h, self.half_w, self.half_h);
             self.stone = Self::scale_and_mask_or_empty(&self.base_stone, self.base_w, self.base_h, self.half_w, self.half_h);
             self.iron = Self::scale_and_mask_or_empty(&self.base_iron, self.base_w, self.base_h, self.half_w, self.half_h);
+
+            // Предтюненные биомные тайлы
+            self.grass_swamp = Self::tint_buffer_color(&self.grass, [50,110,70], 90, 255);
+            self.grass_rocky = Self::tint_buffer_color(&self.grass, [150,150,150], 90, 255);
+            self.forest_swamp = Self::tint_buffer_color(&self.forest, [50,110,70], 80, 255);
+            self.forest_rocky = Self::tint_buffer_color(&self.forest, [150,150,150], 80, 255);
+            // Предтюненные оверлеи месторождений
+            self.clay_tinted = Self::tint_buffer_color(&self.clay, [170,100,80], 120, 230);
+            self.stone_tinted = Self::tint_buffer_alpha(&self.stone, 220);
+            self.iron_tinted = Self::tint_buffer_color(&self.iron, [200,205,220], 140, 240);
+            // Варианты глины — тоже предтюнить, если загружены
+            self.clay_variants_tinted.clear();
+            if !self.clay_variants.is_empty() {
+                self.clay_variants_tinted.reserve(self.clay_variants.len());
+                for spr in &self.clay_variants { self.clay_variants_tinted.push(Self::tint_buffer_color(spr, [170,100,80], 120, 230)); }
+            }
         } else {
             self.grass = Self::build_tile(self.half_w, self.half_h, [40, 120, 80, 255]);
             self.forest = Self::build_tile(self.half_w, self.half_h, [26, 100, 60, 255]);
             self.water_frames.clear();
             let frames = 8;
             for phase in 0..frames { self.water_frames.push(Self::build_water_tile(self.half_w, self.half_h, phase, frames)); }
+            // на процедурном пути тюны не нужны
+            self.grass_swamp = self.grass.clone(); self.grass_rocky = self.grass.clone();
+            self.forest_swamp = self.forest.clone(); self.forest_rocky = self.forest.clone();
+            self.clay_tinted = self.clay.clone(); self.stone_tinted = self.stone.clone(); self.iron_tinted = self.iron.clone();
+            self.clay_variants_tinted.clear();
         }
     }
 
@@ -110,6 +140,30 @@ impl TileAtlas {
     fn scale_and_mask_or_empty(base: &Vec<u8>, bw: i32, bh: i32, half_w: i32, half_h: i32) -> Vec<u8> {
         if base.is_empty() || bw <= 0 || bh <= 0 { return vec![0u8; ((half_w * 2 + 1) * (half_h * 2 + 1) * 4) as usize]; }
         Self::scale_and_mask(base, bw, bh, half_w, half_h)
+    }
+
+    fn tint_buffer_color(src: &Vec<u8>, tint_rgb: [u8;3], strength: u8, global_alpha: u8) -> Vec<u8> {
+        let mut out = src.clone();
+        let k = strength as i32; let invk = 255 - k; let ga = global_alpha as u32;
+        let len = out.len(); let mut i = 0;
+        while i + 3 < len {
+            let sr0 = out[i] as i32; let sg0 = out[i+1] as i32; let sb0 = out[i+2] as i32; let sa0 = out[i+3] as u32;
+            if sa0 == 0 { i += 4; continue; }
+            let sr = ((sr0 * invk + tint_rgb[0] as i32 * k) / 255) as u32;
+            let sg = ((sg0 * invk + tint_rgb[1] as i32 * k) / 255) as u32;
+            let sb = ((sb0 * invk + tint_rgb[2] as i32 * k) / 255) as u32;
+            let sa = (sa0 * ga) / 255;
+            out[i] = sr as u8; out[i+1] = sg as u8; out[i+2] = sb as u8; out[i+3] = sa as u8;
+            i += 4;
+        }
+        out
+    }
+
+    fn tint_buffer_alpha(src: &Vec<u8>, global_alpha: u8) -> Vec<u8> {
+        let mut out = src.clone();
+        let ga = global_alpha as u32; let len = out.len(); let mut i = 0;
+        while i + 3 < len { let sa0 = out[i+3] as u32; let sa = (sa0 * ga) / 255; out[i+3] = sa as u8; i += 4; }
+        out
     }
 
     pub fn blit(&self, frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, kind: TileKind, water_frame: usize) {
