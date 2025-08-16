@@ -200,6 +200,33 @@ pub fn draw_emote_on_marker(frame: &mut [u8], width: i32, height: i32, cx: i32, 
     }
 }
 
+/// Мягкое свечение (радиальный градиент с альфа-смешиванием)
+pub fn draw_soft_glow(frame: &mut [u8], fw: i32, fh: i32, cx: i32, cy: i32, radius: i32, color_rgb: [u8;3], alpha_max: u8) {
+    if radius <= 0 || alpha_max == 0 { return; }
+    let r2 = (radius * radius) as f32;
+    let ax = color_rgb[0] as u32; let ay = color_rgb[1] as u32; let az = color_rgb[2] as u32;
+    let xmin = (cx - radius).max(0); let xmax = (cx + radius).min(fw - 1);
+    let ymin = (cy - radius).max(0); let ymax = (cy + radius).min(fh - 1);
+    for y in ymin..=ymax {
+        for x in xmin..=xmax {
+            let dx = (x - cx) as f32; let dy = (y - cy) as f32;
+            let d2 = dx*dx + dy*dy;
+            if d2 > r2 { continue; }
+            let t = 1.0 - (d2 / r2).sqrt();
+            // квадратичное затухание к краю
+            let a = (alpha_max as f32 * (t*t)) as u32;
+            if a == 0 { continue; }
+            let na = 255 - a;
+            let idx = ((y as usize) * (fw as usize) + (x as usize)) * 4;
+            let dr = frame[idx] as u32; let dg = frame[idx+1] as u32; let db = frame[idx+2] as u32;
+            frame[idx]   = ((a * ax + na * dr) / 255) as u8;
+            frame[idx+1] = ((a * ay + na * dg) / 255) as u8;
+            frame[idx+2] = ((a * az + na * db) / 255) as u8;
+            frame[idx+3] = 255;
+        }
+    }
+}
+
 pub fn draw_log(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, half_w: i32, half_h: i32) {
     // маленький прямоугольник как полено
     let w = (half_w as f32 * 0.4) as i32; let h = (half_h as f32 * 0.3) as i32;

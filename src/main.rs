@@ -74,6 +74,9 @@ struct SaveTree { x: i32, y: i32, stage: u8, age_ms: i32 }
 
 // перенос в save.rs
 
+#[derive(Clone, Debug)]
+struct Firefly { pos: Vec2, vel: Vec2, phase: f32, life_s: f32 }
+
 fn main() -> Result<()> {
     run()
 }
@@ -294,6 +297,8 @@ fn run() -> Result<()> {
         citizen_sprite = Some((vec![img.to_vec()], iw as i32, ih as i32));
     }
     let mut water_anim_time: f32 = 0.0;
+    // Ночные светлячки на экране
+    let mut fireflies: Vec<Firefly> = Vec::new();
     // Простая погода
     let mut weather: WeatherKind = WeatherKind::Clear;
     let mut weather_timer_ms: f32 = 0.0;
@@ -355,7 +360,7 @@ fn run() -> Result<()> {
                                     if !console_input.is_empty() {
                                         let cmd = console_input.clone();
                                         console_log.push(format!("> {}", cmd));
-                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather);
+                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms);
                                         console_input.clear();
                                     }
                                     return;
@@ -705,6 +710,66 @@ fn run() -> Result<()> {
                             }
                         }
                         _ => {}
+                    }
+
+                    // Ночное освещение: окна домов и факелы на дорогах
+                    {
+                        let t_ms = world_clock_ms;
+                        let t = t_ms / 1000.0;
+                        // Порог ночи такой же как в симуляции
+                        let tt = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                        let angle = tt * std::f32::consts::TAU;
+                        let daylight = 0.5 - 0.5 * angle.cos();
+                        let is_night = daylight <= 0.25;
+                        if is_night {
+                            // Масштаб от размера тайла
+                            let base_r = (atlas.half_w as f32 * 0.35).round() as i32;
+                            // 1) Окна домов: по 2 «светлячка» на дом
+                            for b in &buildings {
+                                if b.kind != BuildingKind::House { continue; }
+                                let mx = b.pos.x; let my = b.pos.y;
+                                if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
+                                let sp = render::map::world_to_screen(&atlas, screen_center, cam_snap, mx, my);
+                                // Псевдо-случайная фаза и число окон от координат
+                                let hash = ((mx as i64).wrapping_mul(73856093) ^ (my as i64).wrapping_mul(19349663)) as i64;
+                                let phase = (hash as f32).to_bits() as u32 % 1000;
+                                let flicker = ( (t + (phase as f32)*0.001).sin() * 0.5 + 0.5 );
+                                // позиции «окон» около основания дома
+                                let y0 = sp.y + (atlas.half_h as f32 * 0.10) as i32;
+                                let x0 = sp.x - (atlas.half_w as f32 * 0.25) as i32;
+                                let x1 = sp.x + (atlas.half_w as f32 * 0.25) as i32;
+                                let a0 = (170.0 + 70.0 * flicker).min(240.0) as u8;
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, x0, y0, (base_r as f32 * 0.60) as i32, [255, 210, 130], a0);
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, x1, y0, (base_r as f32 * 0.60) as i32, [255, 220, 150], a0);
+                            }
+                            // 2) Факелы на дорогах: не на каждой клетке, разреженно
+                            for my in min_ty..=max_ty { for mx in min_tx..=max_tx {
+                                if !world.is_road(glam::IVec2::new(mx, my)) { continue; }
+                                // Разрежение по хешу координат, ~1 факел на 6 клеток
+                                let h = ((mx as i64).wrapping_mul(2654435761) ^ (my as i64).wrapping_mul(1597334677)) & 0x7fffffff;
+                                if (h % 6) != 0 { continue; }
+                                let sp = render::map::world_to_screen(&atlas, screen_center, cam_snap, mx, my);
+                                // позиция факела — верхняя грань ромба чуть выше центра
+                                let tx = sp.x + (atlas.half_w as f32 * 0.30) as i32;
+                                let ty = sp.y - (atlas.half_h as f32 * 0.20) as i32;
+                                // Мягкое мигание
+                                let phase = ((h as u32) % 1000) as f32 * 0.0031;
+                                let flick = ( (t * 2.3 + phase).sin() * 0.5 + 0.5 ) * 0.7 + 0.3;
+                                let a = (170.0 * flick).min(230.0) as u8;
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, tx, ty, (base_r as f32 * 0.55) as i32, [255, 200, 120], a);
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, tx, ty + 2, (base_r as f32 * 0.85) as i32, [255, 140, 60], (a as f32 * 0.7) as u8);
+                            }}
+                            // 3) Летающие светлячки (экраные координаты)
+                            for f in &fireflies {
+                                let x = f.pos.x.round() as i32;
+                                let y = f.pos.y.round() as i32;
+                                let flick = ((t * 5.0 + f.phase).sin() * 0.5 + 0.5) * 0.6 + 0.4;
+                                let a = (210.0 * flick).min(230.0) as u8;
+                                // Меньший размер, больше точек
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, x, y, (atlas.half_w as f32 * 0.22) as i32, [255, 200, 120], (a as f32 * 0.65) as u8);
+                                render::tiles::draw_soft_glow(frame, width_i32, height_i32, x, y, (atlas.half_w as f32 * 0.14) as i32, [255, 240, 180], a);
+                            }
+                        }
                     }
 
                     // Отрисовка найденного пути в дебаг-режиме
@@ -1279,9 +1344,47 @@ fn run() -> Result<()> {
                     weather_next_change_ms = choose_weather_duration_ms(weather, &mut rng);
                 }
 
-                if did_step {
-                    window.request_redraw();
-                } else { window.request_redraw(); }
+                // Обновление светлячков в реальном времени (каждый кадр)
+                {
+                    let tt = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                    let angle = tt * std::f32::consts::TAU;
+                    let daylight = 0.5 - 0.5 * angle.cos();
+                    let is_night = daylight <= 0.25;
+                    // Таргет количество светлячков зависит от ночи и размера экрана
+                    let target = if is_night { ((width_i32 * height_i32) as f32 / 60000.0).round().clamp(10.0, 48.0) as usize } else { 0 };
+                    // Спавн/удаление
+                    if fireflies.len() < target {
+                        let need = target - fireflies.len();
+                        for _ in 0..need {
+                            let x = rng.gen_range(0.0..width_i32 as f32);
+                            let y = rng.gen_range(0.0..height_i32 as f32);
+                            let speed = rng.gen_range(8.0..20.0);
+                            let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+                            let vel = Vec2::new(angle.cos(), angle.sin()) * speed;
+                            let phase = rng.gen_range(0.0..std::f32::consts::TAU);
+                            let life_s = rng.gen_range(6.0..14.0);
+                            fireflies.push(Firefly { pos: Vec2::new(x, y), vel, phase, life_s });
+                        }
+                    } else if fireflies.len() > target {
+                        fireflies.truncate(target);
+                    }
+                    // Дрейф и границы
+                    let dt = frame_ms / 1000.0;
+                    for f in fireflies.iter_mut() {
+                        // чуть блуждаем синусом
+                        let sway = Vec2::new((water_anim_time * 0.0016 + f.phase).sin(), (water_anim_time * 0.0021 + f.phase * 0.7).cos()) * 10.0;
+                        f.pos += (f.vel * 0.25 + sway) * dt;
+                        // обруливаем края мягко
+                        if f.pos.x < -20.0 { f.pos.x = -20.0; f.vel.x = f.vel.x.abs(); }
+                        if f.pos.y < -20.0 { f.pos.y = -20.0; f.vel.y = f.vel.y.abs(); }
+                        if f.pos.x > width_i32 as f32 + 20.0 { f.pos.x = width_i32 as f32 + 20.0; f.vel.x = -f.vel.x.abs(); }
+                        if f.pos.y > height_i32 as f32 + 20.0 { f.pos.y = height_i32 as f32 + 20.0; f.vel.y = -f.vel.y.abs(); }
+                        f.life_s -= dt;
+                    }
+                    fireflies.retain(|f| f.life_s > 0.0);
+                }
+
+                window.request_redraw();
             }
             _ => {}
         }
@@ -1409,14 +1512,14 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
     }
 }
 
-fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind) {
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32) {
     let trimmed = cmd.trim();
     if trimmed.is_empty() { return; }
     let mut parts = trimmed.split_whitespace();
     let Some(head) = parts.next() else { return; };
     match head.to_ascii_lowercase().as_str() {
         "help" => {
-            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>".to_string());
+            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>".to_string());
         }
         "weather" => {
             if let Some(arg) = parts.next() {
@@ -1448,6 +1551,20 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
                 }
                 _ => log.push("ERR: unknown 'set' target".to_string()),
             }
+        }
+        "time" => {
+            if let Some(arg) = parts.next() {
+                // day=~0.5, night=~0.0, dawn≈0.25, dusk≈0.75; также принимаем число 0..1
+                let t_opt: Option<f32> = match arg.to_ascii_lowercase().as_str() {
+                    "day" => Some(0.5),
+                    "night" => Some(0.0),
+                    "dawn" => Some(0.25),
+                    "dusk" => Some(0.75),
+                    other => other.parse::<f32>().ok().map(|v| v.clamp(0.0, 1.0)),
+                };
+                if let Some(v) = t_opt { *world_clock_ms = v * 120_000.0; log.push(format!("OK: time set to {:.2}", v)); }
+                else { log.push("ERR: usage time <day|night|dawn|dusk|0..1>".to_string()); }
+            } else { log.push("ERR: usage time <day|night|dawn|dusk|0..1>".to_string()); }
         }
         _ => { log.push("ERR: unknown command. Type 'help'".to_string()); }
     }
