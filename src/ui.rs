@@ -83,11 +83,12 @@ pub fn layout_building_panel(fw: i32, fh: i32, s: i32) -> BuildingPanelLayout {
     let bottom_h = bottom_panel_height(s);
     // Компактная плашка слева, не на всю ширину
     let w = (fw as f32 * 0.33) as i32; // треть экрана
-    // Высота панели из 3 строк: row_h*3 + vgap*2 + верх/низ отступы
+    // Высота панели из 4 строк: заголовок, workers, production, biome — с одинаковыми вертикальными зазорами
     let row_h = ui_item_h(s); let pad_top = ui_pad(s) - 2 * s; let pad_bottom = ui_pad(s) - 2 * s; let vgap = ui_gap(s);
-    let panel_h = pad_top + row_h * 3 + vgap * 2 + pad_bottom;
+    let panel_h = pad_top + row_h * 4 + vgap * 3 + pad_bottom;
     let x = padb;
-    let y = fh - bottom_h - panel_h - 6 * s;
+    // Поднимем панель выше, чтобы не конфликтовала с миникартой и нижней панелью
+    let y = fh - bottom_h - panel_h - 24 * s;
     // Кнопки +/- (высота как у общих кнопок)
     let minus_w = button_w_for(b"-", s); let minus_h = row_h; let plus_w = button_w_for(b"+", s); let plus_h = row_h;
     let minus_x = x + w - (plus_w + minus_w + 16 * s);
@@ -134,6 +135,7 @@ pub fn draw_building_panel(
     frame: &mut [u8], fw: i32, fh: i32, s: i32,
     kind: BuildingKind, workers_current: i32, workers_target: i32,
     prod_label: &[u8], cons_label: Option<&[u8]>,
+    biome_label: Option<&[u8]>,
 ) {
     let layout = layout_building_panel(fw, fh, s);
     // фон
@@ -183,6 +185,11 @@ pub fn draw_building_panel(
     }
     ui_text_group(frame, fw, fh, &mut row3, prod_label, [220,220,220,255]);
     if let Some(c) = cons_label { ui_text_group(frame, fw, fh, &mut row3, c, [200,200,200,255]); }
+    // 4) Биом/эффект — отдельной строкой под производством
+    if let Some(btxt) = biome_label {
+        let mut row4 = ui_row(layout.x + pad, layout.y + ui_pad(s) - 2 * s + (ui_item_h(s) + ui_gap(s)) * 3, s);
+        ui_text_group(frame, fw, fh, &mut row4, btxt, [200,220,220,255]);
+    }
     // Demolish в конце ряда (справа)
     let dem_left = layout.dem_x; // вычислен в layout на этой же строке
     let mut right_row = ui_row(dem_left, layout.dem_y, s);

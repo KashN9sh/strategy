@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, sync::mpsc::{Sender, Receiver, channe
 use glam::IVec2;
 use noise::{Fbm, NoiseFn, Seedable, MultiFractal};
 
-use crate::types::TileKind;
+use crate::types::{TileKind, BiomeKind};
 
 pub const CHUNK_W: i32 = 32;
 pub const CHUNK_H: i32 = 32;
@@ -30,6 +30,13 @@ pub struct World {
     pub clay_deposits: HashSet<(i32, i32)>,
     pub stone_deposits: HashSet<(i32, i32)>,
     pub iron_deposits: HashSet<(i32, i32)>,
+    // биом по тайлам (кэш)
+    pub biomes: HashMap<(i32,i32), BiomeKind>,
+    // настройки биомов из конфига (runtime)
+    pub biome_swamp_thr: f32,
+    pub biome_rocky_thr: f32,
+    pub biome_swamp_tree_growth_wmul: f32,
+    pub biome_rocky_tree_growth_wmul: f32,
 }
 
 impl World {
@@ -37,7 +44,7 @@ impl World {
         let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
         fbm = fbm.set_seed(seed as u32).set_octaves(5).set_frequency(0.03).set_lacunarity(2.0).set_persistence(0.5);
         let (tx, rx) = spawn_chunk_worker(seed);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new() }
+        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new(), biomes: HashMap::new(), biome_swamp_thr: 0.10, biome_rocky_thr: 0.10, biome_swamp_tree_growth_wmul: 0.85, biome_rocky_tree_growth_wmul: 1.20 }
     }
 
     pub fn reset_noise(&mut self, seed: u64) {
@@ -53,6 +60,7 @@ impl World {
         self.clay_deposits.clear();
         self.stone_deposits.clear();
         self.iron_deposits.clear();
+        self.biomes.clear();
         let (tx, rx) = spawn_chunk_worker(seed);
         self.tx = tx; self.rx = rx; self.pending.clear();
     }
@@ -102,14 +110,17 @@ impl World {
                             self.trees.insert((tx, ty), Tree { stage, age_ms: 0 });
                         }
                     }
-                    // заполним кэш месторождений (только для неводных клеток)
+                    // кэш: месторождения и биомы (на неводных)
                     if chunk.tiles[idx] != TileKind::Water {
                         let tx = res.cx * CHUNK_W + lx;
                         let ty = res.cy * CHUNK_H + ly;
                         let p = IVec2::new(tx, ty);
-                        if self.compute_has_clay_deposit(p) { self.clay_deposits.insert((tx, ty)); }
-                        if self.compute_has_stone_deposit(p) { self.stone_deposits.insert((tx, ty)); }
-                        if self.compute_has_iron_deposit(p) { self.iron_deposits.insert((tx, ty)); }
+                        // Шансы месторождений с поправкой на биом: Rocky — больше камня/железа, Swamp — больше глины
+                        let bm = self.compute_biome(p);
+                        if self.compute_has_clay_deposit_biome(p, bm) { self.clay_deposits.insert((tx, ty)); }
+                        if self.compute_has_stone_deposit_biome(p, bm) { self.stone_deposits.insert((tx, ty)); }
+                        if self.compute_has_iron_deposit_biome(p, bm) { self.iron_deposits.insert((tx, ty)); }
+                        self.biomes.insert((tx, ty), self.compute_biome(p));
                     }
                 }}
             }
@@ -174,6 +185,18 @@ impl World {
         false
     }
 
+    fn compute_has_clay_deposit_biome(&self, p: IVec2, bm: BiomeKind) -> bool {
+        let mut ok = self.compute_has_clay_deposit(p);
+        if !ok {
+            // В болоте дадим небольшой шанс сверх порога
+            if matches!(bm, BiomeKind::Swamp) {
+                let n = self.fbm.get([p.x as f64 * 0.55 - 13.0, p.y as f64 * 0.55 + 21.0]) as f32;
+                if n > 0.60 { ok = true; }
+            }
+        }
+        ok
+    }
+
     fn compute_has_stone_deposit(&self, p: IVec2) -> bool {
         let base = self.fbm.get([p.x as f64 * 0.38 - 123.0, p.y as f64 * 0.38 + 19.0]) as f32;
         let thr = 0.26_f32; let margin = 0.06_f32;
@@ -185,6 +208,18 @@ impl World {
             return hits >= 2;
         }
         false
+    }
+
+    fn compute_has_stone_deposit_biome(&self, p: IVec2, bm: BiomeKind) -> bool {
+        let mut ok = self.compute_has_stone_deposit(p);
+        if !ok {
+            // В скалах дадим небольшой шанс сверх порога
+            if matches!(bm, BiomeKind::Rocky) {
+                let n = self.fbm.get([p.x as f64 * 0.52 + 77.0, p.y as f64 * 0.52 - 41.0]) as f32;
+                if n > 0.62 { ok = true; }
+            }
+        }
+        ok
     }
 
     fn compute_has_iron_deposit(&self, p: IVec2) -> bool {
@@ -200,6 +235,40 @@ impl World {
         false
     }
 
+    fn compute_has_iron_deposit_biome(&self, p: IVec2, bm: BiomeKind) -> bool {
+        let mut ok = self.compute_has_iron_deposit(p);
+        if !ok {
+            if matches!(bm, BiomeKind::Rocky) {
+                let n = self.fbm.get([p.x as f64 * 0.59 - 91.0, p.y as f64 * 0.59 + 63.0]) as f32;
+                if n > 0.64 { ok = true; }
+            }
+        }
+        ok
+    }
+
+    pub fn biome(&self, p: IVec2) -> BiomeKind {
+        self.biomes.get(&(p.x, p.y)).cloned().unwrap_or_else(|| self.compute_biome(p))
+    }
+
+    fn compute_biome(&self, p: IVec2) -> BiomeKind {
+        // базовый шум для «влажности/болотистости» и «каменистости»
+        let moisture = self.fbm.get([p.x as f64 * 0.18 + 311.0, p.y as f64 * 0.18 - 211.0]) as f32; // -1..1
+        let rocky    = self.fbm.get([p.x as f64 * 0.22 - 157.0, p.y as f64 * 0.22 +  97.0]) as f32; // -1..1
+        let swamp_thr = self.biome_swamp_thr;
+        let rocky_thr = self.biome_rocky_thr;
+        // простое разбиение: высокий moisture -> болото; высокий rocky -> скалы; иначе — луг
+        if moisture > swamp_thr { BiomeKind::Swamp }
+        else if rocky > rocky_thr { BiomeKind::Rocky }
+        else { BiomeKind::Meadow }
+    }
+
+    pub fn apply_biome_config(&mut self, cfg: &crate::input::Config) {
+        self.biome_swamp_thr = cfg.biome_swamp_thr;
+        self.biome_rocky_thr = cfg.biome_rocky_thr;
+        self.biome_swamp_tree_growth_wmul = cfg.biome_swamp_tree_growth_wmul;
+        self.biome_rocky_tree_growth_wmul = cfg.biome_rocky_tree_growth_wmul;
+    }
+
     // --- Деревья ---
     pub fn has_tree(&self, p: IVec2) -> bool { self.trees.contains_key(&(p.x, p.y)) }
     pub fn tree_stage(&self, p: IVec2) -> Option<u8> { self.trees.get(&(p.x, p.y)).map(|t| t.stage) }
@@ -207,9 +276,19 @@ impl World {
     pub fn remove_tree(&mut self, p: IVec2) { self.trees.remove(&(p.x, p.y)); self.removed_trees.insert((p.x, p.y)); }
 
     pub fn grow_trees(&mut self, dt_ms: i32) {
-        // простая модель роста: 0->1 за 20с, 1->2 за ещё 40с
-        for (_pos, tr) in self.trees.iter_mut() {
-            tr.age_ms += dt_ms;
+        // простая модель роста: 0->1 за 20с, 1->2 за ещё 40с, скорректированные биомом
+        // Swamp — быстрее деревья; Rocky — медленнее
+        let swamp_thr = self.biome_swamp_thr;
+        let rocky_thr = self.biome_rocky_thr;
+        let fbm = &self.fbm;
+        let swamp_tree_wmul = self.biome_swamp_tree_growth_wmul.max(0.01);
+        let rocky_tree_wmul = self.biome_rocky_tree_growth_wmul.max(0.01);
+        for (&(tx, ty), tr) in self.trees.iter_mut() {
+            // локально вычислим биом по шумам без повторного заимствования self
+            let moisture = fbm.get([tx as f64 * 0.18 + 311.0, ty as f64 * 0.18 - 211.0]) as f32;
+            let rocky = fbm.get([tx as f64 * 0.22 - 157.0, ty as f64 * 0.22 +  97.0]) as f32;
+            let wmul = if moisture > swamp_thr { swamp_tree_wmul } else if rocky > rocky_thr { rocky_tree_wmul } else { 1.0 };
+            tr.age_ms += ((dt_ms as f32) / wmul) as i32;
             if tr.stage == 0 && tr.age_ms >= 20000 { tr.stage = 1; tr.age_ms = 0; }
             else if tr.stage == 1 && tr.age_ms >= 40000 { tr.stage = 2; tr.age_ms = 0; }
         }

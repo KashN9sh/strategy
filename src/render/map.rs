@@ -6,6 +6,7 @@ use crate::render::tiles;
 use crate::types::{Building, BuildingKind};
 use crate::palette::building_color;
 use crate::world::World;
+use crate::types::BiomeKind;
 
 pub fn draw_terrain_and_overlays(
     frame: &mut [u8], width: i32, height: i32,
@@ -41,9 +42,23 @@ pub fn draw_terrain_and_overlays(
                     } else {
                         tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h);
                     }
+                    // оттенок по биому (усилим, чтобы было явнее видно)
+                    let biome = world.biome(IVec2::new(mx, my));
+                    match biome {
+                        BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h, [50, 110, 70], 90, 255),
+                        BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_grass, atlas.base_w, atlas.base_h, draw_w, draw_h, [150, 150, 150], 90, 255),
+                        _ => {}
+                    }
                 }
                 crate::types::TileKind::Forest => {
                     tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h);
+                    // оттенок по биому и для леса, чтобы зоны читались
+                    let biome = world.biome(IVec2::new(mx, my));
+                    match biome {
+                        BiomeKind::Swamp => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h, [50, 110, 70], 80, 255),
+                        BiomeKind::Rocky => tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &atlas.base_forest, atlas.base_w, atlas.base_h, draw_w, draw_h, [150, 150, 150], 80, 255),
+                        _ => {}
+                    }
                 }
                 crate::types::TileKind::Water => {
                     let land_n = world.get_tile(mx, my-1) != crate::types::TileKind::Water;
@@ -67,7 +82,15 @@ pub fn draw_terrain_and_overlays(
                 }
             }
         } else { atlas.blit(frame, width, height, screen_pos.x, screen_pos.y, kind, water_frame); }
-        if show_grid { tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [20,20,20,255]); }
+        if show_grid {
+            // Если включён режим сетки через консоль для биомов — раскрасим сетку по биому
+            let color = match world.biome(IVec2::new(mx, my)) {
+                BiomeKind::Meadow => [30, 180, 30, 255],
+                BiomeKind::Swamp  => [40, 120, 80, 255],
+                BiomeKind::Rocky  => [160, 160, 160, 255],
+            };
+            tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
+        }
         // дороги — рисуем отдельным проходом после цикла по тайлам (см. ниже)
         if show_forest_overlay { let n = world.fbm.get([mx as f64, my as f64]) as f32; let v = ((n + 1.0) * 0.5 * 255.0) as u8; tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, [v,50,50,255]); }
 

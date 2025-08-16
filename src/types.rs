@@ -9,6 +9,13 @@ pub enum TileKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BiomeKind {
+    Meadow, // луга
+    Swamp,  // болота
+    Rocky,  // скалы/каменистая местность
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuildingKind {
     Lumberjack,
     House,

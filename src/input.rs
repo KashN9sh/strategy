@@ -34,6 +34,18 @@ pub struct Config {
     pub upkeep_kiln: i32,
     pub upkeep_fishery: i32,
     pub upkeep_smelter: i32,
+    // Биомы — пороги и множители
+    pub biome_swamp_thr: f32,
+    pub biome_rocky_thr: f32,
+    // множители времени циклов (wmul *= ...)
+    pub biome_swamp_lumberjack_wmul: f32,
+    pub biome_rocky_stone_wmul: f32,
+    // рост деревьев (время стадий): множители времени
+    pub biome_swamp_tree_growth_wmul: f32,
+    pub biome_rocky_tree_growth_wmul: f32,
+    // поля пшеницы: множители времени цикла по биому
+    pub biome_meadow_wheat_wmul: f32,
+    pub biome_swamp_wheat_wmul: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

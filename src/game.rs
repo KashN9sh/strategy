@@ -5,13 +5,23 @@ use crate::world::World;
 
 pub fn simulate(
     buildings: &mut Vec<Building>,
-    _world: &mut World,
+    world: &mut World,
     resources: &mut Resources,
     warehouses: &mut Vec<WarehouseStore>,
     dt_ms: i32,
 ) {
     for b in buildings.iter_mut() {
         b.timer_ms += dt_ms;
+        // Биомные модификаторы примера: Swamp замедляет Лесоруба, Rocky ускоряет Каменоломню
+        let biome_mod = {
+            use crate::types::BiomeKind::*;
+            let bm = world.biome(b.pos);
+            match (bm, b.kind) {
+                (Swamp, BuildingKind::Lumberjack) => 1.10, // медленнее
+                (Rocky, BuildingKind::StoneQuarry) => 0.90, // быстрее
+                _ => 1.00,
+            }
+        };
         match b.kind {
             BuildingKind::Lumberjack => {}
             BuildingKind::House => {}
@@ -27,6 +37,8 @@ pub fn simulate(
             BuildingKind::IronMine => {}
             BuildingKind::Smelter => {}
         }
+        // при желании можно применить biome_mod к таймерам производства (пока заглушка)
+        let _ = biome_mod;
     }
 }
 

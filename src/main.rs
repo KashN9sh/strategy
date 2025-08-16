@@ -116,6 +116,7 @@ fn run() -> Result<()> {
     let mut rng = StdRng::seed_from_u64(42);
     let mut seed: u64 = rng.random();
     let mut world = World::new(seed);
+    world.apply_biome_config(&config);
 
     // Состояние игры
     let mut hovered_tile: Option<IVec2> = None;
@@ -141,6 +142,7 @@ fn run() -> Result<()> {
     let mut face_sprites: Option<(Vec<Vec<u8>>, i32, i32)> = None; // (sprites, cell_w, cell_h)
     let mut road_mode = false;
     let mut path_debug_mode = false;
+    let mut biome_overlay_debug = false;
     let mut path_sel_a: Option<IVec2> = None;
     let mut path_sel_b: Option<IVec2> = None;
     let mut last_path: Option<Vec<IVec2>> = None;
@@ -365,7 +367,7 @@ fn run() -> Result<()> {
                                     if !console_input.is_empty() {
                                         let cmd = console_input.clone();
                                         console_log.push(format!("> {}", cmd));
-                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms);
+                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms, &mut world, &mut biome_overlay_debug);
                                         console_input.clear();
                                     }
                                     return;
@@ -569,7 +571,7 @@ fn run() -> Result<()> {
                         min_tx, min_ty, max_tx, max_ty,
                         screen_center, cam_snap,
                         water_frame,
-                        show_grid,
+                        show_grid || biome_overlay_debug,
                         show_forest_overlay,
                         false, // деревья рисуем вместе со зданиями после сортировки
                         &tree_atlas,
@@ -876,9 +878,24 @@ fn run() -> Result<()> {
                                     BuildingKind::Lumberjack => (b"+ Wood (via jobs)", None),
                                     BuildingKind::House | BuildingKind::Warehouse | BuildingKind::Forester => (b"", None),
                                 };
-                                ui::draw_building_panel(frame, width_i32, height_i32, ui::ui_scale(height_i32, config.ui_scale_base), b.kind, workers_current, b.workers_target, prod, cons);
+                                // Строка про биом и эффект
+                                let biome_label: Option<Vec<u8>> = {
+                                    use crate::types::BiomeKind::*;
+                                    let bm = world.biome(b.pos);
+                                    match (bm, b.kind) {
+                                        (Swamp, BuildingKind::Lumberjack) => Some(format!("Biome: Swamp  x{:.2}", config.biome_swamp_lumberjack_wmul).into_bytes()),
+                                        (Rocky, BuildingKind::StoneQuarry) => Some(format!("Biome: Rocky  x{:.2}", config.biome_rocky_stone_wmul).into_bytes()),
+                                        (Meadow, BuildingKind::WheatField) => Some(format!("Biome: Meadow  x{:.2}", config.biome_meadow_wheat_wmul).into_bytes()),
+                                        (Swamp, BuildingKind::WheatField) => Some(format!("Biome: Swamp  x{:.2}", config.biome_swamp_wheat_wmul).into_bytes()),
+                                        _ => None,
+                                    }
+                                };
+                                let biome_label_ref = biome_label.as_deref();
+                                ui::draw_building_panel(frame, width_i32, height_i32, ui::ui_scale(height_i32, config.ui_scale_base), b.kind, workers_current, b.workers_target, prod, cons, biome_label_ref);
                             }
                         }
+
+                        // Убрали тултип биома на наведении — показываем эффект в панели здания
                     }
 
                     if let Err(err) = pixels.render() {
@@ -1174,7 +1191,20 @@ fn run() -> Result<()> {
                                 if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
                                     c.work_timer_ms += step_ms as i32;
                                     // модификатор погоды на скорость циклов производства (по типу здания)
-                                    let wmul = game::production_weather_wmul(weather, b.kind);
+                                    let wmul = {
+                                        // базовый множитель от погоды
+                                        let w = game::production_weather_wmul(weather, b.kind);
+                                        // биомный множитель от клетки здания
+                                        use crate::types::BiomeKind::*;
+                                        let bm = world.biome(b.pos);
+                                        let cfgb = &config;
+                                        let bmul = match (bm, b.kind) {
+                                            (Swamp, BuildingKind::Lumberjack) => cfgb.biome_swamp_lumberjack_wmul,
+                                            (Rocky, BuildingKind::StoneQuarry) => cfgb.biome_rocky_stone_wmul,
+                                            _ => 1.00,
+                                        };
+                                        w * bmul
+                                    };
                                     match b.kind {
                                         BuildingKind::StoneQuarry => {
                                             if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
@@ -1204,7 +1234,16 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::WheatField => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= (6000.0 * wmul) as i32 {
+                                            // учтём биом поля (Meadow быстрее, Swamp медленнее)
+                                            let bmul = {
+                                                use crate::types::BiomeKind::*;
+                                                match world.biome(b.pos) {
+                                                    Meadow => config.biome_meadow_wheat_wmul,
+                                                    Swamp => config.biome_swamp_wheat_wmul,
+                                                    _ => 1.0,
+                                                }
+                                            };
+                                            if c.carrying.is_none() && c.work_timer_ms >= (6000.0 * wmul * bmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Wheat, 1));
@@ -1532,14 +1571,14 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
     }
 }
 
-fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32) {
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool) {
     let trimmed = cmd.trim();
     if trimmed.is_empty() { return; }
     let mut parts = trimmed.split_whitespace();
     let Some(head) = parts.next() else { return; };
     match head.to_ascii_lowercase().as_str() {
         "help" => {
-            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>".to_string());
+            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>, biome <swamp_thr rocky_thr|overlay>, biome-overlay".to_string());
         }
         "weather" => {
             if let Some(arg) = parts.next() {
@@ -1585,6 +1624,24 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
                 if let Some(v) = t_opt { *world_clock_ms = v * 120_000.0; log.push(format!("OK: time set to {:.2}", v)); }
                 else { log.push("ERR: usage time <day|night|dawn|dusk|0..1>".to_string()); }
             } else { log.push("ERR: usage time <day|night|dawn|dusk|0..1>".to_string()); }
+        }
+        "biome" => {
+            if let Some(arg) = parts.next() {
+                if arg.eq_ignore_ascii_case("overlay") {
+                    *biome_overlay_debug = !*biome_overlay_debug;
+                    log.push(format!("OK: biome overlay {}", if *biome_overlay_debug {"ON"} else {"OFF"}));
+                } else if let Some(arg2) = parts.next() {
+                    if let (Ok(sw), Ok(rk)) = (arg.parse::<f32>(), arg2.parse::<f32>()) {
+                        world.biome_swamp_thr = sw; world.biome_rocky_thr = rk;
+                        world.biomes.clear(); // сбросим кэш
+                        log.push(format!("OK: biome thresholds set swamp_thr={:.2} rocky_thr={:.2}", sw, rk));
+                    } else { log.push("ERR: usage biome <swamp_thr rocky_thr|overlay>".to_string()); }
+                } else { log.push("ERR: usage biome <swamp_thr rocky_thr|overlay>".to_string()); }
+            } else { log.push("ERR: usage biome <swamp_thr rocky_thr|overlay>".to_string()); }
+        }
+        "biome_overlay" | "biomeoverlay" | "biome-overlay" => {
+            *biome_overlay_debug = !*biome_overlay_debug;
+            log.push(format!("OK: biome overlay {}", if *biome_overlay_debug {"ON"} else {"OFF"}));
         }
         _ => { log.push("ERR: unknown command. Type 'help'".to_string()); }
     }

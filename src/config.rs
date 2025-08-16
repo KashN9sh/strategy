@@ -35,6 +35,14 @@ pub fn defaults() -> (input::Config, input::InputConfig) {
         upkeep_kiln: 1,
         upkeep_fishery: 1,
         upkeep_smelter: 2,
+        biome_swamp_thr: 0.10,
+        biome_rocky_thr: 0.10,
+        biome_swamp_lumberjack_wmul: 1.10,
+        biome_rocky_stone_wmul: 0.90,
+        biome_swamp_tree_growth_wmul: 0.85,
+        biome_rocky_tree_growth_wmul: 1.20,
+        biome_meadow_wheat_wmul: 0.95,
+        biome_swamp_wheat_wmul: 1.15,
     };
     let input = input::InputConfig {
         move_up: "W".into(),
@@ -99,6 +107,15 @@ pub fn load_or_create(path: &str) -> Result<(input::Config, input::InputConfig)>
         if cfg.upkeep_kiln == 0 { cfg.upkeep_kiln = def_cfg.upkeep_kiln; }
         if cfg.upkeep_fishery == 0 { cfg.upkeep_fishery = def_cfg.upkeep_fishery; }
         if cfg.upkeep_smelter == 0 { cfg.upkeep_smelter = def_cfg.upkeep_smelter; }
+        // биомы — мягкие дефолты
+        if cfg.biome_swamp_thr == 0.0 { cfg.biome_swamp_thr = def_cfg.biome_swamp_thr; }
+        if cfg.biome_rocky_thr == 0.0 { cfg.biome_rocky_thr = def_cfg.biome_rocky_thr; }
+        if cfg.biome_swamp_lumberjack_wmul == 0.0 { cfg.biome_swamp_lumberjack_wmul = def_cfg.biome_swamp_lumberjack_wmul; }
+        if cfg.biome_rocky_stone_wmul == 0.0 { cfg.biome_rocky_stone_wmul = def_cfg.biome_rocky_stone_wmul; }
+        if cfg.biome_swamp_tree_growth_wmul == 0.0 { cfg.biome_swamp_tree_growth_wmul = def_cfg.biome_swamp_tree_growth_wmul; }
+        if cfg.biome_rocky_tree_growth_wmul == 0.0 { cfg.biome_rocky_tree_growth_wmul = def_cfg.biome_rocky_tree_growth_wmul; }
+        if cfg.biome_meadow_wheat_wmul == 0.0 { cfg.biome_meadow_wheat_wmul = def_cfg.biome_meadow_wheat_wmul; }
+        if cfg.biome_swamp_wheat_wmul == 0.0 { cfg.biome_swamp_wheat_wmul = def_cfg.biome_swamp_wheat_wmul; }
         Ok((cfg, parsed.input))
     } else {
         let (config, input) = defaults();
