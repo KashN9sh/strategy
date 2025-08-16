@@ -60,6 +60,29 @@ pub fn handle_left_click(
     // нижняя панель UI
     let bottom_bar_h = ui::bottom_panel_height(ui_s);
     let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;
+    // Миникарта +/- в правом нижнем углу (совпадает с координатами в ui::draw_minimap_widget)
+    {
+        let s = ui_s; let pad = ui::ui_pad(s); let base_cell = 2 * s; let base_w_tiles = 96; let base_h_tiles = 64;
+        let widget_w = base_w_tiles * base_cell; let widget_h = base_h_tiles * base_cell;
+        let x = width_i32 - pad - widget_w; let y = height_i32 - bottom_bar_h - pad - widget_h;
+        let btn_h = ui::ui_item_h(s); let btn_w = ui::button_w_for(b"+", s); let gap = ui::ui_gap(s);
+        let plus_x = x - (btn_w + gap); let plus_y = y;
+        let minus_x = plus_x; let minus_y = plus_y + btn_h + gap;
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, minus_x, minus_y, btn_w, btn_h) {
+            // уменьшить масштаб миникарты (не ниже 1px)
+            use std::sync::atomic::Ordering;
+            let cur = super::MINIMAP_CELL_PX.load(Ordering::Relaxed);
+            super::MINIMAP_CELL_PX.store((cur - s.max(1)).max(1), Ordering::Relaxed);
+            return true;
+        }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, plus_x, plus_y, btn_w, btn_h) {
+            use std::sync::atomic::Ordering;
+            let cur = super::MINIMAP_CELL_PX.load(Ordering::Relaxed);
+            super::MINIMAP_CELL_PX.store(cur + s.max(1), Ordering::Relaxed);
+            return true;
+        }
+    }
+
     // Вкладки
     let s = ui_s; let padb = 8 * s; let btn_h = 18 * s; let by0 = height_i32 - bottom_bar_h;
     let build_w = ui::button_w_for(b"Build", s); let econ_w = ui::button_w_for(b"Economy", s);

@@ -42,6 +42,24 @@ pub fn draw_line(frame: &mut [u8], width: i32, height: i32, mut x0: i32, mut y0:
     }
 }
 
+/// Заливка прямоугольника с альфа-смешиванием
+pub fn fill_rect(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, w: i32, h: i32, color: [u8; 4]) {
+    let x0 = x.max(0); let y0 = y.max(0); let x1 = (x + w).min(fw); let y1 = (y + h).min(fh);
+    if x0 >= x1 || y0 >= y1 { return; }
+    let a = color[3] as u32; let na = 255 - a; let cr = color[0] as u32; let cg = color[1] as u32; let cb = color[2] as u32;
+    for yy in y0..y1 {
+        let row = (yy as usize) * (fw as usize) * 4;
+        for xx in x0..x1 {
+            let idx = row + (xx as usize) * 4;
+            let dr = frame[idx] as u32; let dg = frame[idx+1] as u32; let db = frame[idx+2] as u32;
+            frame[idx]   = ((a * cr + na * dr) / 255) as u8;
+            frame[idx+1] = ((a * cg + na * dg) / 255) as u8;
+            frame[idx+2] = ((a * cb + na * db) / 255) as u8;
+            frame[idx+3] = 255;
+        }
+    }
+}
+
 fn draw_pixel_circle_outline(frame: &mut [u8], width: i32, height: i32, cx: i32, cy: i32, r: i32, color: [u8; 4]) {
     if r <= 0 { return; }
     let mut x = r;

@@ -1,4 +1,6 @@
-use crate::types::{Resources, BuildingKind, building_cost, ResourceKind, FoodPolicy};
+use crate::types::{Resources, BuildingKind, building_cost, ResourceKind, FoodPolicy, Building};
+use crate::world::World;
+use glam::Vec2;
 use crate::palette::resource_color;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +50,13 @@ pub fn ui_text_group(frame: &mut [u8], fw: i32, fh: i32, g: &mut UiGroup, text: 
 /// Зарезервировать прямоугольник в группе фиксированной ширины и высоты item_h, с продвижением курсора
 pub fn ui_slot(g: &mut UiGroup, w: i32) -> (i32, i32, i32, i32) {
     let h = g.item_h;
+    let (x, y) = match g.dir { UiDir::Row => (g.cursor_x, g.y), UiDir::Column => (g.x, g.cursor_y) };
+    match g.dir { UiDir::Row => { g.cursor_x += w + g.gap; }, UiDir::Column => { g.cursor_y += h + g.gap; } }
+    (x, y, w, h)
+}
+
+/// Резерв прямоугольника произвольной высоты в группе
+pub fn ui_slot_wh(g: &mut UiGroup, w: i32, h: i32) -> (i32, i32, i32, i32) {
     let (x, y) = match g.dir { UiDir::Row => (g.cursor_x, g.y), UiDir::Column => (g.x, g.cursor_y) };
     match g.dir { UiDir::Row => { g.cursor_x += w + g.gap; }, UiDir::Column => { g.cursor_y += h + g.gap; } }
     (x, y, w, h)
@@ -708,6 +717,56 @@ fn fill_rect(frame: &mut [u8], fw: i32, fh: i32, x: i32, y: i32, w: i32, h: i32,
         let idx = row + (xx as usize) * 4; let a = color[3] as u32; let na = 255 - a; let dr = frame[idx] as u32; let dg = frame[idx+1] as u32; let db = frame[idx+2] as u32;
         frame[idx] = ((a * color[0] as u32 + na * dr) / 255) as u8; frame[idx+1] = ((a * color[1] as u32 + na * dg) / 255) as u8; frame[idx+2] = ((a * color[2] as u32 + na * db) / 255) as u8; frame[idx+3] = 255;
     }}
+}
+
+// Виджет мини-карты: вычисляет позицию/масштаб и отдаёт отрисовку в render::map::draw_minimap
+pub fn draw_minimap_widget(
+    frame: &mut [u8], fw: i32, fh: i32, s: i32,
+    world: &mut World,
+    buildings: &Vec<Building>,
+    cam_px: Vec2,
+    atlas_half_w: i32, atlas_half_h: i32,
+    vis_min_tx: i32, vis_min_ty: i32, vis_max_tx: i32, vis_max_ty: i32,
+    cell_px: i32,
+    cursor_x: i32, cursor_y: i32,
+) {
+    let pad = ui_pad(s);
+    // Бейзлайн: 96x64 клеток по 2*s (внешний размер фиксированный)
+    let base_cell = 2 * s; let base_w_tiles = 96; let base_h_tiles = 64;
+    let widget_w = base_w_tiles * base_cell; let widget_h = base_h_tiles * base_cell;
+    // Создаём группу-строку в правом нижнем углу и резервируем слот под миникарту — в духе API
+    let mut grp = ui_row(fw - pad - widget_w, fh - bottom_panel_height(s) - pad - widget_h, s);
+    let (x, y, w_slot, h_slot) = ui_slot_wh(&mut grp, widget_w, widget_h);
+    // Подложка виджета в стиле панелей (тень + фон)
+    fill_rect(frame, fw, fh, x + 2 * s, y + 2 * s, w_slot, h_slot, [0, 0, 0, 120]);
+    fill_rect(frame, fw, fh, x, y, w_slot, h_slot, [0, 0, 0, 180]);
+    // Детализация: используем переданный cell_px, охват — по размеру слота
+    let cell = cell_px.max(1);
+    let mini_w_tiles = (w_slot / cell).max(8);
+    let mini_h_tiles = (h_slot / cell).max(6);
+    // центр вокруг текущего смещения камеры (переход px->тайлы приблизительно)
+    let cam_cx = ((cam_px.x / (atlas_half_w as f32)).round() as i32) / 2;
+    let cam_cy = ((cam_px.y / (atlas_half_h as f32)).round() as i32) / 2;
+    let half_w = mini_w_tiles / 2; let half_h = mini_h_tiles / 2;
+    let mm_min_tx = cam_cx - half_w; let mm_min_ty = cam_cy - half_h;
+    let mm_max_tx = cam_cx + half_w - 1; let mm_max_ty = cam_cy + half_h - 1;
+    // фон и миникарта
+    crate::render::map::draw_minimap(
+        frame, fw, fh, world, buildings,
+        mm_min_tx, mm_min_ty, mm_max_tx, mm_max_ty,
+        x, y, cell,
+        vis_min_tx, vis_min_ty, vis_max_tx, vis_max_ty,
+    );
+
+    // Кнопки зума у левого края миникарты, вертикально
+    let btn_h = ui_item_h(s); let btn_w = button_w_for(b"+", s);
+    let gap = ui_gap(s);
+    let plus_x = x - (btn_w + gap); let plus_y = y; // сверху слева
+    let minus_x = plus_x; let minus_y = plus_y + btn_h + gap; // под плюсом
+    let hovered_plus = point_in_rect(cursor_x, cursor_y, plus_x, plus_y, btn_w, btn_h);
+    let hovered_minus = point_in_rect(cursor_x, cursor_y, minus_x, minus_y, btn_w, btn_h);
+    draw_button(frame, fw, fh, minus_x, minus_y, btn_w, btn_h, false, hovered_minus, true, b"-", [230,230,230,255], s, ButtonStyle::Default);
+    draw_button(frame, fw, fh, plus_x, plus_y, btn_w, btn_h, false, hovered_plus, true, b"+", [230,230,230,255], s, ButtonStyle::Default);
 }
 
 

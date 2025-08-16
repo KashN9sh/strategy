@@ -454,4 +454,60 @@ pub fn world_to_screen(atlas: &TileAtlas, screen_center: IVec2, cam_snap: glam::
     screen_center + IVec2::new(sx, sy)
 }
 
+/// Простая мини-карта: даунскейл тайлов, дороги/здания поверх и рамка текущей камеры
+pub fn draw_minimap(
+    frame: &mut [u8], fw: i32, fh: i32,
+    world: &mut World,
+    buildings: &Vec<Building>,
+    min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32, // область, которую рисуем на мини-карте
+    x: i32, y: i32, cell_px: i32,                         // левый верх и размер ячейки в пикселях
+    cam_min_tx: i32, cam_min_ty: i32, cam_max_tx: i32, cam_max_ty: i32, // текущие видимые границы для маркера камеры
+) {
+    let w_tiles = (max_tx - min_tx + 1).max(1);
+    let h_tiles = (max_ty - min_ty + 1).max(1);
+    let map_w = w_tiles * cell_px;
+    let map_h = h_tiles * cell_px;
+    // тайлы
+    for ty in min_ty..=max_ty { for tx in min_tx..=max_tx {
+        let kind = world.get_tile(tx, ty);
+        let col = match kind {
+            crate::types::TileKind::Grass => [100, 170, 90, 255],
+            crate::types::TileKind::Forest => [60, 130, 80, 255],
+            crate::types::TileKind::Water => [70, 130, 220, 255],
+        };
+        let px = x + (tx - min_tx) * cell_px; let py = y + (ty - min_ty) * cell_px;
+        tiles::fill_rect(frame, fw, fh, px, py, cell_px, cell_px, col);
+        // дорога поверх
+        if world.is_road(IVec2::new(tx, ty)) {
+            tiles::fill_rect(frame, fw, fh, px, py, cell_px, cell_px, [210, 180, 120, 255]);
+        }
+    }}
+    // здания поверх
+    for b in buildings.iter() {
+        if b.pos.x < min_tx || b.pos.y < min_ty || b.pos.x > max_tx || b.pos.y > max_ty { continue; }
+        let bx = x + (b.pos.x - min_tx) * cell_px; let by = y + (b.pos.y - min_ty) * cell_px;
+        let c = building_color(b.kind);
+        // чуть ярче на миникарте
+        let brighten = |v: u8| -> u8 { (v as u16 + 40).min(255) as u8 };
+        tiles::fill_rect(frame, fw, fh, bx, by, cell_px, cell_px, [brighten(c[0]), brighten(c[1]), brighten(c[2]), 255]);
+    }
+    // рамка текущей видимой области камеры (отрисовываем только пересечение с миникартой)
+    if cam_max_tx >= min_tx && cam_min_tx <= max_tx && cam_max_ty >= min_ty && cam_min_ty <= max_ty {
+        let sx_t = cam_min_tx.max(min_tx);
+        let ex_t = cam_max_tx.min(max_tx);
+        let sy_t = cam_min_ty.max(min_ty);
+        let ey_t = cam_max_ty.min(max_ty);
+        let rx = x + (sx_t - min_tx) * cell_px;
+        let ry = y + (sy_t - min_ty) * cell_px;
+        let rw = ((ex_t - sx_t + 1).max(1)) * cell_px;
+        let rh = ((ey_t - sy_t + 1).max(1)) * cell_px;
+        let col = [240, 230, 200, 180];
+        // тонкая рамка в 1 пиксель
+        tiles::draw_line(frame, fw, fh, rx, ry, rx + rw - 1, ry, col);
+        tiles::draw_line(frame, fw, fh, rx + rw - 1, ry, rx + rw - 1, ry + rh - 1, col);
+        tiles::draw_line(frame, fw, fh, rx + rw - 1, ry + rh - 1, rx, ry + rh - 1, col);
+        tiles::draw_line(frame, fw, fh, rx, ry + rh - 1, rx, ry, col);
+    }
+}
+
 

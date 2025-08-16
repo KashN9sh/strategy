@@ -18,6 +18,7 @@ mod palette;
 use pixels::{Pixels, SurfaceTexture};
 use std::time::Instant;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use std::sync::atomic::{AtomicI32, Ordering};
  
 // use std::fs; // перенесено в config
 // use std::path::Path; // перенесено в config
@@ -28,6 +29,10 @@ use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::WindowBuilder;
+// duplicate import removed
+
+// Глобальный масштаб клетки миникарты (px на клетку)
+static MINIMAP_CELL_PX: AtomicI32 = AtomicI32::new(0);
 
 // размеры базового тайла перенесены в atlas::TILE_W/H
 // Размер тайла в пикселях задаётся через атлас (half_w/half_h)
@@ -535,6 +540,10 @@ fn run() -> Result<()> {
                     zoom = (zoom * factor).clamp(0.5, 8.0);
                 }
                 WindowEvent::RedrawRequested => {
+                    if MINIMAP_CELL_PX.load(Ordering::Relaxed) == 0 {
+                        let s0 = ui::ui_scale(height_i32, config.ui_scale_base);
+                        MINIMAP_CELL_PX.store(3 * s0, Ordering::Relaxed);
+                    }
                     let frame = pixels.frame_mut();
                     clear(frame, [12, 18, 24, 255]);
 
@@ -639,6 +648,8 @@ fn run() -> Result<()> {
                         screen_center, cam_snap,
                         min_tx, min_ty, max_tx, max_ty,
                     );
+
+                    // (перенесено ниже, после погодных эффектов/осадков/свечений)
 
                     render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap, &citizen_sprite, &face_sprites);
 
@@ -771,6 +782,15 @@ fn run() -> Result<()> {
                             }
                         }
                     }
+
+                    // Мини-карта как UI-виджет (поверх осадков и эффектов)
+                    ui::draw_minimap_widget(
+                        frame, width_i32, height_i32, ui::ui_scale(height_i32, config.ui_scale_base),
+                        &mut world, &buildings,
+                        cam_px, atlas.half_w, atlas.half_h,
+                        min_tx, min_ty, max_tx, max_ty,
+                        MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1), cursor_xy.x, cursor_xy.y,
+                    );
 
                     // Отрисовка найденного пути в дебаг-режиме
                     if let (true, Some(path)) = (path_debug_mode, &last_path) {
