@@ -168,6 +168,7 @@ pub fn draw_ui(
     ui_tab: UITab, food_policy: FoodPolicy,
     last_income: i32, last_upkeep: i32,
     housing_used: i32, housing_cap: i32,
+    weather_label: &[u8], weather_icon_col: [u8;4],
 ) {
     let s = ui_scale(fh, base_scale_k);
     let bar_h = top_panel_height(s);
@@ -210,6 +211,24 @@ pub fn draw_ui(
     draw_number(frame, fw, fh, num_x_tax, pad, taxp, [255,255,255,255], s);
     if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Tax %  [ [ ] to change ]".to_vec())); }
     x = num_x_tax + reserved_w + gap;
+
+    // погода (иконка + короткий лейбл) — рендер справа, возле блока TIME, а не в левом блоке
+    let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
+    let mut minutes_tmp = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
+    let _hours_tmp = (minutes_tmp / 60) as u32; minutes_tmp = minutes_tmp % 60; let _minutes_u_tmp = minutes_tmp as u32;
+    let fps_n_tmp = fps.round() as u32;
+    let fps_w_tmp = text_w(b"FPS", s) + gap_info + number_w(fps_n_tmp, s);
+    let speed_w_tmp = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
+    let time_w_tmp = text_w(b"TIME", s) + gap_info + (5 * 4 * px);
+    let total_w_tmp = time_w_tmp + gap_info + fps_w_tmp + gap_info + speed_w_tmp;
+    let right_x0 = fw - pad_right - total_w_tmp;
+    // рисуем погоду слева от правого блока
+    let wx = (right_x0 - (icon_size + 4 + text_w(weather_label, s) + 10 * s)).max(x); // не уезжать левее уже нарисованных блоков
+    fill_rect(frame, fw, fh, wx, pad, icon_size, icon_size, weather_icon_col);
+    draw_text_mini(frame, fw, fh, wx + icon_size + 4, pad, weather_label, [230,230,230,255], s);
+    if point_in_rect(cursor_x, cursor_y, wx, pad, icon_size, icon_size) {
+        let mut tip = Vec::from(b"Weather: "); tip.extend_from_slice(weather_label); tooltip = Some((wx + icon_size / 2, tip));
+    }
 
     // Рассчитаем занятый справа блок (TIME/FPS/SPEED), чтобы не наезжать на него слева
     let px = 2 * s; let gap_info = 2 * px; let _y_info = 8 * s; let pad_right = 8 * s;

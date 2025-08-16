@@ -30,6 +30,38 @@ pub fn simulate(
     }
 }
 
+pub fn production_weather_penalty(kind: crate::WeatherKind) -> f32 {
+    match kind { crate::WeatherKind::Rain => 0.9, crate::WeatherKind::Fog => 0.95, crate::WeatherKind::Snow => 0.85, _ => 1.0 }
+}
+
+// Дифференцированный множитель длительности производственного цикла
+// (>1.0 — медленнее, <1.0 — быстрее)
+pub fn production_weather_wmul(weather: crate::WeatherKind, building: BuildingKind) -> f32 {
+    use crate::WeatherKind::*;
+    use BuildingKind::*;
+    match weather {
+        Clear => 1.0,
+        Rain => match building {
+            Fishery => 0.85,          // рыбаки быстрее в дождь
+            WheatField => 1.10,       // поле страдает от дождя
+            Lumberjack | StoneQuarry | ClayPit | IronMine => 1.05,
+            Forester => 1.00,         // лесник почти без изменений
+            Mill | Bakery | Kiln | Smelter | House | Warehouse => 1.00,
+        },
+        Fog => match building {
+            Forester => 1.02,         // туман мешает меньше
+            _ => 1.05,
+        },
+        Snow => match building {
+            WheatField => 1.30,       // снег сильно бьёт по полю
+            Fishery => 1.10,
+            Forester => 1.15,
+            Lumberjack | StoneQuarry | ClayPit | IronMine => 1.15,
+            Mill | Bakery | Kiln | Smelter | House | Warehouse => 1.10,
+        },
+    }
+}
+
 pub fn new_day_feed_and_income(citizens: &mut [Citizen], resources: &mut Resources, warehouses: &mut [WarehouseStore], policy: FoodPolicy) {
     for c in citizens.iter_mut() { c.fed_today = false; }
     for c in citizens.iter_mut() {

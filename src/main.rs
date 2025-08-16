@@ -13,6 +13,7 @@ mod jobs;
 mod controls;
 mod ui_interaction;
 mod game;
+use crate::WeatherKind as WK; // доступ к типу для внешних вызовов
 mod palette;
 use pixels::{Pixels, SurfaceTexture};
 use std::time::Instant;
@@ -293,6 +294,10 @@ fn run() -> Result<()> {
         citizen_sprite = Some((img.to_vec(), iw as i32, ih as i32));
     }
     let mut water_anim_time: f32 = 0.0;
+    // Простая погода
+    let mut weather: WeatherKind = WeatherKind::Clear;
+    let mut weather_timer_ms: f32 = 0.0;
+    let mut weather_next_change_ms: f32 = choose_weather_duration_ms(weather, &mut rng);
     // Экономика: вчерашние итоги
     let mut last_tax_income: i32 = 0;
     let mut last_upkeep_cost: i32 = 0;
@@ -561,6 +566,61 @@ fn run() -> Result<()> {
                     let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
                     if night_strength > 0 { overlay_tint(frame, width_i32, height_i32, [18, 28, 60, night_strength]); }
 
+                    // Погодные эффекты (простые оверлеи)
+                    match weather {
+                        WeatherKind::Clear => {}
+                        WeatherKind::Rain => {
+                            // синий прохладный фильтр
+                            overlay_tint(frame, width_i32, height_i32, [40, 60, 100, 40]);
+                        }
+                        WeatherKind::Fog => {
+                            // сероватая дымка
+                            overlay_tint(frame, width_i32, height_i32, [160, 160, 160, 50]);
+                            // плавная анимация тумана (2D-синусоидальное поле альфы)
+                            overlay_fog(frame, width_i32, height_i32, water_anim_time);
+                        }
+                        WeatherKind::Snow => {
+                            // холодный свет
+                            overlay_tint(frame, width_i32, height_i32, [220, 230, 255, 40]);
+                        }
+                    }
+
+                    // Осадки (частицы) — простой, дешёвый слой
+                    match weather {
+                        WeatherKind::Rain => {
+                            let sx_step = 24; let sy_step = 48;
+                            let speed = 120.0; // px/сек (условно)
+                            let t = water_anim_time / 1000.0 * speed; // в px
+                            for x in (0..width_i32).step_by(sx_step as usize) {
+                                for y in (0..height_i32).step_by(sy_step as usize) {
+                                    let off = ((x as f32 * 0.37 + y as f32 * 0.11 + t) % sy_step as f32) as i32;
+                                    let sx = x + off / 3; let sy = y + off;
+                                    let x0 = sx; let y0 = sy; let x1 = sx - 2; let y1 = sy + 8;
+                                    render::tiles::draw_line(frame, width_i32, height_i32, x0, y0, x1, y1, [150, 180, 230, 255]);
+                                }
+                            }
+                        }
+                        WeatherKind::Snow => {
+                            let step = 28; let speed = 35.0;
+                            let t = water_anim_time / 1000.0 * speed;
+                            for x in (0..width_i32).step_by(step as usize) {
+                                for band in 0..3 { // три горизонтальные «полосы» для разнообразия
+                                    let base_y = band * (height_i32 / 3);
+                                    let yy = ((base_y as f32 + (x as f32 * 0.5 + t)) % height_i32 as f32) as i32;
+                                    let sway = ((t * 0.3 + x as f32 * 0.2).sin() * 3.0) as i32;
+                                    let xx = (x + sway).clamp(0, width_i32 - 1);
+                                    // маленькая снежинка 2x2
+                                    if xx >= 0 && yy >= 0 && xx < width_i32 && yy < height_i32 {
+                                        let col = [245, 245, 250, 255];
+                                        render::tiles::draw_line(frame, width_i32, height_i32, xx, yy, xx+1, yy, col);
+                                        render::tiles::draw_line(frame, width_i32, height_i32, xx, yy+1, xx+1, yy+1, col);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
                     // Отрисовка найденного пути в дебаг-режиме
                     if let (true, Some(path)) = (path_debug_mode, &last_path) {
                         render::map::draw_debug_path(frame, width_i32, height_i32, &atlas, path, screen_center, cam_snap);
@@ -605,6 +665,14 @@ fn run() -> Result<()> {
                         for b in &buildings { if b.kind == BuildingKind::House { housing_cap += b.capacity; } }
                         for c in &citizens { if buildings.iter().any(|b| b.kind == BuildingKind::House && b.pos == c.home) { housing_used += 1; } }
                         let pop_show = citizens.len() as i32;
+                        // Параметры погоды для UI: короткий лейбл
+                        let (wlabel, wcol): (&[u8], [u8;4]) = match weather {
+                            WeatherKind::Clear => (b"CLEAR", [180,200,120,255]),
+                            WeatherKind::Rain => (b"RAIN", [90,120,200,255]),
+                            WeatherKind::Fog => (b"FOG", [160,160,160,255]),
+                            WeatherKind::Snow => (b"SNOW", [220,230,255,255]),
+                        };
+
                         ui::draw_ui(
                             frame, width_i32, height_i32,
                             &visible, total_visible_wood, pop_show, selected_building,
@@ -613,6 +681,7 @@ fn run() -> Result<()> {
                             avg_hap, tax_rate, ui_tab, food_policy,
                             last_tax_income, last_upkeep_cost,
                             housing_used, housing_cap,
+                            wlabel, wcol,
                         );
                         // Если выбрана панель здания — рисуем её
                         if let Some(p) = active_building_panel {
@@ -929,9 +998,11 @@ fn run() -> Result<()> {
                                 if c.pos != wp { continue; }
                                 if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
                                     c.work_timer_ms += step_ms as i32;
+                                    // модификатор погоды на скорость циклов производства (по типу здания)
+                                    let wmul = game::production_weather_wmul(weather, b.kind);
                                     match b.kind {
                                         BuildingKind::StoneQuarry => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= 4000 {
+                                            if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Stone, 1));
@@ -940,7 +1011,7 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::ClayPit => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= 4000 {
+                                            if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Clay, 1));
@@ -949,7 +1020,7 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::IronMine => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= 5000 {
+                                            if c.carrying.is_none() && c.work_timer_ms >= (5000.0 * wmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::IronOre, 1));
@@ -958,7 +1029,7 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::WheatField => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= 6000 {
+                                            if c.carrying.is_none() && c.work_timer_ms >= (6000.0 * wmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 if let Some(dst) = warehouses.iter().min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs()).map(|w| w.pos) {
                                                     c.carrying = Some((ResourceKind::Wheat, 1));
@@ -977,7 +1048,7 @@ fn run() -> Result<()> {
                                                     }
                                                 }
                                             } else {
-                                                if c.work_timer_ms >= 5000 {
+                                                if c.work_timer_ms >= (5000.0 * wmul) as i32 {
                                                     c.work_timer_ms = 0;
                                                     // consume carried wheat -> produce flour, then deliver
                                                     c.carrying = None;
@@ -1000,7 +1071,7 @@ fn run() -> Result<()> {
                                                     }
                                                 }
                                             } else {
-                                                if c.work_timer_ms >= 5000 {
+                                                if c.work_timer_ms >= (5000.0 * wmul) as i32 {
                                                     c.work_timer_ms = 0;
                                                     // попытка списать 1 wood со складов
                                                     let mut ok = false;
@@ -1057,7 +1128,7 @@ fn run() -> Result<()> {
                                                     }
                                                 }
                                             } else {
-                                                if c.work_timer_ms >= 6000 {
+                                                if c.work_timer_ms >= (6000.0 * wmul) as i32 {
                                                     c.work_timer_ms = 0;
                                                     // списать 1 wood
                                                     let mut ok = false;
@@ -1073,7 +1144,7 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::Fishery => {
-                                            if c.carrying.is_none() && c.work_timer_ms >= 5000 {
+                                            if c.carrying.is_none() && c.work_timer_ms >= (5000.0 * wmul) as i32 {
                                                 const NB: [(i32,i32);4] = [(1,0),(-1,0),(0,1),(0,-1)];
                                                 if NB.iter().any(|(dx,dy)| world.get_tile(b.pos.x+dx, b.pos.y+dy) == TileKind::Water) {
                                                     c.work_timer_ms = 0;
@@ -1085,7 +1156,7 @@ fn run() -> Result<()> {
                                             }
                                         }
                                         BuildingKind::Forester => {
-                                            if c.work_timer_ms >= 4000 {
+                                            if c.work_timer_ms >= (4000.0 * wmul) as i32 {
                                                 c.work_timer_ms = 0;
                                                 const R: i32 = 6;
                                                 let mut best: Option<(i32, IVec2)> = None;
@@ -1110,6 +1181,14 @@ fn run() -> Result<()> {
                         if accumulator_ms > 10.0 * step_ms { accumulator_ms = 0.0; break; }
                     }
                 }
+                // Погода: случайная длительность и вероятности смены
+                weather_timer_ms += frame_ms;
+                if weather_timer_ms >= weather_next_change_ms {
+                    weather_timer_ms = 0.0;
+                    weather = pick_next_weather(weather, &mut rng);
+                    weather_next_change_ms = choose_weather_duration_ms(weather, &mut rng);
+                }
+
                 if did_step {
                     window.request_redraw();
                 } else { window.request_redraw(); }
@@ -1174,6 +1253,71 @@ fn overlay_tint(frame: &mut [u8], fw: i32, fh: i32, [r,g,b,a]: [u8;4]) {
 // draw_number перенесён в модуль ui
 
 // point_in_rect перенесён в модуль ui
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WeatherKind { Clear, Rain, Fog, Snow }
+
+fn choose_weather_duration_ms(current: WeatherKind, rng: &mut StdRng) -> f32 {
+    // Базовые интервалы (в секундах), затем добавляем разброс
+    let (base_min, base_max) = match current {
+        WeatherKind::Clear => (60.0, 120.0),
+        WeatherKind::Rain => (40.0, 90.0),
+        WeatherKind::Fog => (30.0, 70.0),
+        WeatherKind::Snow => (50.0, 100.0),
+    };
+    let sec: f32 = rng.gen_range(base_min..base_max);
+    sec * 1000.0
+}
+
+fn pick_next_weather(current: WeatherKind, rng: &mut StdRng) -> WeatherKind {
+    // Вероятности переходов зависят от текущей погоды
+    // Значения — веса; нормализуем автоматически
+    let (opts, weights): (&[WeatherKind], &[f32]) = match current {
+        WeatherKind::Clear => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.55, 0.25, 0.15, 0.05]),
+        WeatherKind::Rain  => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.35, 0.35, 0.20, 0.10]),
+        WeatherKind::Fog   => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.40, 0.20, 0.30, 0.10]),
+        WeatherKind::Snow  => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.30, 0.20, 0.10, 0.40]),
+    };
+    let total: f32 = weights.iter().copied().sum();
+    let mut r = rng.gen_range(0.0..total);
+    for (w, &p) in opts.iter().zip(weights.iter()) {
+        if r < p { return *w; }
+        r -= p;
+    }
+    *opts.last().unwrap_or(&current)
+}
+
+fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
+    let t = t_ms / 1000.0;
+    // два больших «слоя тумана» движутся в разные стороны, альфа суммируется
+    let scale1 = 1.0 / 220.0;
+    let scale2 = 1.0 / 140.0;
+    let speed1 = 10.0; // px/сек
+    let speed2 = -6.0;
+    for y in 0..fh {
+        let row = (y as usize) * (fw as usize) * 4;
+        let fy = y as f32;
+        for x in 0..fw {
+            let fx = x as f32;
+            let idx = row + (x as usize) * 4;
+            // две синус-«волны» дают мягкое пятнистое поле 0..1
+            let v1 = (fx * scale1 + t * speed1 * scale1).sin() * (fy * scale1 * 1.3).cos();
+            let v2 = (fx * scale2 + t * speed2 * scale2 * 0.8).cos() * (fy * scale2 * 0.9 + 1.7).sin();
+            let fog = ((v1 + v2) * 0.5 + 0.5).clamp(0.0, 1.0);
+            // базовая серость тумана
+            let r = 170u32; let g = 170u32; let b = 170u32;
+            // сила тумана — нежная, 0..~30 альфы
+            let a = (fog * 30.0) as u32;
+            if a == 0 { continue; }
+            let na = 255 - a;
+            let dr = frame[idx] as u32; let dg = frame[idx+1] as u32; let db = frame[idx+2] as u32;
+            frame[idx]   = ((a * r + na * dr) / 255) as u8;
+            frame[idx+1] = ((a * g + na * dg) / 255) as u8;
+            frame[idx+2] = ((a * b + na * db) / 255) as u8;
+            frame[idx+3] = 255;
+        }
+    }
+}
 
 fn screen_to_tile_px(mx: i32, my: i32, sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i32) -> Option<IVec2> {
     // экран -> мир (в пикселях изометрии)
