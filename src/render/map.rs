@@ -335,7 +335,7 @@ pub fn draw_citizens(
     citizens: &Vec<crate::types::Citizen>,
     buildings: &Vec<Building>,
     screen_center: IVec2, cam_snap: glam::Vec2,
-    citizen_sprite: &Option<(Vec<u8>, i32, i32)>,
+    citizen_sprites: &Option<(Vec<Vec<u8>>, i32, i32)>,
     face_sprites: &Option<(Vec<Vec<u8>>, i32, i32)>,
 ) {
     for c in citizens.iter() {
@@ -347,7 +347,15 @@ pub fn draw_citizens(
         if let Some(wp) = c.workplace { if let Some(b) = buildings.iter().find(|b| b.pos == wp) { col = building_color(b.kind); } }
         let base_y = screen_pos.y - atlas.half_h/3;
         let rr = r.max(2);
-        if let Some((spr, sw, sh)) = citizen_sprite {
+        if let Some((frames, sw, sh)) = citizen_sprites {
+            // Анимация: 0 — стоит, 1.. — 2-4 кадра ходьбы
+            let num_frames = frames.len().max(1);
+            let anim_idx = if c.moving {
+                // простой счётчик по прогрессу и пути
+                let stride = ((c.progress * 8.0) as usize) % num_frames.max(1);
+                if stride == 0 { 1.min(num_frames-1) } else { stride.min(num_frames-1) }
+            } else { 0 };
+            let spr = &frames[anim_idx.min(frames.len()-1)];
             let draw_w = rr * 2 + 1; let draw_h = rr * 2 + 1;
             let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = base_y - draw_h / 2;
             tiles::blit_sprite_alpha_scaled_color_tint(
@@ -393,6 +401,50 @@ pub fn draw_debug_path(frame: &mut [u8], width: i32, height: i32, atlas: &TileAt
         let sp = world_to_screen(atlas, screen_center, cam_snap, p.x, p.y);
         tiles::draw_iso_outline(frame, width, height, sp.x, sp.y, atlas.half_w, atlas.half_h, [50, 200, 240, 255]);
     }
+}
+
+/// Нарисовать «призрак» здания на тайле `tp` с цветом в зависимости от допустимости `allowed`.
+pub fn draw_building_ghost(
+    frame: &mut [u8], width: i32, height: i32,
+    atlas: &TileAtlas,
+    building_kind: BuildingKind,
+    tp: IVec2,
+    allowed: bool,
+    screen_center: IVec2, cam_snap: glam::Vec2,
+    building_atlas: &Option<crate::atlas::BuildingAtlas>,
+)
+{
+    let screen_pos = world_to_screen(atlas, screen_center, cam_snap, tp.x, tp.y);
+    // зелёный/красный оттенок
+    let fill = if allowed { [120, 200, 120, 80] } else { [220, 100, 100, 80] };
+    let line = if allowed { [120, 220, 120, 240] } else { [240, 140, 140, 240] };
+    let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32;
+    // Подсветим ромб клетки под зданием
+    tiles::draw_iso_tile_tinted(frame, width, height, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, fill);
+    tiles::draw_iso_outline(frame, width, height, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, line);
+    // Попробуем полупрозрачно показать спрайт здания, если есть
+    if let Some(ba) = building_atlas {
+        if let Some(idx) = crate::atlas::building_sprite_index(building_kind) {
+            if idx < ba.sprites.len() {
+                let tile_w_px = atlas.half_w * 2 + 1;
+                let scale = tile_w_px as f32 / ba.w as f32;
+                let draw_w = (ba.w as f32 * scale).round() as i32;
+                let draw_h = (ba.h as f32 * scale).round() as i32;
+                let building_off = ((atlas.half_h as f32) * 0.7).round() as i32;
+                let top_left_x = screen_pos.x - draw_w / 2;
+                let top_left_y = screen_pos.y + atlas.half_h - draw_h + building_off;
+                // Тонируем спрайт под allowed/denied
+                let tint_rgb = if allowed { [160, 240, 160] } else { [255, 120, 120] };
+                let tint_a: u8 = 160; // полупрозрачный
+                tiles::blit_sprite_alpha_scaled_color_tint(frame, width, height, top_left_x, top_left_y, &ba.sprites[idx], ba.w, ba.h, draw_w, draw_h, tint_rgb, tint_a, 255);
+                return;
+            }
+        }
+    }
+    // Фоллбек: примитив здания с тоном
+    let mut color = building_color(building_kind);
+    if allowed { color = [color[0], (color[1] as u16 + 30).min(255) as u8, color[2], 255]; }
+    tiles::draw_building(frame, width, height, screen_pos.x, screen_pos.y, atlas.half_w, atlas.half_h, color);
 }
 
 pub fn world_to_screen(atlas: &TileAtlas, screen_center: IVec2, cam_snap: glam::Vec2, mx: i32, my: i32) -> IVec2 {

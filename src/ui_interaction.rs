@@ -7,6 +7,28 @@ use crate::ui;
 use crate::types::FoodPolicy;
 use crate::world::World;
 
+/// Проверка возможности размещения здания указанного типа в клетке `tp`.
+pub fn building_allowed_at(world: &mut World, kind: BuildingKind, tp: IVec2) -> bool {
+    let tile_kind = world.get_tile(tp.x, tp.y);
+    let mut allowed = !world.is_occupied(tp) && tile_kind != crate::types::TileKind::Water;
+    if allowed {
+        match kind {
+            BuildingKind::Fishery => {
+                // Требуем: клетка суши и не занята, и хотя бы один из 8 соседей — вода
+                const NB8: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+                let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x + 1 + dx, tp.y + 1 + dy) == crate::types::TileKind::Water);
+                allowed = !world.is_occupied(tp) && near_water;
+            }
+            BuildingKind::WheatField => { allowed = tile_kind == crate::types::TileKind::Grass; }
+            BuildingKind::StoneQuarry => { allowed = world.has_stone_deposit(tp + IVec2::new(1, 1)); }
+            BuildingKind::ClayPit => { allowed = world.has_clay_deposit(tp + IVec2::new(1, 1)); }
+            BuildingKind::IronMine => { allowed = world.has_iron_deposit(tp + IVec2::new(1, 1)); }
+            _ => {}
+        }
+    }
+    allowed
+}
+
 pub fn handle_left_click(
     cursor_xy: IVec2,
     width_i32: i32,
@@ -138,23 +160,7 @@ pub fn handle_left_click(
             return true;
         }
         // строительство
-        let tile_kind = world.get_tile(tp.x, tp.y);
-        let mut allowed = !world.is_occupied(tp) && tile_kind != crate::types::TileKind::Water;
-        if allowed {
-            match *selected_building {
-                BuildingKind::Fishery => {
-                    // Требуем: клетка суши и не занята, и хотя бы один из 8 соседей — вода
-                    const NB8: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
-                    let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x + 1 + dx, tp.y + 1 + dy) == crate::types::TileKind::Water);
-                    allowed = !world.is_occupied(tp) && near_water;
-                }
-                BuildingKind::WheatField => { allowed = tile_kind == crate::types::TileKind::Grass; }
-                BuildingKind::StoneQuarry => { allowed = world.has_stone_deposit(tp + IVec2::new(1, 1)); }
-                BuildingKind::ClayPit => { allowed = world.has_clay_deposit(tp + IVec2::new(1, 1)); }
-                BuildingKind::IronMine => { allowed = world.has_iron_deposit(tp + IVec2::new(1, 1)); }
-                _ => {}
-            }
-        }
+        let allowed = building_allowed_at(world, *selected_building, tp);
         if allowed {
             let cost = building_cost(*selected_building);
             if crate::types::can_afford_building(warehouses, resources, &cost) {

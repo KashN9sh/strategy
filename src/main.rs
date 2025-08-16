@@ -127,7 +127,7 @@ fn run() -> Result<()> {
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
     let mut road_atlas = atlas::RoadAtlas::new();
-    let mut citizen_sprite: Option<(Vec<u8>, i32, i32)> = None;
+    let mut citizen_sprite: Option<(Vec<Vec<u8>>, i32, i32)> = None;
     // лица: ожидаем faces.png с 3 колонками (sad,neutral,happy), опционально 2 ряда (light/dark)
     // порядок: [sad_l, neutral_l, happy_l, sad_d, neutral_d, happy_d]
     let mut face_sprites: Option<(Vec<Vec<u8>>, i32, i32)> = None; // (sprites, cell_w, cell_h)
@@ -291,7 +291,7 @@ fn run() -> Result<()> {
     if let Ok(img) = image::open("assets/citizen.png") {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
-        citizen_sprite = Some((img.to_vec(), iw as i32, ih as i32));
+        citizen_sprite = Some((vec![img.to_vec()], iw as i32, ih as i32));
     }
     let mut water_anim_time: f32 = 0.0;
     // Простая погода
@@ -571,18 +571,27 @@ fn run() -> Result<()> {
                         render::tiles::draw_log(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/4, atlas.half_w, atlas.half_h);
                     }
 
-                    // Подсветка ховера (заливка + контур) — пересчёт под актуальную камеру
+                    // Подсветка ховера / призрак здания
                     if let Some(tp) = screen_to_tile_px(cursor_xy.x, cursor_xy.y, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h) {
-                        let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, tp.x, tp.y);
-                        let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32; // ~30px при max zoom
-                        // мягкая внутренняя подсветка
-                        render::tiles::draw_iso_tile_tinted(
-                            frame, width_i32, height_i32,
-                            screen_pos.x, screen_pos.y + hover_off,
-                            atlas.half_w, atlas.half_h,
-                            [240, 230, 80, 70],
-                        );
-                        render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
+                        // Если активен режим дорог — оставляем прежнюю подсветку клетки
+                        if road_mode {
+                            let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, tp.x, tp.y);
+                            let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32;
+                            render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 70]);
+                            render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
+                        } else {
+                            // Рисуем призрак выбранного здания с валидностью
+                            let allowed = ui_interaction::building_allowed_at(&mut world, selected_building, tp);
+                            render::map::draw_building_ghost(
+                                frame, width_i32, height_i32,
+                                &atlas,
+                                selected_building,
+                                tp,
+                                allowed,
+                                screen_center, cam_snap,
+                                &building_atlas,
+                            );
+                        }
                     }
 
                     // Страховка предпросмотра: при зажатой ЛКМ пересчитываем путь
