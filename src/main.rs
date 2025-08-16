@@ -319,6 +319,11 @@ fn run() -> Result<()> {
     // активная панель здания (по клику)
     let mut active_building_panel: Option<IVec2> = None;
 
+    // Консоль разработчика
+    let mut console_open: bool = false;
+    let mut console_input: String = String::new();
+    let mut console_log: Vec<String> = vec!["Console: type 'help' for commands".to_string()];
+
     let mut width_i32 = size.width as i32;
     let mut height_i32 = size.height as i32;
     // День/ночь
@@ -341,6 +346,71 @@ fn run() -> Result<()> {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if event.state == ElementState::Pressed {
                         let key = event.physical_key;
+                        // Тоггл консоли на '/'
+                        if let PhysicalKey::Code(KeyCode::Slash) = key { console_open = !console_open; return; }
+                        if console_open {
+                            // В консоли обычные бинды не работают
+                            match key {
+                                PhysicalKey::Code(KeyCode::Enter) => {
+                                    if !console_input.is_empty() {
+                                        let cmd = console_input.clone();
+                                        console_log.push(format!("> {}", cmd));
+                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather);
+                                        console_input.clear();
+                                    }
+                                    return;
+                                }
+                                PhysicalKey::Code(KeyCode::Backspace) => { console_input.pop(); return; }
+                                PhysicalKey::Code(KeyCode::Escape) => { console_open = false; return; }
+                                // Небольшой набор ASCII: буквы/цифры/символы — добавляем в строку ввода
+                                PhysicalKey::Code(KeyCode::Space) => { console_input.push(' '); return; }
+                                PhysicalKey::Code(KeyCode::Digit0) => { console_input.push('0'); return; }
+                                PhysicalKey::Code(KeyCode::Digit1) => { console_input.push('1'); return; }
+                                PhysicalKey::Code(KeyCode::Digit2) => { console_input.push('2'); return; }
+                                PhysicalKey::Code(KeyCode::Digit3) => { console_input.push('3'); return; }
+                                PhysicalKey::Code(KeyCode::Digit4) => { console_input.push('4'); return; }
+                                PhysicalKey::Code(KeyCode::Digit5) => { console_input.push('5'); return; }
+                                PhysicalKey::Code(KeyCode::Digit6) => { console_input.push('6'); return; }
+                                PhysicalKey::Code(KeyCode::Digit7) => { console_input.push('7'); return; }
+                                PhysicalKey::Code(KeyCode::Digit8) => { console_input.push('8'); return; }
+                                PhysicalKey::Code(KeyCode::Digit9) => { console_input.push('9'); return; }
+                                PhysicalKey::Code(KeyCode::Minus) => { console_input.push('-'); return; }
+                                PhysicalKey::Code(KeyCode::Equal) => { console_input.push('='); return; }
+                                PhysicalKey::Code(KeyCode::Comma) => { console_input.push(','); return; }
+                                PhysicalKey::Code(KeyCode::Period) => { console_input.push('.'); return; }
+                                PhysicalKey::Code(KeyCode::Slash) => { console_input.push('/'); return; }
+                                PhysicalKey::Code(KeyCode::Backslash) => { console_input.push('\\'); return; }
+                                PhysicalKey::Code(KeyCode::KeyA) => { console_input.push('a'); return; }
+                                PhysicalKey::Code(KeyCode::KeyB) => { console_input.push('b'); return; }
+                                PhysicalKey::Code(KeyCode::KeyC) => { console_input.push('c'); return; }
+                                PhysicalKey::Code(KeyCode::KeyD) => { console_input.push('d'); return; }
+                                PhysicalKey::Code(KeyCode::KeyE) => { console_input.push('e'); return; }
+                                PhysicalKey::Code(KeyCode::KeyF) => { console_input.push('f'); return; }
+                                PhysicalKey::Code(KeyCode::KeyG) => { console_input.push('g'); return; }
+                                PhysicalKey::Code(KeyCode::KeyH) => { console_input.push('h'); return; }
+                                PhysicalKey::Code(KeyCode::KeyI) => { console_input.push('i'); return; }
+                                PhysicalKey::Code(KeyCode::KeyJ) => { console_input.push('j'); return; }
+                                PhysicalKey::Code(KeyCode::KeyK) => { console_input.push('k'); return; }
+                                PhysicalKey::Code(KeyCode::KeyL) => { console_input.push('l'); return; }
+                                PhysicalKey::Code(KeyCode::KeyM) => { console_input.push('m'); return; }
+                                PhysicalKey::Code(KeyCode::KeyN) => { console_input.push('n'); return; }
+                                PhysicalKey::Code(KeyCode::KeyO) => { console_input.push('o'); return; }
+                                PhysicalKey::Code(KeyCode::KeyP) => { console_input.push('p'); return; }
+                                PhysicalKey::Code(KeyCode::KeyQ) => { console_input.push('q'); return; }
+                                PhysicalKey::Code(KeyCode::KeyR) => { console_input.push('r'); return; }
+                                PhysicalKey::Code(KeyCode::KeyS) => { console_input.push('s'); return; }
+                                PhysicalKey::Code(KeyCode::KeyT) => { console_input.push('t'); return; }
+                                PhysicalKey::Code(KeyCode::KeyU) => { console_input.push('u'); return; }
+                                PhysicalKey::Code(KeyCode::KeyV) => { console_input.push('v'); return; }
+                                PhysicalKey::Code(KeyCode::KeyW) => { console_input.push('w'); return; }
+                                PhysicalKey::Code(KeyCode::KeyX) => { console_input.push('x'); return; }
+                                PhysicalKey::Code(KeyCode::KeyY) => { console_input.push('y'); return; }
+                                PhysicalKey::Code(KeyCode::KeyZ) => { console_input.push('z'); return; }
+                                _ => { }
+                            }
+                            // Консоль перехватывает ввод
+                            return;
+                        }
                         if key == PhysicalKey::Code(KeyCode::Escape) { elwt.exit(); }
 
                         if key == PhysicalKey::Code(input.move_up) { cam_px.y -= 80.0; }
@@ -601,19 +671,26 @@ fn run() -> Result<()> {
                             }
                         }
                         WeatherKind::Snow => {
-                            let step = 28; let speed = 35.0;
+                            // Сетка как у дождя → сопоставимая плотность частиц
+                            let sx_step = 24; let sy_step = 48;
+                            let speed = 22.0; // медленнее дождя
                             let t = water_anim_time / 1000.0 * speed;
-                            for x in (0..width_i32).step_by(step as usize) {
-                                for band in 0..3 { // три горизонтальные «полосы» для разнообразия
-                                    let base_y = band * (height_i32 / 3);
-                                    let yy = ((base_y as f32 + (x as f32 * 0.5 + t)) % height_i32 as f32) as i32;
-                                    let sway = ((t * 0.3 + x as f32 * 0.2).sin() * 3.0) as i32;
-                                    let xx = (x + sway).clamp(0, width_i32 - 1);
-                                    // маленькая снежинка 2x2
-                                    if xx >= 0 && yy >= 0 && xx < width_i32 && yy < height_i32 {
+                            for x in (0..width_i32).step_by(sx_step as usize) {
+                                for y in (0..height_i32).step_by(sy_step as usize) {
+                                    let off = ((x as f32 * 0.17 + y as f32 * 0.07 + t) % sy_step as f32) as i32;
+                                    let sway = ((t * 0.15 + x as f32 * 0.30).sin() * 3.0) as i32;
+                                    let sx = (x + sway).clamp(0, width_i32 - 1);
+                                    let sy = y + off;
+                                    if sx >= 0 && sy >= 0 && sx < width_i32 && sy < height_i32 {
                                         let col = [245, 245, 250, 255];
-                                        render::tiles::draw_line(frame, width_i32, height_i32, xx, yy, xx+1, yy, col);
-                                        render::tiles::draw_line(frame, width_i32, height_i32, xx, yy+1, xx+1, yy+1, col);
+                                        let size = 3;
+                                        for oy in 0..size {
+                                            let yy = sy + oy;
+                                            if yy < 0 || yy >= height_i32 { continue; }
+                                            let x0 = sx.max(0);
+                                            let x1 = (sx + size - 1).min(width_i32 - 1);
+                                            render::tiles::draw_line(frame, width_i32, height_i32, x0, yy, x1, yy, col);
+                                        }
                                     }
                                 }
                             }
@@ -683,6 +760,10 @@ fn run() -> Result<()> {
                             housing_used, housing_cap,
                             wlabel, wcol,
                         );
+                        if console_open {
+                            let s = ui::ui_scale(height_i32, config.ui_scale_base);
+                            ui::draw_console(frame, width_i32, height_i32, s, &console_input, &console_log);
+                        }
                         // Если выбрана панель здания — рисуем её
                         if let Some(p) = active_building_panel {
                             if let Some(b) = buildings.iter().find(|bb| bb.pos == p) {
@@ -1316,6 +1397,50 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
             frame[idx+2] = ((a * b + na * db) / 255) as u8;
             frame[idx+3] = 255;
         }
+    }
+}
+
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind) {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() { return; }
+    let mut parts = trimmed.split_whitespace();
+    let Some(head) = parts.next() else { return; };
+    match head.to_ascii_lowercase().as_str() {
+        "help" => {
+            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>".to_string());
+        }
+        "weather" => {
+            if let Some(arg) = parts.next() {
+                let nw = match arg.to_ascii_lowercase().as_str() {
+                    "clear" => Some(WeatherKind::Clear),
+                    "rain" => Some(WeatherKind::Rain),
+                    "fog" => Some(WeatherKind::Fog),
+                    "snow" => Some(WeatherKind::Snow),
+                    _ => None,
+                };
+                if let Some(w) = nw { *weather = w; log.push(format!("OK: weather set to {}", arg)); }
+                else { log.push("ERR: usage weather <clear|rain|fog|snow>".to_string()); }
+            } else { log.push("ERR: usage weather <clear|rain|fog|snow>".to_string()); }
+        }
+        "gold" => {
+            if let Some(arg) = parts.next() {
+                if let Ok(delta) = arg.parse::<i32>() { resources.gold = resources.gold.saturating_add(delta); log.push(format!("OK: gold += {} -> {}", delta, resources.gold)); }
+                else { log.push("ERR: usage gold <±N>".to_string()); }
+            } else { log.push("ERR: usage gold <±N>".to_string()); }
+        }
+        "set" => {
+            let Some(what) = parts.next() else { log.push("ERR: usage set gold <N>".to_string()); return; };
+            match what.to_ascii_lowercase().as_str() {
+                "gold" => {
+                    if let Some(arg) = parts.next() {
+                        if let Ok(val) = arg.parse::<i32>() { resources.gold = val; log.push(format!("OK: gold = {}", resources.gold)); }
+                        else { log.push("ERR: usage set gold <N>".to_string()); }
+                    } else { log.push("ERR: usage set gold <N>".to_string()); }
+                }
+                _ => log.push("ERR: unknown 'set' target".to_string()),
+            }
+        }
+        _ => { log.push("ERR: unknown command. Type 'help'".to_string()); }
     }
 }
 

@@ -461,6 +461,27 @@ pub fn draw_ui(
     }
 }
 
+// Консоль разработчика: простое окно внизу экрана
+pub fn draw_console(frame: &mut [u8], fw: i32, fh: i32, s: i32, input: &str, log: &[String]) {
+    let pad = 8 * s; let px = 2 * s; let line_h = 5 * px + 4 * s;
+    let lines_visible = 6usize;
+    let height = pad + (lines_visible as i32) * line_h + pad + line_h; // лог + строка ввода
+    let y0 = fh - height;
+    // фон
+    fill_rect(frame, fw, fh, 0, y0 + 2 * s, fw, height, [0, 0, 0, 120]);
+    fill_rect(frame, fw, fh, 0, y0, fw, height, [0, 0, 0, 180]);
+    // последние строки лога
+    let start = log.len().saturating_sub(lines_visible);
+    let mut y = y0 + pad;
+    for line in &log[start..] {
+        draw_text_mini(frame, fw, fh, pad, y, line.as_bytes(), [220,220,220,255], s);
+        y += line_h;
+    }
+    // строка ввода с префиксом
+    draw_text_mini(frame, fw, fh, pad, y, b"> ", [220,220,180,255], s);
+    draw_text_mini(frame, fw, fh, pad + text_w(b"> ", s), y, input.as_bytes(), [230,230,230,255], s);
+}
+
 pub fn point_in_rect(px: i32, py: i32, x: i32, y: i32, w: i32, h: i32) -> bool { px >= x && py >= y && px < x + w && py < y + h }
 
 fn draw_button(
