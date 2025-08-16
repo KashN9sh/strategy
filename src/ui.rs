@@ -6,14 +6,64 @@ pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UITab { Build, Economy }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonStyle { Default, Primary, Danger }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiDir { Row, Column }
+
+#[derive(Clone, Copy, Debug)]
+pub struct UiGroup { pub x: i32, pub y: i32, pub dir: UiDir, pub cursor_x: i32, pub cursor_y: i32, pub gap: i32, pub item_h: i32, pub s: i32 }
+
+pub fn ui_gap(s: i32) -> i32 { 6 * s }
+pub fn ui_pad(s: i32) -> i32 { 8 * s }
+pub fn ui_item_h(s: i32) -> i32 { 18 * s }
+
+pub fn ui_row(x: i32, y: i32, s: i32) -> UiGroup { UiGroup { x, y, dir: UiDir::Row, cursor_x: x, cursor_y: y, gap: ui_gap(s), item_h: ui_item_h(s), s } }
+pub fn ui_column(x: i32, y: i32, s: i32) -> UiGroup { UiGroup { x, y, dir: UiDir::Column, cursor_x: x, cursor_y: y, gap: ui_gap(s), item_h: ui_item_h(s), s } }
+
+pub fn ui_set_gap(g: &mut UiGroup, gap: i32) { g.gap = gap; }
+
+pub fn ui_button_group(
+    frame: &mut [u8], fw: i32, fh: i32,
+    g: &mut UiGroup,
+    label: &[u8], active: bool, hovered: bool, enabled: bool, label_col: [u8;4], style: ButtonStyle,
+) -> (i32, i32, i32, i32) {
+    let s = g.s; let w = button_w_for(label, s); let h = g.item_h;
+    let (x, y) = match g.dir { UiDir::Row => (g.cursor_x, g.y), UiDir::Column => (g.x, g.cursor_y) };
+    draw_button(frame, fw, fh, x, y, w, h, active, hovered, enabled, label, label_col, s, style);
+    match g.dir { UiDir::Row => { g.cursor_x += w + g.gap; }, UiDir::Column => { g.cursor_y += h + g.gap; } }
+    (x, y, w, h)
+}
+
+pub fn ui_text_group(frame: &mut [u8], fw: i32, fh: i32, g: &mut UiGroup, text: &[u8], color: [u8;4]) -> (i32, i32, i32, i32) {
+    let s = g.s; let px = 2 * s; let text_h = 5 * px; let w = text_w(text, s) + 12 * s; let h = g.item_h;
+    let (x, y) = match g.dir { UiDir::Row => (g.cursor_x, g.y), UiDir::Column => (g.x, g.cursor_y) };
+    let ty = y + (h - text_h) / 2;
+    draw_text_mini(frame, fw, fh, x + 6 * s, ty, text, color, s);
+    match g.dir { UiDir::Row => { g.cursor_x += w + g.gap; }, UiDir::Column => { g.cursor_y += h + g.gap; } }
+    (x, y, w, h)
+}
+
+/// Зарезервировать прямоугольник в группе фиксированной ширины и высоты item_h, с продвижением курсора
+pub fn ui_slot(g: &mut UiGroup, w: i32) -> (i32, i32, i32, i32) {
+    let h = g.item_h;
+    let (x, y) = match g.dir { UiDir::Row => (g.cursor_x, g.y), UiDir::Column => (g.x, g.cursor_y) };
+    match g.dir { UiDir::Row => { g.cursor_x += w + g.gap; }, UiDir::Column => { g.cursor_y += h + g.gap; } }
+    (x, y, w, h)
+}
+
 pub fn ui_scale(fh: i32, k: f32) -> i32 { (((fh as f32) / 720.0) * k).clamp(1.0, 5.0) as i32 }
 // удалено: ui_bar_height (не используется)
-pub fn bottom_panel_height(s: i32) -> i32 { let padb = 8 * s; let btn_h = 18 * s; // Tabs + Categories + Items (межстрочный отступ один)
-    padb * 2 + btn_h * 3 + 6 * s * 2 }
+pub fn bottom_panel_height(s: i32) -> i32 {
+    let padb = ui_pad(s); let btn_h = ui_item_h(s); let gap = ui_gap(s);
+    // Tabs + Categories + Items (две вертикальные щели между тремя рядами)
+    padb * 2 + btn_h * 3 + gap * 2
+}
 pub fn top_panel_height(s: i32) -> i32 {
-    let pad = 8 * s; let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px;
+    let pad = ui_pad(s); let icon = 10 * s; let px = 2 * s; let glyph_h = 5 * px; let gap = ui_gap(s);
     // Две строки контента (иконки/цифры) + отступ между ними
-    pad * 2 + (icon.max(glyph_h)) * 2 + 6 * s
+    pad * 2 + (icon.max(glyph_h)) * 2 + gap
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,21 +74,23 @@ pub fn layout_building_panel(fw: i32, fh: i32, s: i32) -> BuildingPanelLayout {
     let bottom_h = bottom_panel_height(s);
     // Компактная плашка слева, не на всю ширину
     let w = (fw as f32 * 0.33) as i32; // треть экрана
-    let panel_h = 64 * s; // достаточно для 3 строк
+    // Высота панели из 3 строк: row_h*3 + vgap*2 + верх/низ отступы
+    let row_h = ui_item_h(s); let pad_top = ui_pad(s) - 2 * s; let pad_bottom = ui_pad(s) - 2 * s; let vgap = ui_gap(s);
+    let panel_h = pad_top + row_h * 3 + vgap * 2 + pad_bottom;
     let x = padb;
     let y = fh - bottom_h - panel_h - 6 * s;
-    // Кнопки +/-
-    let minus_w = 14 * s; let minus_h = 14 * s; let plus_w = 14 * s; let plus_h = 14 * s;
-    let minus_x = x + w - (plus_w + minus_w + 12 * s);
-    // выравниваем по строке Workers (см. draw_building_panel: y + 6*s + line_h)
-    let px = 2 * s; let line_h = (5 * px).max(10 * s) + 4 * s; let workers_y = y + 6 * s + line_h;
-    let minus_y = workers_y - 2 * s;
-    let plus_x = x + w - (plus_w + 4 * s);
-    let plus_y = workers_y - 2 * s;
-    // кнопка сноса — внизу справа, ширина по тексту в общем стиле
-    let dem_w = button_w_for(b"DEMOLISH", s); let dem_h = 18 * s;
-    let dem_x = x + w - dem_w - 6 * s;
-    let dem_y = y + panel_h - dem_h - 6 * s;
+    // Кнопки +/- (высота как у общих кнопок)
+    let minus_w = button_w_for(b"-", s); let minus_h = row_h; let plus_w = button_w_for(b"+", s); let plus_h = row_h;
+    let minus_x = x + w - (plus_w + minus_w + 16 * s);
+    // выравниваем по строке Workers — (row2)
+    let workers_row_y = y + pad_top + row_h + vgap;
+    let minus_y = workers_row_y;
+    let plus_x = x + w - (plus_w + 10 * s);
+    let plus_y = workers_row_y;
+    // кнопка сноса — в той же строке, что и блок производства (row3)
+    let dem_w = button_w_for(b"DEMOLISH", s); let dem_h = row_h;
+    let dem_x = x + w - dem_w - 10 * s;
+    let dem_y = y + pad_top + (row_h + vgap) * 2; // row3 y
     BuildingPanelLayout { x, y, w, h: panel_h, minus_x, minus_y, minus_w, minus_h, plus_x, plus_y, plus_w, plus_h, dem_x, dem_y, dem_w, dem_h }
 }
 
@@ -79,8 +131,8 @@ pub fn draw_building_panel(
     fill_rect(frame, fw, fh, layout.x + 2 * s, layout.y + 2 * s, layout.w, layout.h, [0,0,0,100]);
     fill_rect(frame, fw, fh, layout.x, layout.y, layout.w, layout.h, [0,0,0,160]);
     let pad = 8 * s; let px = 2 * s; let icon = 10 * s;
-    let cx = layout.x + pad;
-    // название
+    // 1) Заголовок — отдельный ui_row
+    let mut row = ui_row(layout.x + pad, layout.y + ui_pad(s) - 2 * s, s);
     let title = match kind {
         BuildingKind::Lumberjack => b"Lumberjack".as_ref(),
         BuildingKind::House => b"House".as_ref(),
@@ -96,49 +148,36 @@ pub fn draw_building_panel(
         BuildingKind::IronMine => b"Iron Mine".as_ref(),
         BuildingKind::Smelter => b"Smelter".as_ref(),
     };
-    let mut yline = layout.y + 6 * s;
-    draw_text_mini(frame, fw, fh, cx, yline, title, [230,230,230,255], s);
-    // шаг строк
-    let line_h = (5 * px).max(icon) + 4 * s; // высота глифа + отступ
-    // workers
-    yline += line_h;
-    let workers_text = b"Workers";
-    draw_text_mini(frame, fw, fh, cx, yline, workers_text, [200,200,200,255], s);
-    let mut valx = cx + text_w(workers_text, s) + 6 * s;
-    draw_number(frame, fw, fh, valx, yline, workers_current.max(0) as u32, [255,255,255,255], s);
-    valx += number_w(workers_current.max(0) as u32, s);
-    draw_glyph_3x5(frame, fw, fh, valx, yline, b'/', [180,180,180,255], px);
-    valx += 4 * px;
-    draw_number(frame, fw, fh, valx, yline, workers_target.max(0) as u32, [220,220,220,255], s);
-    // +/-
-    fill_rect(frame, fw, fh, layout.minus_x, layout.minus_y, layout.minus_w, layout.minus_h, [120, 100, 80, 220]);
-    fill_rect(frame, fw, fh, layout.plus_x, layout.plus_y, layout.plus_w, layout.plus_h, [120, 100, 80, 220]);
-    // минус знак
-    fill_rect(frame, fw, fh, layout.minus_x + 3 * s, layout.minus_y + layout.minus_h/2 - s, layout.minus_w - 6 * s, 2 * s, [230,230,230,255]);
-    // плюс знак
-    let cxp = layout.plus_x + layout.plus_w/2; let cyp = layout.plus_y + layout.plus_h/2;
-    fill_rect(frame, fw, fh, cxp - (layout.plus_w/2 - 3 * s), cyp - s, layout.plus_w - 6 * s, 2 * s, [230,230,230,255]);
-    fill_rect(frame, fw, fh, cxp - s, cyp - (layout.plus_h/2 - 3 * s), 2 * s, layout.plus_h - 6 * s, [230,230,230,255]);
-    // production/consumption c иконками ресурсов
-    yline += line_h;
-    let (prod_col_opt, cons_cols) = resource_colors_for_building(kind);
-    let mut prod_x = cx;
-    if let Some(col) = prod_col_opt {
-        fill_rect(frame, fw, fh, prod_x, yline, icon, icon, col);
-        prod_x += icon + 6 * s;
+    ui_text_group(frame, fw, fh, &mut row, title, [230,230,230,255]);
+
+    // 2) Workers + +/- — отдельный ui_row, с вертикальным зазором между строками
+    let mut row2 = ui_row(layout.x + pad, layout.y + ui_pad(s) - 2 * s + ui_item_h(s) + ui_gap(s), s);
+    ui_set_gap(&mut row2, 10 * s);
+    ui_text_group(frame, fw, fh, &mut row2, b"Workers", [200,200,200,255]);
+    let cur_txt = format!("{}", workers_current.max(0));
+    ui_text_group(frame, fw, fh, &mut row2, cur_txt.as_bytes(), [255,255,255,255]);
+    ui_text_group(frame, fw, fh, &mut row2, b"/", [180,180,180,255]);
+    let tgt_txt = format!("{}", workers_target.max(0));
+    ui_text_group(frame, fw, fh, &mut row2, tgt_txt.as_bytes(), [220,220,220,255]);
+    // справа — две кнопки в том же ряду
+    let right_x = layout.plus_x - (button_w_for(b"-", s) + 10 * s);
+    let mut controls = ui_row(right_x, layout.minus_y, s);
+    ui_button_group(frame, fw, fh, &mut controls, b"-", false, false, true, [230,230,230,255], ButtonStyle::Default);
+    ui_button_group(frame, fw, fh, &mut controls, b"+", false, false, true, [230,230,230,255], ButtonStyle::Default);
+
+    // 3) Производство слева + Demolish справа — один ui_row, ещё ниже с тем же вертикальным шагом
+    let mut row3 = ui_row(layout.x + pad, layout.y + ui_pad(s) - 2 * s + (ui_item_h(s) + ui_gap(s)) * 2, s);
+    ui_set_gap(&mut row3, 12 * s);
+    if let Some(col) = resource_colors_for_building(kind).0 {
+        let (x, y, _w, _h) = ui_slot(&mut row3, icon + 6 * s);
+        fill_rect(frame, fw, fh, x, y + (row3.item_h - icon)/2, icon, icon, col);
     }
-    draw_text_mini(frame, fw, fh, prod_x, yline, prod_label, [220,220,220,255], s);
-    if let Some(c) = cons_label {
-        let mut con_x = cx + text_w(prod_label, s) + 12 * s + (if prod_col_opt.is_some() { icon + 6 * s } else { 0 });
-        for (idx, col) in cons_cols.iter().enumerate() {
-            if idx > 0 { con_x += 2 * s; }
-            fill_rect(frame, fw, fh, con_x, yline, icon, icon, *col);
-            con_x += icon + 4 * s;
-        }
-        draw_text_mini(frame, fw, fh, con_x, yline, c, [200,200,200,255], s);
-    }
-    // кнопка Demolish — общий стиль draw_button, с красной палитрой и hover-эффектом
-    draw_button(frame, fw, fh, layout.dem_x, layout.dem_y, layout.dem_w, layout.dem_h, false, false, true, b"DEMOLISH", [240,230,230,255], s);
+    ui_text_group(frame, fw, fh, &mut row3, prod_label, [220,220,220,255]);
+    if let Some(c) = cons_label { ui_text_group(frame, fw, fh, &mut row3, c, [200,200,200,255]); }
+    // Demolish в конце ряда (справа)
+    let dem_left = layout.dem_x; // вычислен в layout на этой же строке
+    let mut right_row = ui_row(dem_left, layout.dem_y, s);
+    ui_button_group(frame, fw, fh, &mut right_row, b"DEMOLISH", false, false, true, [240,230,230,255], ButtonStyle::Danger);
 }
 
 #[derive(Clone, Copy)]
@@ -182,41 +221,39 @@ pub fn draw_ui(
 
     let pad = 8 * s;
     let icon_size = 10 * s;
-    let mut x = pad;
-    // Слева — население и золото, с резервом под 4 цифры
-    let px = 2 * s; let reserve_digits = 4; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
-    // население
-    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [180, 60, 60, 255]);
-    let num_x_pop = x + icon_size + 4;
-    draw_number(frame, fw, fh, num_x_pop, pad, population.max(0) as u32, [255,255,255,255], s);
     let mut tooltip: Option<(i32, Vec<u8>)> = None;
-    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) {
-        tooltip = Some((x + icon_size / 2, b"Population".to_vec()));
+    // Левая группа верхней панели: Population, Gold, Happiness, Tax
+    let mut left = ui_row(pad, pad, s);
+    // население
+    {
+        let (x, y, w, h) = ui_slot(&mut left, icon_size + 4 + number_w(9999, s) + 6 * s);
+        fill_rect(frame, fw, fh, x, y, icon_size, icon_size, [180,60,60,255]);
+        draw_number(frame, fw, fh, x + icon_size + 4, y, population.max(0) as u32, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, x, y, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Population".to_vec())); }
     }
-    x = num_x_pop + reserved_w + gap;
     // золото
-    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [220, 180, 60, 255]);
-    let num_x_gold = x + icon_size + 4;
-    draw_number(frame, fw, fh, num_x_gold, pad, resources.gold.max(0) as u32, [255,255,255,255], s);
-    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) {
-        // Простой тултип: золото. В будущем можно добавить доход/апкип за последний день
-        tooltip = Some((x + icon_size / 2, b"Gold".to_vec()));
+    {
+        let (x, y, _w, _h) = ui_slot(&mut left, icon_size + 4 + number_w(9999, s) + 6 * s);
+        fill_rect(frame, fw, fh, x, y, icon_size, icon_size, [220,180,60,255]);
+        draw_number(frame, fw, fh, x + icon_size + 4, y, resources.gold.max(0) as u32, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, x, y, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Gold".to_vec())); }
     }
-    x = num_x_gold + reserved_w + gap;
-    // среднее счастье
-    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [220, 120, 160, 255]);
-    let num_x_hap = x + icon_size + 4;
-    let hap = avg_happiness.round().clamp(0.0, 100.0) as u32;
-    draw_number(frame, fw, fh, num_x_hap, pad, hap, [255,255,255,255], s);
-    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Happiness".to_vec())); }
-    x = num_x_hap + reserved_w + gap;
-    // налоговая ставка (в процентах)
-    fill_rect(frame, fw, fh, x, pad, icon_size, icon_size, [200, 180, 90, 255]);
-    let num_x_tax = x + icon_size + 4;
-    let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
-    draw_number(frame, fw, fh, num_x_tax, pad, taxp, [255,255,255,255], s);
-    if point_in_rect(cursor_x, cursor_y, x, pad, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Tax %  [ [ ] to change ]".to_vec())); }
-    x = num_x_tax + reserved_w + gap;
+    // счастье
+    {
+        let (x, y, _w, _h) = ui_slot(&mut left, icon_size + 4 + number_w(100, s) + 6 * s);
+        fill_rect(frame, fw, fh, x, y, icon_size, icon_size, [220,120,160,255]);
+        let hap = avg_happiness.round().clamp(0.0, 100.0) as u32;
+        draw_number(frame, fw, fh, x + icon_size + 4, y, hap, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, x, y, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Happiness".to_vec())); }
+    }
+    // налог
+    {
+        let (x, y, _w, _h) = ui_slot(&mut left, icon_size + 4 + number_w(100, s) + 6 * s);
+        fill_rect(frame, fw, fh, x, y, icon_size, icon_size, [200,180,90,255]);
+        let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
+        draw_number(frame, fw, fh, x + icon_size + 4, y, taxp, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, x, y, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, b"Tax %  [ [ ] to change ]".to_vec())); }
+    }
 
     // погода (иконка + короткий лейбл) — рендер справа, возле блока TIME, а не в левом блоке
     let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
@@ -228,13 +265,13 @@ pub fn draw_ui(
     let time_w_tmp = text_w(b"TIME", s) + gap_info + (5 * 4 * px);
     let total_w_tmp = time_w_tmp + gap_info + fps_w_tmp + gap_info + speed_w_tmp;
     let right_x0 = fw - pad_right - total_w_tmp;
-    // рисуем погоду слева от правого блока
-    let wx = (right_x0 - (icon_size + 4 + text_w(weather_label, s) + 10 * s)).max(x); // не уезжать левее уже нарисованных блоков
-    fill_rect(frame, fw, fh, wx, pad, icon_size, icon_size, weather_icon_col);
-    draw_text_mini(frame, fw, fh, wx + icon_size + 4, pad, weather_label, [230,230,230,255], s);
-    if point_in_rect(cursor_x, cursor_y, wx, pad, icon_size, icon_size) {
-        let mut tip = Vec::from(b"Weather: "); tip.extend_from_slice(weather_label); tooltip = Some((wx + icon_size / 2, tip));
-    }
+    // погода слева от правого инфо-блока — через ui_row
+    let wx = (right_x0 - (icon_size + 4 + text_w(weather_label, s) + 10 * s)).max(left.cursor_x);
+    let mut weather_row = ui_row(wx, pad, s);
+    let (sx, sy, _w, _h) = ui_slot(&mut weather_row, icon_size + 4 + text_w(weather_label, s) + 6 * s);
+    fill_rect(frame, fw, fh, sx, sy, icon_size, icon_size, weather_icon_col);
+    draw_text_mini(frame, fw, fh, sx + icon_size + 4, sy, weather_label, [230,230,230,255], s);
+    if point_in_rect(cursor_x, cursor_y, sx, sy, icon_size, icon_size) { let mut tip = Vec::from(b"Weather: "); tip.extend_from_slice(weather_label); tooltip = Some((sx + icon_size / 2, tip)); }
 
     // Рассчитаем занятый справа блок (TIME/FPS/SPEED), чтобы не наезжать на него слева
     let px = 2 * s; let gap_info = 2 * px; let _y_info = 8 * s; let pad_right = 8 * s;
@@ -247,64 +284,52 @@ pub fn draw_ui(
     let total_w_tmp = time_w_tmp + gap_info + fps_w_tmp + gap_info + speed_w_tmp;
     let right_x0 = fw - pad_right - total_w_tmp;
 
-    // Блок статистики жителей (idle/working/sleeping/haul/fetch)
-    let mut sx = x;
-    let sy = pad;
-    let mut entry_stat = |frame: &mut [u8], x: &mut i32, label_color: [u8;4], val: i32, label: &[u8], s: i32| {
-        let px = 2 * s; let reserve_digits = 3; let reserved_w = reserve_digits * 4 * px; let gap = 6 * s;
-        let need_w = icon_size + 4 + reserved_w + gap;
-        if *x + need_w > right_x0 { return; }
-        fill_rect(frame, fw, fh, *x, sy, icon_size, icon_size, label_color);
-        let num_x = *x + icon_size + 4;
-        draw_number(frame, fw, fh, num_x, sy, val.max(0) as u32, [255,255,255,255], s);
-        if point_in_rect(cursor_x, cursor_y, *x, sy, icon_size, icon_size) {
-            tooltip = Some((*x + icon_size / 2, label.to_vec()));
+    // Правый инфо-блок: TIME | FPS | SPEED/PAUSE — единым рядом
+    {
+        let mut info_row = ui_row(right_x0, pad, s);
+        // TIME HH:MM
+        let (ix, iy, _iw, _ih) = ui_slot(&mut info_row, time_w_tmp);
+        draw_text_mini(frame, fw, fh, ix, iy, b"TIME", [220,220,220,255], s);
+        // вычисление текущего времени повторно, чтобы не полагаться на подчёркнутые переменные
+        let mut minutes_tmp = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
+        let hours_u = (minutes_tmp / 60) as u32; minutes_tmp = minutes_tmp % 60; let minutes_u = minutes_tmp as u32;
+        let label_w = text_w(b"TIME", s) + gap_info;
+        let mut cx = ix + label_w;
+        cx += draw_two_digits(frame, fw, fh, cx, iy, hours_u, [230,230,230,255], s);
+        draw_glyph_3x5(frame, fw, fh, cx, iy, b':', [230,230,230,255], 2 * s); cx += 4 * (2 * s);
+        cx += draw_two_digits(frame, fw, fh, cx, iy, minutes_u, [230,230,230,255], s);
+        // FPS
+        let (fx, fy, _fw2, _fh2) = ui_slot(&mut info_row, fps_w_tmp);
+        draw_text_mini(frame, fw, fh, fx, fy, b"FPS", [220,220,220,255], s);
+        let cx_fps = fx + text_w(b"FPS", s) + gap_info;
+        draw_number(frame, fw, fh, cx_fps, fy, fps_n_tmp, [230,230,230,255], s);
+        // SPEED / PAUSE
+        let (sx, sy, _sw2, _sh2) = ui_slot(&mut info_row, speed_w_tmp);
+        if paused {
+            draw_text_mini(frame, fw, fh, sx, sy, b"PAUSE", [230,200,200,255], s);
+        } else {
+            draw_text_mini(frame, fw, fh, sx, sy, b"SPEED", [220,220,220,255], s);
+            let sp = (speed * 10.0).round() as u32;
+            let cx_sp = sx + text_w(b"SPEED", s) + gap_info;
+            draw_number(frame, fw, fh, cx_sp, sy, sp, [230,230,230,255], s);
         }
-        *x = num_x + reserved_w + gap;
-    };
-    entry_stat(frame, &mut sx, [70, 160, 70, 255], citizens_idle, b"Idle", s);
-    entry_stat(frame, &mut sx, [70, 110, 200, 255], citizens_working, b"Working", s);
-    entry_stat(frame, &mut sx, [120, 120, 120, 255], citizens_sleeping, b"Sleeping", s);
-    entry_stat(frame, &mut sx, [210, 150, 70, 255], citizens_hauling, b"Hauling", s);
-    entry_stat(frame, &mut sx, [80, 200, 200, 255], citizens_fetching, b"Fetching", s);
-    let _ = sx; // x больше не используется, не присваиваем
-
-    // верх: больше не рисуем кнопки строительства — они в нижней панели
-
-    // Инфо справа: одна строка, правое выравнивание: "TIME HH:MM  FPS <n>  SPEED <m>" или "TIME HH:MM  FPS <n>  PAUSE"
-    let px = 2 * s; let gap_info = 2 * px; let y_info = 8 * s; let pad_right = 8 * s;
-    // Время суток из day_progress_01 (0..1)
-    let mut minutes = (day_progress_01.clamp(0.0, 1.0) * 1440.0).round() as i32 % 1440;
-    let hours = (minutes / 60) as u32; minutes = minutes % 60; let minutes_u = minutes as u32;
-    let fps_n = fps.round() as u32;
-    let fps_w = text_w(b"FPS", s) + gap_info + number_w(fps_n, s);
-    let speed_w = if paused { text_w(b"PAUSE", s) } else { let sp = (speed * 10.0).round() as u32; text_w(b"SPEED", s) + gap_info + number_w(sp, s) };
-    let time_w = text_w(b"TIME", s) + gap_info + (5 * 4 * px); // HH:MM — 5 глифов
-    let total_w = time_w + gap_info + fps_w + gap_info + speed_w;
-    let mut ix = fw - pad_right - total_w;
-    // TIME
-    draw_text_mini(frame, fw, fh, ix, y_info, b"TIME", [200,200,200,255], s);
-    ix += text_w(b"TIME", s) + gap_info;
-    // HH:MM
-    ix += draw_two_digits(frame, fw, fh, ix, y_info, hours, [255,255,255,255], s);
-    draw_glyph_3x5(frame, fw, fh, ix, y_info, b':', [255,255,255,255], px);
-    ix += 4 * px;
-    ix += draw_two_digits(frame, fw, fh, ix, y_info, minutes_u, [255,255,255,255], s);
-    ix += gap_info;
-    // FPS
-    draw_text_mini(frame, fw, fh, ix, y_info, b"FPS", [200,200,200,255], s);
-    ix += text_w(b"FPS", s) + gap_info;
-    draw_number(frame, fw, fh, ix, y_info, fps_n, [255,255,255,255], s);
-    ix += number_w(fps_n, s) + gap_info;
-    // SPEED/PAUSE
-    if paused {
-        draw_text_mini(frame, fw, fh, ix, y_info, b"PAUSE", [200,200,200,255], s);
-    } else {
-        let sp = (speed * 10.0).round() as u32;
-        draw_text_mini(frame, fw, fh, ix, y_info, b"SPEED", [200,200,200,255], s);
-        ix += text_w(b"SPEED", s) + gap_info;
-        draw_number(frame, fw, fh, ix, y_info, sp, [255,255,255,255], s);
     }
+
+    // Блок статистики жителей (idle/working/sleeping/haul/fetch)
+    // блок статусов жителей — ui_row на правой части, до right_x0
+    let mut stat_row = ui_row(left.cursor_x, pad, s);
+    let mut stat = |col: [u8;4], val: i32, label: &[u8]| {
+        let (x, y, _w, _h) = ui_slot(&mut stat_row, icon_size + 4 + number_w(999, s) + 6 * s);
+        if x + icon_size > right_x0 { return; }
+        fill_rect(frame, fw, fh, x, y, icon_size, icon_size, col);
+        draw_number(frame, fw, fh, x + icon_size + 4, y, val.max(0) as u32, [255,255,255,255], s);
+        if point_in_rect(cursor_x, cursor_y, x, y, icon_size, icon_size) { tooltip = Some((x + icon_size / 2, label.to_vec())); }
+    };
+    stat([70,160,70,255], citizens_idle, b"Idle");
+    stat([70,110,200,255], citizens_working, b"Working");
+    stat([120,120,120,255], citizens_sleeping, b"Sleeping");
+    stat([210,150,70,255], citizens_hauling, b"Hauling");
+    stat([80,200,200,255], citizens_fetching, b"Fetching");
 
     // Вторая строка: ресурсы — сразу под первой строкой
     // Панель дополнительных ресурсов (камень, глина, кирпич, пшеница, мука, хлеб, рыба)
@@ -360,13 +385,16 @@ pub fn draw_ui(
     let by0 = fh - bottom_h;
     fill_rect(frame, fw, fh, 0, by0, fw, bottom_h, [0, 0, 0, 160]);
     let padb = 8 * s; let btn_h = 18 * s;
-    // Вкладки: Build | Economy
+    // Вкладки: Build | Economy — через row API
     let tabs = [(b"Build".as_ref(), ui_tab == UITab::Build), (b"Economy".as_ref(), ui_tab == UITab::Economy)];
-    let mut tx = padb;
-    for (label, active) in tabs { let bw = button_w_for(label, s); draw_button(frame, fw, fh, tx, by0 + padb, bw, btn_h, active, point_in_rect(cursor_x, cursor_y, tx, by0 + padb, bw, btn_h), true, label, [220,220,220,255], s); tx += bw + 6 * s; }
+    let mut row = ui_row(padb, by0 + padb, s);
+    for (label, active) in tabs {
+        let hovered = point_in_rect(cursor_x, cursor_y, row.cursor_x, row.y, button_w_for(label, s), row.item_h);
+        ui_button_group(frame, fw, fh, &mut row, label, active, hovered, true, [220,220,220,255], ButtonStyle::Primary);
+    }
     if ui_tab == UITab::Build {
         // Категории (верхняя строка нижней панели)
-        let mut cx = padb;
+        // Категории — row API с переносом на 2 строки
         let cats: &[(UICategory, &[u8])] = &[
             (UICategory::Housing, b"Housing"),
             (UICategory::Storage, b"Storage"),
@@ -377,19 +405,19 @@ pub fn draw_ui(
         ];
         // Рисуем двумя колонками в 2 строки, чтобы не упираться в ширину
         let row_y = [by0 + padb + btn_h + 6 * s, by0 + padb + (btn_h + 6 * s) * 2];
-        let mut row = 0; cx = padb;
-        for (idx, (cat, label)) in cats.iter().enumerate() {
-            let active = *cat == category; let bw = button_w_for(label, s);
-            if cx + bw > fw - padb { row += 1; cx = padb; }
-            if row > 0 && row as usize >= row_y.len() { break; }
-            let y = row_y[row as usize];
-            let hovered = point_in_rect(cursor_x, cursor_y, cx, y, bw, btn_h);
-            draw_button(frame, fw, fh, cx, y, bw, btn_h, active, hovered, true, label, [200,200,200,255], s);
-            cx += bw + 6 * s;
+        let mut ridx = 0; let mut cx = padb;
+        for (cat, label) in cats.iter() {
+            let bw = button_w_for(label, s);
+            if cx + bw > fw - padb { ridx += 1; cx = padb; }
+            if ridx >= row_y.len() { break; }
+            let mut r = ui_row(cx, row_y[ridx], s);
+            let active = *cat == category;
+            let hovered = point_in_rect(cursor_x, cursor_y, r.cursor_x, r.y, bw, r.item_h);
+            ui_button_group(frame, fw, fh, &mut r, label, active, hovered, true, [220,220,220,255], ButtonStyle::Default);
+            cx = r.cursor_x;
         }
         // Здания по выбранной категории (нижняя строка)
-        let mut bx = padb;
-        let by = by0 + padb + (btn_h + 6 * s) * 2;
+        let mut row_items = ui_row(padb, by0 + padb + (btn_h + 6 * s) * 2, s);
         let buildings_for_cat: &[BuildingKind] = match category {
             UICategory::Housing => &[BuildingKind::House],
             UICategory::Storage => &[BuildingKind::Warehouse],
@@ -402,13 +430,13 @@ pub fn draw_ui(
             let label = label_for_building(bk);
             let active = selected == bk;
             let bw = button_w_for(label, s);
-            if bx + bw > fw - padb { break; }
+            if row_items.cursor_x + bw > fw - padb { break; }
             let cost = building_cost(bk);
             let can_afford = resources.gold >= cost.gold && resources.wood >= cost.wood;
             let text_col = if can_afford { [220,220,220,255] } else { [140,140,140,220] };
-            let hovered_btn = point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h);
-            draw_button(frame, fw, fh, bx, by, bw, btn_h, active, hovered_btn, can_afford, label, text_col, s);
-            if point_in_rect(cursor_x, cursor_y, bx, by, bw, btn_h) {
+            let hovered_btn = point_in_rect(cursor_x, cursor_y, row_items.cursor_x, row_items.y, bw, row_items.item_h);
+            let (bx, by, bw, _bh) = ui_button_group(frame, fw, fh, &mut row_items, label, active, hovered_btn, can_afford, text_col, ButtonStyle::Default);
+            if hovered_btn {
                 let px = 2 * s; let pad = 5 * s; let gap = 6 * s; let icon = 10 * s;
                 let cost_w = { let w_wood = icon + 4 + number_w(cost.wood.max(0) as u32, s); let w_gold = icon + 4 + number_w(cost.gold.max(0) as u32, s); w_wood + gap + w_gold };
                 let (prod_label, prod_color, note) = production_info(bk);
@@ -428,7 +456,6 @@ pub fn draw_ui(
                 fill_rect(frame, fw, fh, cx2, cy2, icon, icon, prod_color); cx2 += icon + 4; draw_text_mini(frame, fw, fh, cx2, cy2 - (icon - 5*px)/2, prod_label, [230,230,230,255], s);
                 if let Some(t) = note { let cy3 = y_tip + 2*line_h + s + (line_h - 5*px)/2; draw_text_mini(frame, fw, fh, x_tip + pad, cy3, t, [200,200,200,255], s); }
             }
-            bx += bw + 6 * s;
         }
     } else {
         // Economy panel
@@ -440,14 +467,14 @@ pub fn draw_ui(
         // -/+ кнопки как в меню строительства
         let hovered_minus = point_in_rect(cursor_x, cursor_y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h);
         let hovered_plus  = point_in_rect(cursor_x, cursor_y, lay.tax_plus_x,  lay.tax_plus_y,  lay.tax_plus_w,  lay.tax_plus_h);
-        draw_button(frame, fw, fh, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h, false, hovered_minus, true, b"-", [230,230,230,255], s);
-        draw_button(frame, fw, fh, lay.tax_plus_x,  lay.tax_plus_y,  lay.tax_plus_w,  lay.tax_plus_h,  false, hovered_plus,  true, b"+", [230,230,230,255], s);
+        draw_button(frame, fw, fh, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h, false, hovered_minus, true, b"-", [230,230,230,255], s, ButtonStyle::Default);
+        draw_button(frame, fw, fh, lay.tax_plus_x,  lay.tax_plus_y,  lay.tax_plus_w,  lay.tax_plus_h,  false, hovered_plus,  true, b"+", [230,230,230,255], s, ButtonStyle::Default);
         // значение налога (по центру вертикали строки)
         let taxp = (tax_rate.round().max(0.0)) as u32; draw_number(frame, fw, fh, lay.tax_plus_x + lay.tax_plus_w + 8 * s, label_y, taxp, [255,255,255,255], s);
         // Policy label и кнопки справа
         draw_text_mini(frame, fw, fh, lay.policy_bal_x - (text_w(b"FOOD", s) + 8 * s), label_y, b"FOOD", [200,200,200,255], s);
         let draw_toggle = |frame: &mut [u8], x:i32,y:i32,w:i32,h:i32, active:bool, label:&[u8], hovered: bool| {
-            draw_button(frame, fw, fh, x, y, w, h, active, hovered, true, label, [220,220,220,255], s);
+            draw_button(frame, fw, fh, x, y, w, h, active, hovered, true, label, [220,220,220,255], s, ButtonStyle::Default);
         };
         let by = lay.y; // выравнивание по базовой линии текста
         draw_toggle(frame, lay.policy_bal_x, by, lay.policy_bal_w, lay.policy_bal_h, food_policy == FoodPolicy::Balanced, b"Balanced", point_in_rect(cursor_x, cursor_y, lay.policy_bal_x, by, lay.policy_bal_w, lay.policy_bal_h));
@@ -495,27 +522,27 @@ fn draw_button(
     x: i32, y: i32, w: i32, h: i32,
     active: bool, hovered: bool, enabled: bool,
     label: &[u8], col: [u8;4], s: i32,
+    style: ButtonStyle,
 ) {
-    // Деревянная палитра (светлее)
-    let mut bg_base = [140, 105, 75, 180];
-    let mut bg_hover = [160, 120, 85, 200];
-    let mut bg_active = [185, 140, 95, 220];
-    // Если это красная кнопка (DEMOLISH), используем «алерт»-палитру, но в том же стиле
-    if label == b"DEMOLISH" {
-        // более «динамитная» яркая палитра
-        bg_base = [200, 60, 50, 230];
-        bg_hover = [220, 80, 60, 240];
-        bg_active = [240, 95, 70, 255];
-    }
+    // Палитры по стилю
+    let (bg_base, bg_hover, bg_active, top_hi, bot_shadow) = match style {
+        ButtonStyle::Default => (
+            [140,105,75,180], [160,120,85,200], [185,140,95,220], [255,255,255,70], [0,0,0,60]
+        ),
+        ButtonStyle::Danger => (
+            [200,60,50,230], [220,80,60,240], [240,95,70,255], [255,255,255,110], [0,0,0,90]
+        ),
+        ButtonStyle::Primary => (
+            [170,130,60,200], [190,150,80,220], [210,170,95,235], [255,255,255,90], [0,0,0,70]
+        ),
+    };
     let bg_disabled = [115, 95, 75, 150];
     let bg = if !enabled { bg_disabled } else if active { bg_active } else if hovered { bg_hover } else { bg_base };
     fill_rect(frame, fw, fh, x, y, w, h, bg);
     // верхний блик и нижняя тень для объёма (чуть сильнее, чтобы быть заметнее на тёмной плашке)
     let band = (2 * s).max(2);
-    let top_highlight = if label == b"DEMOLISH" { [255, 255, 255, 110] } else { [255, 255, 255, 70] };
-    let bottom_shadow = if label == b"DEMOLISH" { [0, 0, 0, 90] } else { [0, 0, 0, 60] };
-    fill_rect(frame, fw, fh, x, y, w, band, top_highlight);
-    fill_rect(frame, fw, fh, x, y + h - band, w, band, bottom_shadow);
+    fill_rect(frame, fw, fh, x, y, w, band, top_hi);
+    fill_rect(frame, fw, fh, x, y + h - band, w, band, bot_shadow);
     // Центрируем однобуквенные служебные ярлыки ("+"/"-") по кнопке,
     // а обычные — оставляем с левым отступом как в строительном меню
     if label == b"+" || label == b"-" {
