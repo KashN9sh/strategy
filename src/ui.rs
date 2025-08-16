@@ -436,7 +436,7 @@ pub fn draw_ui(
         if last_income != 0 || last_upkeep != 0 {
             let mut info_x = lay.x + text_w(housing_text.as_bytes(), s) + 12 * s;
             let net = last_income - last_upkeep;
-            let info = format!("  |  +{}  -{}  = {}", last_income.max(0), last_upkeep.max(0), net).into_bytes();
+            let info = format!("  |  INCOME +{}  UPKEEP -{}  NET {}", last_income.max(0), last_upkeep.max(0), net).into_bytes();
             draw_text_mini(frame, fw, fh, info_x, line2_y, &info, [220,220,200,255], s);
         }
     }

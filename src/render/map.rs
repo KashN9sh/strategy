@@ -336,6 +336,7 @@ pub fn draw_citizens(
     buildings: &Vec<Building>,
     screen_center: IVec2, cam_snap: glam::Vec2,
     citizen_sprite: &Option<(Vec<u8>, i32, i32)>,
+    face_sprites: &Option<(Vec<Vec<u8>>, i32, i32)>,
 ) {
     for c in citizens.iter() {
         let (fx, fy) = if c.moving { let dx = (c.target.x - c.pos.x) as f32; let dy = (c.target.y - c.pos.y) as f32; (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress) } else { (c.pos.x as f32, c.pos.y as f32) };
@@ -358,9 +359,32 @@ pub fn draw_citizens(
         } else {
             tiles::draw_citizen_marker(frame, width, height, screen_pos.x, base_y, rr, col);
         }
-        // мини-эмоция поверх маркера: рисуем “по кружку” более жирной линией
+        // мини-эмоция поверх маркера: используем спрайт если есть
+        // mood: 0 = sad, 1 = neutral, 2 = happy (внутреннее значение)
+        // порядок в ассете: neutral (0), happy (1), sad (2)
         let mood = if c.happiness as i32 >= 66 { 2 } else if c.happiness as i32 <= 33 { 0 } else { 1 };
-        tiles::draw_emote_on_marker(frame, width, height, screen_pos.x, base_y, rr, mood);
+        if let Some((sprites, sw, sh)) = face_sprites {
+            // маппинг: internal -> asset index: neutral(1)->0, happy(2)->1, sad(0)->2
+            let idx = match mood { 1 => 0, 2 => 1, _ => 2 };
+            // выбор ряда по яркости основы: если фон светлый — тёмный ряд (ry=1), иначе светлый (ry=0)
+            let ry = {
+                // проба пикселя маркера в центре
+                let col = [col[0], col[1], col[2]]; // цвет маркера; approx luminance
+                let lum = (col[0] as u16 * 77 + col[1] as u16 * 150 + col[2] as u16 * 29) >> 8;
+                if *sh > 0 && sprites.len() >= 6 && lum > 140 { 1 } else { 0 }
+            } as usize;
+            let sprite_idx = ry * 3 + idx;
+            if sprite_idx < sprites.len() {
+                let face = &sprites[sprite_idx];
+                // позиционируем лицо внутри круга; делаем крупнее для читаемости
+                let scale = ((rr as f32) * 1.7).round() as i32;
+                let draw_w = scale; let draw_h = scale;
+                let top_left_x = screen_pos.x - draw_w / 2; let top_left_y = base_y - draw_h / 2;
+                tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, face, *sw, *sh, draw_w, draw_h);
+            }
+        } else {
+            tiles::draw_emote_on_marker(frame, width, height, screen_pos.x, base_y, rr, mood);
+        }
     }
 }
 

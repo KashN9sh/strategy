@@ -127,6 +127,9 @@ fn run() -> Result<()> {
     let mut atlas = TileAtlas::new();
     let mut road_atlas = atlas::RoadAtlas::new();
     let mut citizen_sprite: Option<(Vec<u8>, i32, i32)> = None;
+    // лица: ожидаем faces.png с 3 колонками (sad,neutral,happy), опционально 2 ряда (light/dark)
+    // порядок: [sad_l, neutral_l, happy_l, sad_d, neutral_d, happy_d]
+    let mut face_sprites: Option<(Vec<Vec<u8>>, i32, i32)> = None; // (sprites, cell_w, cell_h)
     let mut road_mode = false;
     let mut path_debug_mode = false;
     let mut path_sel_a: Option<IVec2> = None;
@@ -255,6 +258,33 @@ fn run() -> Result<()> {
             sprites.push(out);
         }
         tree_atlas = Some(atlas::TreeAtlas { sprites, w: base_w as i32, h: ih as i32 });
+    }
+    // faces.png: 3 колонки по эмоциям, 1-2 ряда (light/dark)
+    if let Ok(img) = image::open("assets/faces.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let cols = 3u32;
+        if iw >= cols && iw % cols == 0 {
+            let cell_w = iw / cols;
+            if cell_w > 0 {
+                let rows = (ih / cell_w).max(1);
+                let cell_h = if rows > 0 { cell_w } else { ih };
+                let mut sprites = Vec::new();
+                let slice_cell = |cx: u32, cy: u32| -> Vec<u8> {
+                    let x0 = cx * cell_w; let y0 = cy * cell_h;
+                    let mut out = vec![0u8; (cell_w * cell_h * 4) as usize];
+                    for y in 0..cell_h as usize {
+                        let src = ((y0 as usize + y) * iw as usize + x0 as usize) * 4;
+                        let dst = y * cell_w as usize * 4;
+                        out[dst..dst + cell_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + cell_w as usize * 4]);
+                    }
+                    out
+                };
+                let rows_clamped = rows.min(2); // используем максимум 2 ряда
+                for ry in 0..rows_clamped { for cx in 0..cols { sprites.push(slice_cell(cx, ry)); } }
+                face_sprites = Some((sprites, cell_w as i32, cell_h as i32));
+            }
+        }
     }
     // citizen.png: одиночный спрайт (квадратный предпочтительно), масштабируется под радиус маркера
     if let Ok(img) = image::open("assets/citizen.png") {
@@ -449,7 +479,7 @@ fn run() -> Result<()> {
                         min_tx, min_ty, max_tx, max_ty,
                     );
 
-                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap, &citizen_sprite);
+                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap, &citizen_sprite, &face_sprites);
 
                     // Оверлей день/ночь
                     let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);

@@ -16,7 +16,7 @@ pub fn defaults() -> (input::Config, input::InputConfig) {
         happy_feed_bonus: 15,
         happy_variety_bonus: 5,
         happy_house_bonus: 10,
-        happy_starving_penalty: -15,
+        happy_starving_penalty: -25,
         migration_join_threshold: 65.0,
         migration_leave_threshold: 35.0,
         tax_income_base: 0.5,

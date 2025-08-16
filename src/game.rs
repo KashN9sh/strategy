@@ -68,7 +68,8 @@ pub fn economy_new_day(citizens: &mut Vec<Citizen>, resources: &mut Resources, w
         let mut h: i32 = 50;
         if c.fed_today { h += cfg.happy_feed_bonus; } else { h += cfg.happy_starving_penalty; }
         if c.last_food_mask & 0b11 == 0b11 { h += cfg.happy_variety_bonus; }
-        if has_house_at(c.home) { h += cfg.happy_house_bonus; }
+        // Бонус за дом только если житель сегодня поел — иначе голод нивелирует комфорт жилья
+        if has_house_at(c.home) && c.fed_today { h += cfg.happy_house_bonus; }
         // простой штраф за высокие налоги перенесём в доход
         c.happiness = h.clamp(0, 100) as u8;
         happiness_sum += c.happiness as i32;
