@@ -301,6 +301,12 @@ fn run() -> Result<()> {
     let mut show_tree_stage_overlay = false;
     let mut show_ui = true;
     let mut cursor_xy = IVec2::new(0, 0);
+    // Drag-to-build roads state
+    let mut left_mouse_down: bool = false;
+    let mut drag_prev_tile: Option<IVec2> = None;
+    let mut drag_road_state: Option<bool> = None; // Some(true)=build, Some(false)=erase
+    let mut drag_anchor_tile: Option<IVec2> = None; // начало протяжки
+    let mut preview_road_path: Vec<IVec2> = Vec::new();
     let mut fps_ema: f32 = 60.0;
     // удалён дубликат переменной show_ui
     // выбранный житель для ручного назначения на работу (отключено)
@@ -368,9 +374,39 @@ fn run() -> Result<()> {
                     cursor_xy = IVec2::new(mx, my);
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
                     hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h);
+                    if left_mouse_down && road_mode {
+                        // считаем только предпросмотр, без применения
+                        if drag_anchor_tile.is_none() {
+                            if let Some(curr) = hovered_tile {
+                                if drag_road_state.is_none() { drag_road_state = Some(!world.is_road(curr)); }
+                                drag_anchor_tile = Some(curr);
+                            }
+                        }
+                        if let (Some(anchor), Some(curr)) = (drag_anchor_tile, hovered_tile) {
+                            preview_road_path.clear();
+                            let mut x = anchor.x; let mut y = anchor.y;
+                            let sx = (curr.x - x).signum();
+                            let sy = (curr.y - y).signum();
+                            preview_road_path.push(IVec2::new(x, y));
+                            while x != curr.x { x += sx; preview_road_path.push(IVec2::new(x, y)); }
+                            while y != curr.y { y += sy; preview_road_path.push(IVec2::new(x, y)); }
+                        }
+                    }
                 }
-                WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } => {
-                    if button == winit::event::MouseButton::Left {
+                WindowEvent::MouseInput { state, button, .. } => {
+                    if button == winit::event::MouseButton::Left && state == ElementState::Pressed {
+                        left_mouse_down = true;
+                        if road_mode {
+                            if let Some(tp) = hovered_tile {
+                                let on = !world.is_road(tp);
+                                drag_prev_tile = Some(tp);
+                                drag_road_state = Some(on);
+                                drag_anchor_tile = Some(tp);
+                                preview_road_path.clear();
+                                preview_road_path.push(tp);
+                                return;
+                            }
+                        }
                         if show_ui {
                             if ui_interaction::handle_left_click(
                                 cursor_xy, width_i32, height_i32, &config, &atlas, hovered_tile,
@@ -386,13 +422,23 @@ fn run() -> Result<()> {
                             if let Some(bh) = buildings.iter().find(|bb| bb.pos == tp) {
                                 active_building_panel = match active_building_panel { Some(cur) if cur == bh.pos => None, _ => Some(bh.pos) }; return;
                             }
-                            if road_mode { let on = !world.is_road(tp); world.set_road(tp, on); return; }
                             if path_debug_mode {
                                 match (path_sel_a, path_sel_b) { (None, _) => { path_sel_a = Some(tp); last_path=None; }, (Some(_), None) => { path_sel_b = Some(tp); }, (Some(_), Some(_)) => { path_sel_a = Some(tp); path_sel_b=None; last_path=None; } }
                                 if let (Some(a), Some(b)) = (path_sel_a, path_sel_b) { last_path = crate::path::astar(&world, a, b, 20_000); }
                                 return;
                             }
                         }
+                    } else if button == winit::event::MouseButton::Left && state == ElementState::Released {
+                        left_mouse_down = false;
+                        if road_mode {
+                            if let Some(on) = drag_road_state {
+                                for p in preview_road_path.iter() { world.set_road(*p, on); }
+                            }
+                        }
+                        drag_prev_tile = None;
+                        drag_road_state = None;
+                        drag_anchor_tile = None;
+                        preview_road_path.clear();
                     }
                 }
                 WindowEvent::Resized(new_size) => {
@@ -462,6 +508,32 @@ fn run() -> Result<()> {
                             [240, 230, 80, 70],
                         );
                         render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
+                    }
+
+                    // Страховка предпросмотра: при зажатой ЛКМ пересчитываем путь
+                    if left_mouse_down && road_mode {
+                        if let (Some(anchor), Some(curr)) = (drag_anchor_tile, hovered_tile) {
+                            preview_road_path.clear();
+                            let mut x = anchor.x; let mut y = anchor.y;
+                            let sx = (curr.x - x).signum();
+                            let sy = (curr.y - y).signum();
+                            preview_road_path.push(IVec2::new(x, y));
+                            while x != curr.x { x += sx; preview_road_path.push(IVec2::new(x, y)); }
+                            while y != curr.y { y += sy; preview_road_path.push(IVec2::new(x, y)); }
+                        }
+                    }
+
+                    // Отрисовка предпросмотра дороги
+                    if left_mouse_down && road_mode && !preview_road_path.is_empty() {
+                        let build = drag_road_state.unwrap_or(true);
+                        let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32;
+                        let fill_col = if build { [120, 200, 120, 90] } else { [200, 100, 100, 90] };
+                        let line_col = if build { [120, 220, 120, 255] } else { [220, 120, 120, 255] };
+                        for tp in preview_road_path.iter() {
+                            let sp = render::map::world_to_screen(&atlas, screen_center, cam_snap, tp.x, tp.y);
+                            render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, sp.x, sp.y + hover_off, atlas.half_w, atlas.half_h, fill_col);
+                            render::tiles::draw_iso_outline(frame, width_i32, height_i32, sp.x, sp.y + hover_off, atlas.half_w, atlas.half_h, line_col);
+                        }
                     }
 
                     // Отрисуем здания и деревья вместе, отсортировав по глубине
