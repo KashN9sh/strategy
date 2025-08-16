@@ -35,9 +35,11 @@ fn tile_cost(world: &World, p: IVec2) -> Option<i32> {
     match kind {
         TileKind::Water => None,
         _ => {
-            // высокая разница стоимостей: дорога=1, трава=4, лес=7
+            // высокая разница стоимостей: дорога=1, мост=2, трава=4, лес=7
             let base = match kind { TileKind::Grass => 4, TileKind::Forest => 7, TileKind::Water => 999 };
-            let cost = if world.is_road(p) { 1 } else { base };
+            let mut cost = if world.is_road(p) { 1 } else { base };
+            // мост как «особая дорога»: дорога, стоящая на воде — разрешаем проход с ценой 2
+            if cost >= 999 && world.is_road(p) { cost = 2; }
             Some(cost)
         }
     }

@@ -30,6 +30,7 @@ pub struct World {
     pub clay_deposits: HashSet<(i32, i32)>,
     pub stone_deposits: HashSet<(i32, i32)>,
     pub iron_deposits: HashSet<(i32, i32)>,
+    pub rivers: HashSet<(i32, i32)>,
     // биом по тайлам (кэш)
     pub biomes: HashMap<(i32,i32), BiomeKind>,
     // настройки биомов из конфига (runtime)
@@ -44,7 +45,7 @@ impl World {
         let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
         fbm = fbm.set_seed(seed as u32).set_octaves(5).set_frequency(0.03).set_lacunarity(2.0).set_persistence(0.5);
         let (tx, rx) = spawn_chunk_worker(seed);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new(), biomes: HashMap::new(), biome_swamp_thr: 0.10, biome_rocky_thr: 0.10, biome_swamp_tree_growth_wmul: 0.85, biome_rocky_tree_growth_wmul: 1.20 }
+        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new(), rivers: HashSet::new(), biomes: HashMap::new(), biome_swamp_thr: 0.10, biome_rocky_thr: 0.10, biome_swamp_tree_growth_wmul: 0.85, biome_rocky_tree_growth_wmul: 1.20 }
     }
 
     pub fn reset_noise(&mut self, seed: u64) {
@@ -60,6 +61,7 @@ impl World {
         self.clay_deposits.clear();
         self.stone_deposits.clear();
         self.iron_deposits.clear();
+        self.rivers.clear();
         self.biomes.clear();
         let (tx, rx) = spawn_chunk_worker(seed);
         self.tx = tx; self.rx = rx; self.pending.clear();
@@ -90,12 +92,35 @@ impl World {
             self.chunks.insert((res.cx, res.cy), Chunk { tiles: res.tiles });
             self.pending.remove(&(res.cx, res.cy));
             // Заполним набор деревьев по лесным тайлам в чанке
-            if let Some(chunk) = self.chunks.get(&(res.cx, res.cy)) {
+            if let Some(chunk) = self.chunks.get_mut(&(res.cx, res.cy)) {
                 for ly in 0..CHUNK_H { for lx in 0..CHUNK_W {
                     let idx = (ly * CHUNK_W + lx) as usize;
+                    let tx = res.cx * CHUNK_W + lx;
+                    let ty = res.cy * CHUNK_H + ly;
+                    let p = IVec2::new(tx, ty);
+                    // Преобразуем «речные» клетки в воду на этапе интеграции (без доп. заимствования self)
+                    // Локальные параметры/шумы
+                    let fbm = &self.fbm;
+                    let is_river = {
+                        // маска 1
+                        let v1 = fbm.get([p.x as f64 * 0.035 + 1234.0, p.y as f64 * 0.035 - 987.0]) as f32;
+                        let u1 = fbm.get([p.x as f64 * 0.018 - 777.0, p.y as f64 * 0.022 + 444.0]) as f32;
+                        let w1 = fbm.get([p.x as f64 * 0.10 - 222.0, p.y as f64 * 0.10 + 333.0]) as f32;
+                        let s1 = ((v1 + u1 * 0.5) * 3.14159).sin().abs();
+                        let width1 = 0.028 + 0.018 * (w1 * 0.5 + 0.5); // 0.028..0.046
+                        // маска 2 (смещённые фазы) — добавляет дополнительных рек, почти не увеличивая ширину
+                        let v2 = fbm.get([p.x as f64 * 0.032 - 321.0, p.y as f64 * 0.032 + 654.0]) as f32;
+                        let u2 = fbm.get([p.x as f64 * 0.020 + 999.0, p.y as f64 * 0.017 - 888.0]) as f32;
+                        let w2 = fbm.get([p.x as f64 * 0.12 + 111.0, p.y as f64 * 0.12 - 222.0]) as f32;
+                        let s2 = ((v2 + u2 * 0.5) * 3.14159).sin().abs();
+                        let width2 = 0.026 + 0.016 * (w2 * 0.5 + 0.5); // 0.026..0.042
+                        (s1 < width1) || (s2 < width2)
+                    };
+                    if chunk.tiles[idx] != TileKind::Water && is_river {
+                        chunk.tiles[idx] = TileKind::Water;
+                        self.rivers.insert((tx, ty));
+                    }
                     if chunk.tiles[idx] == TileKind::Forest {
-                        let tx = res.cx * CHUNK_W + lx;
-                        let ty = res.cy * CHUNK_H + ly;
                         if !self.removed_trees.contains(&(tx, ty)) {
                             // Детерминированное распределение зрелости по координатам и seed:
                             // ~15% stage0, ~30% stage1, ~55% stage2
@@ -110,17 +135,60 @@ impl World {
                             self.trees.insert((tx, ty), Tree { stage, age_ms: 0 });
                         }
                     }
-                    // кэш: месторождения и биомы (на неводных)
+                    // кэш: месторождений и биомы (на неводных)
                     if chunk.tiles[idx] != TileKind::Water {
-                        let tx = res.cx * CHUNK_W + lx;
-                        let ty = res.cy * CHUNK_H + ly;
-                        let p = IVec2::new(tx, ty);
-                        // Шансы месторождений с поправкой на биом: Rocky — больше камня/железа, Swamp — больше глины
-                        let bm = self.compute_biome(p);
-                        if self.compute_has_clay_deposit_biome(p, bm) { self.clay_deposits.insert((tx, ty)); }
-                        if self.compute_has_stone_deposit_biome(p, bm) { self.stone_deposits.insert((tx, ty)); }
-                        if self.compute_has_iron_deposit_biome(p, bm) { self.iron_deposits.insert((tx, ty)); }
-                        self.biomes.insert((tx, ty), self.compute_biome(p));
+                        // Локальный расчёт биома и месторождений для избежания конфликта заимствований
+                        let fbm = &self.fbm;
+                        let swamp_thr = self.biome_swamp_thr;
+                        let rocky_thr = self.biome_rocky_thr;
+                        let moisture = fbm.get([tx as f64 * 0.18 + 311.0, ty as f64 * 0.18 - 211.0]) as f32;
+                        let rocky_v  = fbm.get([tx as f64 * 0.22 - 157.0, ty as f64 * 0.22 +  97.0]) as f32;
+                        let bm = if moisture > swamp_thr { BiomeKind::Swamp } else if rocky_v > rocky_thr { BiomeKind::Rocky } else { BiomeKind::Meadow };
+                        // базовые вероятности
+                        let has_clay_base = {
+                            let base = fbm.get([tx as f64 * 0.30 + 31.0, ty as f64 * 0.30 - 77.0]) as f32;
+                            let thr = 0.22_f32; let margin = 0.05_f32;
+                            if base > thr { true } else if base > thr - margin {
+                                const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+                                let mut hits = 0; for (dx,dy) in NB { let v = fbm.get([(tx+dx) as f64 * 0.30 + 31.0, (ty+dy) as f64 * 0.30 - 77.0]) as f32; if v > thr { hits += 1; } }
+                                hits >= 2
+                            } else { false }
+                        };
+                        let has_stone_base = {
+                            let base = fbm.get([tx as f64 * 0.38 - 123.0, ty as f64 * 0.38 + 19.0]) as f32;
+                            let thr = 0.26_f32; let margin = 0.06_f32;
+                            if base > thr { true } else if base > thr - margin {
+                                const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+                                let mut hits = 0; for (dx,dy) in NB { let v = fbm.get([(tx+dx) as f64 * 0.38 - 123.0, (ty+dy) as f64 * 0.38 + 19.0]) as f32; if v > thr { hits += 1; } }
+                                hits >= 2
+                            } else { false }
+                        };
+                        let has_iron_base = {
+                            let base = fbm.get([tx as f64 * 0.34 + 211.0, ty as f64 * 0.34 + 87.0]) as f32;
+                            let thr = 0.30_f32; let margin = 0.05_f32;
+                            if base > thr { true } else if base > thr - margin {
+                                const NB: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
+                                let mut hits = 0; for (dx,dy) in NB { let v = fbm.get([(tx+dx) as f64 * 0.34 + 211.0, (ty+dy) as f64 * 0.34 + 87.0]) as f32; if v > thr { hits += 1; } }
+                                hits >= 2
+                            } else { false }
+                        };
+                        // биомные довески
+                        let mut has_clay = has_clay_base;
+                        if !has_clay && matches!(bm, BiomeKind::Swamp) {
+                            let n = fbm.get([tx as f64 * 0.55 - 13.0, ty as f64 * 0.55 + 21.0]) as f32; if n > 0.60 { has_clay = true; }
+                        }
+                        let mut has_stone = has_stone_base;
+                        if !has_stone && matches!(bm, BiomeKind::Rocky) {
+                            let n = fbm.get([tx as f64 * 0.52 + 77.0, ty as f64 * 0.52 - 41.0]) as f32; if n > 0.62 { has_stone = true; }
+                        }
+                        let mut has_iron = has_iron_base;
+                        if !has_iron && matches!(bm, BiomeKind::Rocky) {
+                            let n = fbm.get([tx as f64 * 0.59 - 91.0, ty as f64 * 0.59 + 63.0]) as f32; if n > 0.64 { has_iron = true; }
+                        }
+                        if has_clay { self.clay_deposits.insert((tx, ty)); }
+                        if has_stone { self.stone_deposits.insert((tx, ty)); }
+                        if has_iron { self.iron_deposits.insert((tx, ty)); }
+                        self.biomes.insert((tx, ty), bm);
                     }
                 }}
             }
@@ -137,6 +205,7 @@ impl World {
                     self.clay_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
                     self.stone_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
                     self.iron_deposits.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
+                    self.rivers.retain(|&(tx, ty)| !(tx >= min_tx && tx <= max_tx && ty >= min_ty && ty <= max_ty));
                     self.chunks.remove(&key);
                 } else { break; }
             }
@@ -170,6 +239,18 @@ impl World {
     pub fn has_stone_deposit(&self, p: IVec2) -> bool { self.stone_deposits.contains(&(p.x, p.y)) }
 
     pub fn has_iron_deposit(&self, p: IVec2) -> bool { self.iron_deposits.contains(&(p.x, p.y)) }
+
+    pub fn is_river(&self, p: IVec2) -> bool { self.rivers.contains(&(p.x, p.y)) }
+    fn compute_is_river(&self, p: IVec2) -> bool {
+        // Извилистые «потоки»: две гармоники для направления + ширина от второго шума
+        let v = self.fbm.get([p.x as f64 * 0.035 + 1234.0, p.y as f64 * 0.035 - 987.0]) as f32; // -1..1
+        let u = self.fbm.get([p.x as f64 * 0.018 - 777.0, p.y as f64 * 0.022 + 444.0]) as f32; // -1..1
+        let w = self.fbm.get([p.x as f64 * 0.10 - 222.0, p.y as f64 * 0.10 + 333.0]) as f32;   // -1..1
+        // синусоидальная гребёнка для линий уровня, сдвинутая u
+        let s = ((v + u * 0.5) * 3.14159).sin().abs();
+        let width = 0.06 + 0.04 * (w * 0.5 + 0.5); // 0.06..0.10
+        s < width
+    }
 
     // --- Приватные методы расчёта месторождений (для заполнения кэша при интеграции чанков) ---
     fn compute_has_clay_deposit(&self, p: IVec2) -> bool {

@@ -80,6 +80,8 @@ pub fn draw_terrain_and_overlays(
                         } else { tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h); }
                     } else { tiles::blit_sprite_alpha_scaled(frame, width, height, top_left_x, top_left_y, &atlas.base_water, atlas.base_w, atlas.base_h, draw_w, draw_h); }
                 }
+                // Река поверх травы/леса — узкая голубая лента с небольшой прозрачностью
+                _ => {}
             }
         } else { atlas.blit(frame, width, height, screen_pos.x, screen_pos.y, kind, water_frame); }
         if show_grid {
@@ -500,6 +502,7 @@ pub fn draw_minimap(
         };
         let px = x + (tx - min_tx) * cell_px; let py = y + (ty - min_ty) * cell_px;
         tiles::fill_rect(frame, fw, fh, px, py, cell_px, cell_px, col);
+        // на миникарте река уже учтена как вода (перезаписана в чанке), поэтому отдельной отрисовки не нужно
         // дорога поверх
         if world.is_road(IVec2::new(tx, ty)) {
             tiles::fill_rect(frame, fw, fh, px, py, cell_px, cell_px, [210, 180, 120, 255]);
