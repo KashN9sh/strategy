@@ -1163,6 +1163,15 @@ fn run() -> Result<()> {
                                     if c.path_index + 1 < c.path.len() { c.path_index += 1; c.target = c.path[c.path_index]; c.progress = 0.0; }
                                     else { c.moving = false; c.progress = 0.0; }
                                 } else {
+                                    // запрет: без моста нельзя идти в воду
+                                    {
+                                        use crate::types::TileKind::*;
+                                        let k = world.get_tile(c.target.x, c.target.y);
+                                        if matches!(k, Water) && !world.is_road(c.target) {
+                                            c.moving = false; c.progress = 0.0; c.path.clear();
+                                            continue;
+                                        }
+                                    }
                                     // скорость шага зависит от целевой клетки: дорога быстрее, трава медленнее, лес ещё медленнее
                                     let mut _step_time_ms: f32 = 300.0; // базовая скорость (нравится на дорогах)
                                     if world.is_road(c.target) {
