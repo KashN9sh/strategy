@@ -126,7 +126,7 @@ pub fn handle_left_click(
         bx += bw + 6 * ui_s;
     }
 
-    // обработка клика по панели здания (+/-) — только если панель активна
+    // обработка клика по панели здания (+/-/Demolish) — только если панель активна
     if let Some(p) = *active_building_panel {
         let panel = ui::layout_building_panel(width_i32, height_i32, ui_s);
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.minus_x, panel.minus_y, panel.minus_w, panel.minus_h) {
@@ -136,6 +136,44 @@ pub fn handle_left_click(
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.plus_x, panel.plus_y, panel.plus_w, panel.plus_h) {
             if let Some(b) = buildings.iter_mut().find(|bb| bb.pos == p) { b.workers_target = (b.workers_target + 1).min(9); }
             return true;
+        }
+        // Снос
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, panel.dem_x, panel.dem_y, panel.dem_w, panel.dem_h) {
+            if let Some(idx) = buildings.iter().position(|bb| bb.pos == p) {
+                let b = buildings.remove(idx);
+                // освободить клетку
+                world.occupied.remove(&(p.x, p.y));
+                // вернуть 50% стоимости и 50% накопленных ресурсов (если применимо)
+                let cost = crate::types::building_cost(b.kind);
+                // Возврат половины стоимости
+                resources.wood += (cost.wood as f32 * 0.5).round() as i32;
+                resources.gold += (cost.gold as f32 * 0.5).round() as i32;
+                // Возврат половины внутреннего «содержимого» здания
+                match b.kind {
+                    BuildingKind::House => { /* нет ресурсов */ }
+                    BuildingKind::Warehouse => {
+                        // Найти склад по позиции и вытащить его содержимое
+                        if let Some(iw) = warehouses.iter().position(|w| w.pos == p) {
+                            let w = warehouses.remove(iw);
+                            resources.wood += (w.wood as f32 * 0.5).round() as i32;
+                            resources.stone += (w.stone as f32 * 0.5).round() as i32;
+                            resources.clay += (w.clay as f32 * 0.5).round() as i32;
+                            resources.bricks += (w.bricks as f32 * 0.5).round() as i32;
+                            resources.wheat += (w.wheat as f32 * 0.5).round() as i32;
+                            resources.flour += (w.flour as f32 * 0.5).round() as i32;
+                            resources.bread += (w.bread as f32 * 0.5).round() as i32;
+                            resources.fish += (w.fish as f32 * 0.5).round() as i32;
+                            resources.gold += (w.gold as f32 * 0.5).round() as i32;
+                            resources.iron_ore += (w.iron_ore as f32 * 0.5).round() as i32;
+                            resources.iron_ingots += (w.iron_ingots as f32 * 0.5).round() as i32;
+                        }
+                    }
+                    _ => { /* производственные не хранят, возвращаем только стоимость */ }
+                }
+                *buildings_dirty = true;
+                *active_building_panel = None;
+                return true;
+            }
         }
     }
 

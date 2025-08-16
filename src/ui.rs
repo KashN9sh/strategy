@@ -17,7 +17,7 @@ pub fn top_panel_height(s: i32) -> i32 {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct BuildingPanelLayout { pub x: i32, pub y: i32, pub w: i32, pub h: i32, pub minus_x: i32, pub minus_y: i32, pub minus_w: i32, pub minus_h: i32, pub plus_x: i32, pub plus_y: i32, pub plus_w: i32, pub plus_h: i32 }
+pub struct BuildingPanelLayout { pub x: i32, pub y: i32, pub w: i32, pub h: i32, pub minus_x: i32, pub minus_y: i32, pub minus_w: i32, pub minus_h: i32, pub plus_x: i32, pub plus_y: i32, pub plus_w: i32, pub plus_h: i32, pub dem_x: i32, pub dem_y: i32, pub dem_w: i32, pub dem_h: i32 }
 
 pub fn layout_building_panel(fw: i32, fh: i32, s: i32) -> BuildingPanelLayout {
     let padb = 8 * s;
@@ -35,7 +35,11 @@ pub fn layout_building_panel(fw: i32, fh: i32, s: i32) -> BuildingPanelLayout {
     let minus_y = workers_y - 2 * s;
     let plus_x = x + w - (plus_w + 4 * s);
     let plus_y = workers_y - 2 * s;
-    BuildingPanelLayout { x, y, w, h: panel_h, minus_x, minus_y, minus_w, minus_h, plus_x, plus_y, plus_w, plus_h }
+    // кнопка сноса — внизу справа, ширина по тексту в общем стиле
+    let dem_w = button_w_for(b"DEMOLISH", s); let dem_h = 18 * s;
+    let dem_x = x + w - dem_w - 6 * s;
+    let dem_y = y + panel_h - dem_h - 6 * s;
+    BuildingPanelLayout { x, y, w, h: panel_h, minus_x, minus_y, minus_w, minus_h, plus_x, plus_y, plus_w, plus_h, dem_x, dem_y, dem_w, dem_h }
 }
 
 fn resource_colors_for_building(kind: BuildingKind) -> (Option<[u8;4]>, Vec<[u8;4]>) {
@@ -133,6 +137,8 @@ pub fn draw_building_panel(
         }
         draw_text_mini(frame, fw, fh, con_x, yline, c, [200,200,200,255], s);
     }
+    // кнопка Demolish — общий стиль draw_button, с красной палитрой и hover-эффектом
+    draw_button(frame, fw, fh, layout.dem_x, layout.dem_y, layout.dem_w, layout.dem_h, false, false, true, b"DEMOLISH", [240,230,230,255], s);
 }
 
 #[derive(Clone, Copy)]
@@ -491,16 +497,25 @@ fn draw_button(
     label: &[u8], col: [u8;4], s: i32,
 ) {
     // Деревянная палитра (светлее)
-    let bg_base = [140, 105, 75, 180];
-    let bg_hover = [160, 120, 85, 200];
-    let bg_active = [185, 140, 95, 220];
+    let mut bg_base = [140, 105, 75, 180];
+    let mut bg_hover = [160, 120, 85, 200];
+    let mut bg_active = [185, 140, 95, 220];
+    // Если это красная кнопка (DEMOLISH), используем «алерт»-палитру, но в том же стиле
+    if label == b"DEMOLISH" {
+        // более «динамитная» яркая палитра
+        bg_base = [200, 60, 50, 230];
+        bg_hover = [220, 80, 60, 240];
+        bg_active = [240, 95, 70, 255];
+    }
     let bg_disabled = [115, 95, 75, 150];
     let bg = if !enabled { bg_disabled } else if active { bg_active } else if hovered { bg_hover } else { bg_base };
     fill_rect(frame, fw, fh, x, y, w, h, bg);
     // верхний блик и нижняя тень для объёма (чуть сильнее, чтобы быть заметнее на тёмной плашке)
     let band = (2 * s).max(2);
-    fill_rect(frame, fw, fh, x, y, w, band, [255, 255, 255, 70]);
-    fill_rect(frame, fw, fh, x, y + h - band, w, band, [0, 0, 0, 60]);
+    let top_highlight = if label == b"DEMOLISH" { [255, 255, 255, 110] } else { [255, 255, 255, 70] };
+    let bottom_shadow = if label == b"DEMOLISH" { [0, 0, 0, 90] } else { [0, 0, 0, 60] };
+    fill_rect(frame, fw, fh, x, y, w, band, top_highlight);
+    fill_rect(frame, fw, fh, x, y + h - band, w, band, bottom_shadow);
     // Центрируем однобуквенные служебные ярлыки ("+"/"-") по кнопке,
     // а обычные — оставляем с левым отступом как в строительном меню
     if label == b"+" || label == b"-" {
@@ -508,7 +523,10 @@ fn draw_button(
         let cx = x + (w - text_w) / 2; let cy = y + (h - text_h) / 2;
         draw_text_mini(frame, fw, fh, cx, cy, label, col, s);
     } else {
-        draw_text_mini(frame, fw, fh, x + 6 * s, y + 4 * s, label, col, s);
+        // Вертикально центрируем, чтобы паддинги сверху/снизу были равны
+        let px = 2 * s; let text_h = 5 * px;
+        let ty = y + (h - text_h) / 2;
+        draw_text_mini(frame, fw, fh, x + 6 * s, ty, label, col, s);
     }
 }
 
