@@ -17,6 +17,7 @@ pub struct WgpuRenderer {
     // Шейдеры
     pub render_pipeline: wgpu::RenderPipeline,
     pub colored_pipeline: wgpu::RenderPipeline, // Pipeline for colored objects (buildings)
+    pub grid_pipeline: wgpu::RenderPipeline, // Pipeline for grid rendering
     pub bind_group_layout: wgpu::BindGroupLayout,
     
     // Буферы
@@ -236,6 +237,49 @@ impl WgpuRenderer {
             multiview: None,
         });
         
+        // Создаем grid pipeline для отображения сетки
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Grid Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid.wgsl").into()),
+        });
+        
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Grid Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
         // Создаем texture manager
         let texture_manager = TextureManager::new();
         
@@ -246,6 +290,7 @@ impl WgpuRenderer {
             size,
             render_pipeline,
             colored_pipeline,
+            grid_pipeline,
             bind_group_layout,
             vertex_buffer,
             index_buffer,
@@ -355,10 +400,10 @@ impl WgpuRenderer {
             
             render_pass.set_pipeline(&self.render_pipeline);
             
-            // Рендерим тайлы используя atlas renderer
+            // Рендерим тайлы используя atlas renderer с сеткой
             if let Some(ref atlas_renderer) = self.atlas_renderer {
-                // Используем текстурированный pipeline для тайлов
-                render_pass.set_pipeline(&self.render_pipeline);
+                // Используем grid pipeline для тайлов с сеткой
+                render_pass.set_pipeline(&self.grid_pipeline);
                 
                 // Устанавливаем bind group для spritesheet
                 if let Some(ref bind_group) = bind_group {

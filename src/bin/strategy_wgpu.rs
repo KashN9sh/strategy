@@ -225,7 +225,7 @@ fn run() -> Result<()> {
     // Размер карты (пока фиксированный, потом можно сделать динамическим)
     let map_width = 50;
     let map_height = 50;
-    let tile_size = 0.1; // Размер тайла в мировых координатах
+    let tile_size = 0.05; // Размер тайла в мировых координатах (нормализованные координаты)
     
     // Создаем atlas renderer
     renderer.create_atlas_renderer(map_width, map_height, tile_size);
