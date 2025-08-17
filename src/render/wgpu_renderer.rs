@@ -6,6 +6,7 @@ use crate::render::texture_manager::TextureManager;
 use crate::render::tile_renderer::TileRenderer;
 use crate::render::building_renderer::BuildingRenderer;
 use crate::render::ui_renderer::UIRenderer;
+use crate::render::atlas_renderer::AtlasRenderer;
 
 pub struct WgpuRenderer {
     pub device: wgpu::Device,
@@ -39,6 +40,9 @@ pub struct WgpuRenderer {
     
     // UI renderer
     pub ui_renderer: Option<UIRenderer>,
+    
+    // Atlas renderer
+    pub atlas_renderer: Option<AtlasRenderer>,
 }
 
 impl WgpuRenderer {
@@ -166,7 +170,7 @@ impl WgpuRenderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -209,7 +213,7 @@ impl WgpuRenderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -253,6 +257,7 @@ impl WgpuRenderer {
             tile_renderer: None,
             building_renderer: None,
             ui_renderer: None,
+            atlas_renderer: None,
         })
     }
     
@@ -274,6 +279,16 @@ impl WgpuRenderer {
 
     pub fn create_ui_renderer(&mut self, screen_width: f32, screen_height: f32) {
         self.ui_renderer = Some(UIRenderer::new(&self.device, screen_width, screen_height));
+    }
+
+    pub fn create_atlas_renderer(&mut self, map_width: u32, map_height: u32, tile_size: f32) {
+        self.atlas_renderer = Some(AtlasRenderer::new(&self.device, map_width, map_height, tile_size));
+    }
+    
+    pub fn update_atlas_world_data(&mut self, world: &mut crate::world::World, cam_x: f32, cam_y: f32) {
+        if let Some(ref mut atlas_renderer) = self.atlas_renderer {
+            atlas_renderer.update_world_data(&self.device, world, cam_x, cam_y);
+        }
     }
 
     pub fn create_bind_group(&self, texture_name: &str) -> Option<wgpu::BindGroup> {
@@ -305,8 +320,8 @@ impl WgpuRenderer {
         let output = surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
-        // Создаем bind group для тестовой текстуры
-        let bind_group = self.create_bind_group("test_texture");
+        // Создаем bind group для spritesheet
+        let bind_group = self.create_bind_group("spritesheet");
         if bind_group.is_some() {
             println!("✅ Bind group создан успешно");
         } else {
@@ -340,16 +355,20 @@ impl WgpuRenderer {
             
             render_pass.set_pipeline(&self.render_pipeline);
             
-            // Рендерим тайлы если есть tile_renderer
-            if let Some(ref tile_renderer) = self.tile_renderer {
-                // Устанавливаем bind group если текстура найдена
+            // Рендерим тайлы используя atlas renderer
+            if let Some(ref atlas_renderer) = self.atlas_renderer {
+                // Используем текстурированный pipeline для тайлов
+                render_pass.set_pipeline(&self.render_pipeline);
+                
+                // Устанавливаем bind group для spritesheet
                 if let Some(ref bind_group) = bind_group {
                     render_pass.set_bind_group(0, bind_group, &[]);
                 }
                 
-                render_pass.set_vertex_buffer(0, tile_renderer.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(tile_renderer.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..tile_renderer.num_indices, 0, 0..1);
+                render_pass.set_vertex_buffer(0, atlas_renderer.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(atlas_renderer.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..atlas_renderer.num_indices, 0, 0..1);
+            }
                 
                 // Рендерим здания поверх тайлов
                 if let Some(ref building_renderer) = self.building_renderer {
@@ -376,16 +395,6 @@ impl WgpuRenderer {
                     // Возвращаемся к основному pipeline
                     render_pass.set_pipeline(&self.render_pipeline);
                 }
-            } else {
-                // Рендерим тестовый квадрат
-                if let Some(ref bind_group) = bind_group {
-                    render_pass.set_bind_group(0, bind_group, &[]);
-                }
-                
-                render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-            }
         }
         
         self.queue.submit(std::iter::once(encoder.finish()));

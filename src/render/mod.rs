@@ -6,3 +6,4 @@ pub mod texture_manager;
 pub mod tile_renderer;
 pub mod building_renderer;
 pub mod ui_renderer;
+pub mod atlas_renderer;

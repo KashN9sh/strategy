@@ -25,6 +25,6 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texture_color = textureSample(t_diffuse, s_diffuse, in.uv);
-    // Просто возвращаем цвет текстуры без умножения на in.color
-    return texture_color;
+    // Возвращаем цвет текстуры с учетом прозрачности
+    return vec4<f32>(texture_color.rgb, texture_color.a);
 }

@@ -160,6 +160,12 @@ impl TextureManager {
         Ok(())
     }
 
+    pub fn load_texture_from_image(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, name: &str, img: &image::RgbaImage) -> Result<()> {
+        let texture = Texture::create_2d_texture(device, queue, &image::DynamicImage::ImageRgba8(img.clone()), Some(name))?;
+        self.textures.insert(name.to_string(), texture);
+        Ok(())
+    }
+
     pub fn create_placeholder(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, name: &str, width: u32, height: u32, color: [u8; 4]) -> Result<()> {
         let texture = Texture::create_placeholder_texture(device, queue, width, height, color)?;
         self.textures.insert(name.to_string(), texture);
