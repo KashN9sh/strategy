@@ -1,38 +1,23 @@
 use anyhow::Result;
 use glam::{IVec2, Vec2};
-mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
-mod world; use world::World;
-mod atlas; use atlas::{TileAtlas, BuildingAtlas};
-mod render { pub mod tiles; pub mod utils; pub mod map; }
-mod ui;
-mod input;
-mod config;
-mod save;
-mod path;
-mod jobs;
-mod controls;
-mod ui_interaction;
-mod game;
-use crate::WeatherKind as WK; // доступ к типу для внешних вызовов
-mod palette;
-use pixels::{Pixels, SurfaceTexture};
+use strategy::types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
+use strategy::world::World;
+use strategy::atlas::{TileAtlas, BuildingAtlas};
+use strategy::render::{tiles, utils, map, wgpu_renderer};
+use strategy::ui;
+use strategy::input;
+use strategy::config;
+use strategy::save;
+use strategy::path;
+use strategy::jobs;
+use strategy::controls;
+use strategy::ui_interaction;
+use strategy::game;
+use strategy::palette;
+use strategy::globals;
+use crate::types::WeatherKind as WK; // доступ к типу для внешних вызовов
 use std::time::Instant;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::sync::atomic::{AtomicI32, Ordering};
- 
-// use std::fs; // перенесено в config
-// use std::path::Path; // перенесено в config
-use serde::{Serialize, Deserialize};
-// use image::GenericImageView; // не нужен
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, Event, MouseScrollDelta, WindowEvent};
-use winit::event_loop::EventLoop;
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::WindowBuilder;
-// duplicate import removed
-
-// Глобальный масштаб клетки миникарты (px на клетку)
-static MINIMAP_CELL_PX: AtomicI32 = AtomicI32::new(0);
 
 // размеры базового тайла перенесены в atlas::TILE_W/H
 // Размер тайла в пикселях задаётся через атлас (half_w/half_h)
@@ -307,7 +292,7 @@ fn run() -> Result<()> {
     // Ночные светлячки на экране
     let mut fireflies: Vec<Firefly> = Vec::new();
     // Простая погода
-    let mut weather: WeatherKind = WeatherKind::Clear;
+    let mut weather: WK = WK::Clear;
     let mut weather_timer_ms: f32 = 0.0;
     let mut weather_next_change_ms: f32 = choose_weather_duration_ms(weather, &mut rng);
     // Экономика: вчерашние итоги
@@ -542,9 +527,9 @@ fn run() -> Result<()> {
                     zoom = (zoom * factor).clamp(0.5, 8.0);
                 }
                 WindowEvent::RedrawRequested => {
-                    if MINIMAP_CELL_PX.load(Ordering::Relaxed) == 0 {
+                    if globals::get_minimap_cell_px() == 0 {
                         let s0 = ui::ui_scale(height_i32, config.ui_scale_base);
-                        MINIMAP_CELL_PX.store(3 * s0, Ordering::Relaxed);
+                        globals::set_minimap_cell_px(3 * s0);
                     }
                     let frame = pixels.frame_mut();
                     clear(frame, [12, 18, 24, 255]);
@@ -666,18 +651,18 @@ fn run() -> Result<()> {
 
                     // Погодные эффекты (простые оверлеи)
                     match weather {
-                        WeatherKind::Clear => {}
-                        WeatherKind::Rain => {
+                        WK::Clear => {}
+                        WK::Rain => {
                             // синий прохладный фильтр
                             overlay_tint(frame, width_i32, height_i32, [40, 60, 100, 40]);
                         }
-                        WeatherKind::Fog => {
+                        WK::Fog => {
                             // сероватая дымка
                             overlay_tint(frame, width_i32, height_i32, [160, 160, 160, 50]);
                             // плавная анимация тумана (2D-синусоидальное поле альфы)
                             overlay_fog(frame, width_i32, height_i32, water_anim_time);
                         }
-                        WeatherKind::Snow => {
+                        WK::Snow => {
                             // холодный свет
                             overlay_tint(frame, width_i32, height_i32, [220, 230, 255, 40]);
                         }
@@ -685,7 +670,7 @@ fn run() -> Result<()> {
 
                     // Осадки (частицы) — простой, дешёвый слой
                     match weather {
-                        WeatherKind::Rain => {
+                        WK::Rain => {
                             let sx_step = 24; let sy_step = 48;
                             let speed = 120.0; // px/сек (условно)
                             let t = water_anim_time / 1000.0 * speed; // в px
@@ -698,7 +683,7 @@ fn run() -> Result<()> {
                                 }
                             }
                         }
-                        WeatherKind::Snow => {
+                        WK::Snow => {
                             // Сетка как у дождя → сопоставимая плотность частиц
                             let sx_step = 24; let sy_step = 48;
                             let speed = 22.0; // медленнее дождя
@@ -792,7 +777,7 @@ fn run() -> Result<()> {
                         &mut world, &buildings,
                         cam_px, atlas.half_w, atlas.half_h,
                         min_tx, min_ty, max_tx, max_ty,
-                        MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1), cursor_xy.x, cursor_xy.y,
+                        globals::get_minimap_cell_px().max(1), cursor_xy.x, cursor_xy.y,
                     );
 
                     // Отрисовка найденного пути в дебаг-режиме
@@ -841,10 +826,10 @@ fn run() -> Result<()> {
                         let pop_show = citizens.len() as i32;
                         // Параметры погоды для UI: короткий лейбл
                         let (wlabel, wcol): (&[u8], [u8;4]) = match weather {
-                            WeatherKind::Clear => (b"CLEAR", [180,200,120,255]),
-                            WeatherKind::Rain => (b"RAIN", [90,120,200,255]),
-                            WeatherKind::Fog => (b"FOG", [160,160,160,255]),
-                            WeatherKind::Snow => (b"SNOW", [220,230,255,255]),
+                            WK::Clear => (b"CLEAR", [180,200,120,255]),
+                            WK::Rain => (b"RAIN", [90,120,200,255]),
+                            WK::Fog => (b"FOG", [160,160,160,255]),
+                            WK::Snow => (b"SNOW", [220,230,255,255]),
                         };
 
                         ui::draw_ui(
@@ -1516,29 +1501,26 @@ fn overlay_tint(frame: &mut [u8], fw: i32, fh: i32, [r,g,b,a]: [u8;4]) {
 
 // point_in_rect перенесён в модуль ui
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WeatherKind { Clear, Rain, Fog, Snow }
-
-fn choose_weather_duration_ms(current: WeatherKind, rng: &mut StdRng) -> f32 {
+fn choose_weather_duration_ms(current: WK, rng: &mut StdRng) -> f32 {
     // Базовые интервалы (в секундах), затем добавляем разброс
     let (base_min, base_max) = match current {
-        WeatherKind::Clear => (60.0, 120.0),
-        WeatherKind::Rain => (40.0, 90.0),
-        WeatherKind::Fog => (30.0, 70.0),
-        WeatherKind::Snow => (50.0, 100.0),
+        WK::Clear => (60.0, 120.0),
+        WK::Rain => (40.0, 90.0),
+        WK::Fog => (30.0, 70.0),
+        WK::Snow => (50.0, 100.0),
     };
     let sec: f32 = rng.gen_range(base_min..base_max);
     sec * 1000.0
 }
 
-fn pick_next_weather(current: WeatherKind, rng: &mut StdRng) -> WeatherKind {
+fn pick_next_weather(current: WK, rng: &mut StdRng) -> WK {
     // Вероятности переходов зависят от текущей погоды
     // Значения — веса; нормализуем автоматически
-    let (opts, weights): (&[WeatherKind], &[f32]) = match current {
-        WeatherKind::Clear => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.55, 0.25, 0.15, 0.05]),
-        WeatherKind::Rain  => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.35, 0.35, 0.20, 0.10]),
-        WeatherKind::Fog   => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.40, 0.20, 0.30, 0.10]),
-        WeatherKind::Snow  => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.30, 0.20, 0.10, 0.40]),
+    let (opts, weights): (&[WK], &[f32]) = match current {
+        WK::Clear => (&[WK::Clear, WK::Rain, WK::Fog, WK::Snow], &[0.55, 0.25, 0.15, 0.05]),
+        WK::Rain  => (&[WK::Clear, WK::Rain, WK::Fog, WK::Snow], &[0.35, 0.35, 0.20, 0.10]),
+        WK::Fog   => (&[WK::Clear, WK::Rain, WK::Fog, WK::Snow], &[0.40, 0.20, 0.30, 0.10]),
+        WK::Snow  => (&[WK::Clear, WK::Rain, WK::Fog, WK::Snow], &[0.30, 0.20, 0.10, 0.40]),
     };
     let total: f32 = weights.iter().copied().sum();
     let mut r = rng.gen_range(0.0..total);
@@ -1581,7 +1563,7 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
     }
 }
 
-fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool) {
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WK, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool) {
     let trimmed = cmd.trim();
     if trimmed.is_empty() { return; }
     let mut parts = trimmed.split_whitespace();
@@ -1593,10 +1575,10 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
         "weather" => {
             if let Some(arg) = parts.next() {
                 let nw = match arg.to_ascii_lowercase().as_str() {
-                    "clear" => Some(WeatherKind::Clear),
-                    "rain" => Some(WeatherKind::Rain),
-                    "fog" => Some(WeatherKind::Fog),
-                    "snow" => Some(WeatherKind::Snow),
+                    "clear" => Some(WK::Clear),
+                    "rain" => Some(WK::Rain),
+                    "fog" => Some(WK::Fog),
+                    "snow" => Some(WK::Snow),
                     _ => None,
                 };
                 if let Some(w) = nw { *weather = w; log.push(format!("OK: weather set to {}", arg)); }

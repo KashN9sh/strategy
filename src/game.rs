@@ -42,14 +42,14 @@ pub fn simulate(
     }
 }
 
-pub fn production_weather_penalty(kind: crate::WeatherKind) -> f32 {
-    match kind { crate::WeatherKind::Rain => 0.9, crate::WeatherKind::Fog => 0.95, crate::WeatherKind::Snow => 0.85, _ => 1.0 }
+pub fn production_weather_penalty(kind: crate::types::WeatherKind) -> f32 {
+    match kind { crate::types::WeatherKind::Rain => 0.9, crate::types::WeatherKind::Fog => 0.95, crate::types::WeatherKind::Snow => 0.85, _ => 1.0 }
 }
 
 // Дифференцированный множитель длительности производственного цикла
 // (>1.0 — медленнее, <1.0 — быстрее)
-pub fn production_weather_wmul(weather: crate::WeatherKind, building: BuildingKind) -> f32 {
-    use crate::WeatherKind::*;
+pub fn production_weather_wmul(weather: crate::types::WeatherKind, building: BuildingKind) -> f32 {
+    use crate::types::WeatherKind::*;
     use BuildingKind::*;
     match weather {
         Clear => 1.0,

@@ -70,15 +70,13 @@ pub fn handle_left_click(
         let minus_x = plus_x; let minus_y = plus_y + btn_h + gap;
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, minus_x, minus_y, btn_w, btn_h) {
             // уменьшить масштаб миникарты (не ниже 1px)
-            use std::sync::atomic::Ordering;
-            let cur = super::MINIMAP_CELL_PX.load(Ordering::Relaxed);
-            super::MINIMAP_CELL_PX.store((cur - s.max(1)).max(1), Ordering::Relaxed);
+            let cur = crate::globals::get_minimap_cell_px();
+            crate::globals::set_minimap_cell_px((cur - s.max(1)).max(1));
             return true;
         }
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, plus_x, plus_y, btn_w, btn_h) {
-            use std::sync::atomic::Ordering;
-            let cur = super::MINIMAP_CELL_PX.load(Ordering::Relaxed);
-            super::MINIMAP_CELL_PX.store(cur + s.max(1), Ordering::Relaxed);
+            let cur = crate::globals::get_minimap_cell_px();
+            crate::globals::set_minimap_cell_px(cur + s.max(1));
             return true;
         }
     }
