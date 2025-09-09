@@ -15,7 +15,9 @@ mod ui_interaction;
 mod game;
 use crate::WeatherKind as WK; // доступ к типу для внешних вызовов
 mod palette;
-use pixels::{Pixels, SurfaceTexture};
+mod gpu_renderer;
+use gpu_renderer::GpuRenderer;
+// use pixels::{Pixels, SurfaceTexture}; // заменяем на wgpu
 use std::time::Instant;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -87,16 +89,18 @@ fn main() -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    use std::rc::Rc;
+    use std::sync::Arc;
     let event_loop = EventLoop::new()?;
-    let window = Rc::new(WindowBuilder::new()
+    let window = Arc::new(WindowBuilder::new()
         .with_title("Strategy Isometric Prototype")
         .with_inner_size(LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?);
 
+    // Инициализируем логгер для wgpu
+    env_logger::init();
+
     let size = window.inner_size();
-    let surface_texture = SurfaceTexture::new(size.width, size.height, &*window);
-    let mut pixels = Pixels::new(size.width, size.height, surface_texture)?;
+    let mut gpu_renderer = pollster::block_on(GpuRenderer::new(window.clone()))?;
 
     // Конфиг
     let (config, input) = config::load_or_create("config.toml")?;
@@ -531,8 +535,7 @@ fn run() -> Result<()> {
                 WindowEvent::Resized(new_size) => {
                     width_i32 = new_size.width as i32;
                     height_i32 = new_size.height as i32;
-                    pixels.resize_surface(new_size.width, new_size.height).ok();
-                    pixels.resize_buffer(new_size.width, new_size.height).ok();
+                    gpu_renderer.resize(new_size);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let factor = match delta {
@@ -546,11 +549,6 @@ fn run() -> Result<()> {
                         let s0 = ui::ui_scale(height_i32, config.ui_scale_base);
                         MINIMAP_CELL_PX.store(3 * s0, Ordering::Relaxed);
                     }
-                    let frame = pixels.frame_mut();
-                    clear(frame, [12, 18, 24, 255]);
-
-                    // Центр экрана
-                    let screen_center = IVec2::new(width_i32 / 2, height_i32 / 2);
 
                     // Обновим атлас для текущего зума
                     atlas.ensure_zoom(zoom);
@@ -564,53 +562,36 @@ fn run() -> Result<()> {
                     // Интегрируем готовые чанки (non-blocking)
                     world.integrate_ready_chunks();
 
+                    // Обновляем камеру GPU рендерера
+                    gpu_renderer.update_camera(cam_px.x, cam_px.y, zoom);
+
+                    // Подготавливаем тайлы для GPU рендеринга
+                    gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    
+                    // Подготавливаем структуры (здания и деревья) для GPU рендеринга с правильной сортировкой
+                    if buildings_dirty {
+                        buildings.sort_by_key(|b| b.pos.x + b.pos.y);
+                        buildings_dirty = false;
+                    }
+                    gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
+
+                    // TODO: Временно комментируем CPU рендеринг, пока не реализуем полный GPU пайплайн
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
-                    let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
-                    render::map::draw_terrain_and_overlays(
-                        frame, width_i32, height_i32, &atlas, &mut world,
-                        min_tx, min_ty, max_tx, max_ty,
-                        screen_center, cam_snap,
-                        water_frame,
-                        show_grid || biome_overlay_debug,
-                        show_forest_overlay,
-                        false, // деревья рисуем вместе со зданиями после сортировки
-                        &tree_atlas,
-                        &road_atlas,
-                        !biome_overlay_debug, // когда включён оверлей — отключаем дорогое тонирование
-                    );
+                    let screen_center = IVec2::new(width_i32 / 2, height_i32 / 2);
+                    
+                    // Центр экрана нужен для некоторых функций пока
+                    // let water_frame = ((water_anim_time / 120.0) as usize) % atlas.water_frames.len().max(1);
+                    // render::map::draw_terrain_and_overlays(...);
+                    
+                    // Базовый GPU рендеринг тайлов
 
-                    // Поленья на земле
-                    for li in &logs_on_ground {
-                        if li.carried { continue; }
-                        let mx = li.pos.x; let my = li.pos.y;
-                        if mx < min_tx || my < min_ty || mx > max_tx || my > max_ty { continue; }
-                        let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, mx, my);
-                        render::tiles::draw_log(frame, width_i32, height_i32, screen_pos.x, screen_pos.y - atlas.half_h/4, atlas.half_w, atlas.half_h);
-                    }
+                    // TODO: Временно комментируем рендеринг поленьев
+                    // for li in &logs_on_ground { ... }
 
-                    // Подсветка ховера / призрак здания
-                    if let Some(tp) = screen_to_tile_px(cursor_xy.x, cursor_xy.y, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h) {
-                        // Если активен режим дорог — оставляем прежнюю подсветку клетки
-                        if road_mode {
-                            let screen_pos = render::map::world_to_screen(&atlas, screen_center, cam_snap, tp.x, tp.y);
-                            let hover_off = ((atlas.half_h as f32) * 0.5).round() as i32;
-                            render::tiles::draw_iso_tile_tinted(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 70]);
-                            render::tiles::draw_iso_outline(frame, width_i32, height_i32, screen_pos.x, screen_pos.y + hover_off, atlas.half_w, atlas.half_h, [240, 230, 80, 255]);
-                        } else {
-                            // Рисуем призрак выбранного здания с валидностью
-                            let allowed = ui_interaction::building_allowed_at(&mut world, selected_building, tp);
-                            render::map::draw_building_ghost(
-                                frame, width_i32, height_i32,
-                                &atlas,
-                                selected_building,
-                                tp,
-                                allowed,
-                                screen_center, cam_snap,
-                                &building_atlas,
-                            );
-                        }
-                    }
+                    // TODO: Временно комментируем подсветку ховера / призрак здания
+                    // if let Some(_tp) = screen_to_tile_px(...) { ... }
 
+                    // TODO: Временно комментируем логику предпросмотра дорог
                     // Страховка предпросмотра: при зажатой ЛКМ пересчитываем путь
                     if left_mouse_down && road_mode {
                         if let (Some(anchor), Some(curr)) = (drag_anchor_tile, hovered_tile) {
@@ -624,6 +605,7 @@ fn run() -> Result<()> {
                         }
                     }
 
+                    /* TODO: Временно комментируем весь CPU рендеринг
                     // Отрисовка предпросмотра дороги
                     if left_mouse_down && road_mode && !preview_road_path.is_empty() {
                         let build = drag_road_state.unwrap_or(true);
@@ -651,11 +633,15 @@ fn run() -> Result<()> {
                         screen_center, cam_snap,
                         min_tx, min_ty, max_tx, max_ty,
                     );
+                    */ 
 
-                    // (перенесено ниже, после погодных эффектов/осадков/свечений)
+                    // TODO: Остальные эффекты будут портированы на GPU позже
+                    // - Граждане (цветные кружки)
+                    // - Погодные эффекты (дождь, снег, туман)
+                    // - Ночное освещение (окна домов, факелы)
+                    // - UI рендеринг
 
-                    render::map::draw_citizens(frame, width_i32, height_i32, &atlas, &citizens, &buildings, screen_center, cam_snap, &citizen_sprite, &face_sprites);
-
+                    /* TODO: Портировать на GPU позже
                     // Оверлей день/ночь
                     let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
                     let angle = t * std::f32::consts::TAU;
@@ -899,8 +885,119 @@ fn run() -> Result<()> {
                         // Убрали тултип биома на наведении — показываем эффект в панели здания
                     }
 
-                    if let Err(err) = pixels.render() {
-                        eprintln!("pixels.render() failed: {err}");
+                    ЗАКРЫТО ВРЕМЕННОЕ КОММЕНТИРОВАНИЕ CPU РЕНДЕРИНГА */
+                    
+                    // GPU рендеринг заменяет весь CPU рендеринг
+                    
+                    // UI наложение - портируем полный UI из CPU версии на GPU
+                    if show_ui {
+                        let depot_total_wood: i32 = warehouses.iter().map(|w| w.wood).sum();
+                        let total_visible_wood = resources.wood + depot_total_wood;
+                        // Показ ресурсов как сумма "на руках" + в складах
+                        let visible = Resources {
+                            wood: total_visible_wood,
+                            stone: resources.stone + warehouses.iter().map(|w| w.stone).sum::<i32>(),
+                            clay: resources.clay + warehouses.iter().map(|w| w.clay).sum::<i32>(),
+                            bricks: resources.bricks + warehouses.iter().map(|w| w.bricks).sum::<i32>(),
+                            wheat: resources.wheat + warehouses.iter().map(|w| w.wheat).sum::<i32>(),
+                            flour: resources.flour + warehouses.iter().map(|w| w.flour).sum::<i32>(),
+                            bread: resources.bread + warehouses.iter().map(|w| w.bread).sum::<i32>(),
+                            fish: resources.fish + warehouses.iter().map(|w| w.fish).sum::<i32>(),
+                            gold: resources.gold + warehouses.iter().map(|w| w.gold).sum::<i32>(),
+                            iron_ore: resources.iron_ore + warehouses.iter().map(|w| w.iron_ore).sum::<i32>(),
+                            iron_ingots: resources.iron_ingots + warehouses.iter().map(|w| w.iron_ingots).sum::<i32>(),
+                        };
+                        // Статусы жителей для UI
+                        let mut idle=0; let mut working=0; let mut sleeping=0; let mut hauling=0; let mut fetching=0;
+                        for c in &citizens {
+                            use types::CitizenState::*;
+                            match c.state {
+                                Idle => idle+=1,
+                                Working => working+=1,
+                                Sleeping => sleeping+=1,
+                                GoingToDeposit => hauling+=1,
+                                GoingToFetch => fetching+=1,
+                                GoingToWork | GoingHome => idle+=1,
+                            }
+                        }
+                        let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                        // среднее счастье
+                        let avg_hap: f32 = if citizens.is_empty() { 50.0 } else { citizens.iter().map(|c| c.happiness as i32).sum::<i32>() as f32 / citizens.len() as f32 };
+                        // Жилищная вместимость/занятость
+                        let mut housing_cap = 0; let mut housing_used = 0;
+                        for b in &buildings { if b.kind == BuildingKind::House { housing_cap += b.capacity; } }
+                        for c in &citizens { if buildings.iter().any(|b| b.kind == BuildingKind::House && b.pos == c.home) { housing_used += 1; } }
+                        let pop_show = citizens.len() as i32;
+                        // Параметры погоды для UI: короткий лейбл
+                        let (wlabel, wcol): (&[u8], [u8;4]) = match weather {
+                            WeatherKind::Clear => (b"CLEAR", [180,200,120,255]),
+                            WeatherKind::Rain => (b"RAIN", [90,120,200,255]),
+                            WeatherKind::Fog => (b"FOG", [160,160,160,255]),
+                            WeatherKind::Snow => (b"SNOW", [220,230,255,255]),
+                        };
+
+                        // GPU UI рендеринг с полными данными из игры (как в CPU версии)
+                        gpu_renderer.clear_ui();
+                        
+                        // Верхняя панель (полная высота под две строки ресурсов)
+                        let panel_height = 100.0; 
+                        gpu_renderer.draw_ui_panel(0.0, 0.0, width_i32 as f32, panel_height);
+                        
+                        // Реальные ресурсы из игры (заменяем тестовые иконки)
+                        let icon_size = 16.0;
+                        let start_x = 10.0;
+                        let start_y = 30.0; // вторая строка под FPS/временем
+                        let gap = 70.0;
+                        
+                        // Первая строка ресурсов (основные материалы)
+                        gpu_renderer.draw_ui_resource_icon(start_x, start_y, icon_size, [0.6, 0.4, 0.2, 1.0]); // Дерево
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap, start_y, icon_size, [0.6, 0.6, 0.6, 1.0]); // Камень
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 2.0, start_y, icon_size, [0.8, 0.5, 0.3, 1.0]); // Глина
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 3.0, start_y, icon_size, [0.8, 0.3, 0.2, 1.0]); // Кирпич
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 4.0, start_y, icon_size, [0.9, 0.7, 0.2, 1.0]); // Пшеница
+                        
+                        // Вторая строка ресурсов (производные материалы)
+                        let row2_y = start_y + 25.0;
+                        gpu_renderer.draw_ui_resource_icon(start_x, row2_y, icon_size, [0.9, 0.9, 0.8, 1.0]); // Мука
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap, row2_y, icon_size, [0.9, 0.8, 0.3, 1.0]); // Хлеб
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 2.0, row2_y, icon_size, [0.4, 0.6, 0.8, 1.0]); // Рыба
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 3.0, row2_y, icon_size, [0.3, 0.3, 0.3, 1.0]); // Железная руда
+                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 4.0, row2_y, icon_size, [0.5, 0.5, 0.7, 1.0]); // Железные слитки
+                        
+                        // Статусы граждан справа
+                        let citizen_x = width_i32 as f32 - 300.0;
+                        let citizen_y = 10.0;
+                        let citizen_gap = 50.0;
+                        
+                        // Статусы граждан (цвета из CPU версии)
+                        gpu_renderer.draw_ui_resource_icon(citizen_x, citizen_y, icon_size, [70.0/255.0, 160.0/255.0, 70.0/255.0, 1.0]); // Idle (зеленый)
+                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap, citizen_y, icon_size, [70.0/255.0, 110.0/255.0, 200.0/255.0, 1.0]); // Working (синий)
+                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 2.0, citizen_y, icon_size, [120.0/255.0, 120.0/255.0, 120.0/255.0, 1.0]); // Sleeping (серый)
+                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 3.0, citizen_y, icon_size, [210.0/255.0, 150.0/255.0, 70.0/255.0, 1.0]); // Hauling (оранжевый)
+                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 4.0, citizen_y, icon_size, [80.0/255.0, 200.0/255.0, 200.0/255.0, 1.0]); // Fetching (бирюзовый)
+                        
+                        // Прогресс-бар дня внизу панели (как в CPU версии)
+                        let progress_y = panel_height - 4.0;
+                        let progress_w = (width_i32 as f32 * day_progress).clamp(0.0, width_i32 as f32);
+                        gpu_renderer.add_ui_rect(0.0, progress_y, width_i32 as f32, 4.0, [0.0, 0.0, 0.0, 0.5]); // фон
+                        gpu_renderer.add_ui_rect(0.0, progress_y, progress_w, 4.0, [220.0/255.0, 200.0/255.0, 120.0/255.0, 0.8]); // прогресс
+                        
+                        // TODO: Добавить текст с цифрами ресурсов (следующий шаг)
+                        // TODO: Добавить FPS, время суток в первой строке  
+                        // TODO: Добавить нижнюю панель с кнопками Build/Economy
+                        
+                        if console_open {
+                            // TODO: консоль на GPU
+                        }
+                        // TODO: панели зданий на GPU
+                    } else {
+                        // Если UI выключен, все равно очищаем
+                        gpu_renderer.clear_ui();
+                    }
+                    
+                    // GPU рендеринг
+                    if let Err(err) = gpu_renderer.render() {
+                        eprintln!("gpu_renderer.render() failed: {err}");
                         elwt.exit();
                     }
                 }
