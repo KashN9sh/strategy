@@ -14,9 +14,9 @@ pub fn draw_ui_gpu(
     total_wood: i32,
     population: i32,
     selected: BuildingKind,
-    _fps: f32,
-    _speed: f32,
-    _paused: bool,
+    fps: f32,
+    speed: f32,
+    paused: bool,
     base_scale_k: f32,
     category: UICategory,
     day_progress_01: f32,
@@ -91,10 +91,41 @@ pub fn draw_ui_gpu(
         x += (count.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * scale + gap;
     }
     
-    // Weather icon (справа, перед инфо-блоком)
-    let weather_x = fw as f32 - pad - 200.0; // примерно
-    gpu.draw_ui_resource_icon(weather_x, row1_y, icon_size, weather_icon_col);
-    gpu.draw_text(weather_x + icon_size + 4.0, row1_y + 5.0, weather_label, [230.0/255.0, 230.0/255.0, 230.0/255.0, 1.0], scale);
+    // Правая часть в одну строку: Weather | Day | Speed | FPS
+    let mut right_x = fw as f32 - pad;
+    
+    // FPS (самый правый)
+    let fps_rounded = fps.round() as u32;
+    let fps_num_w = (fps_rounded.to_string().len() as f32 * 4.0 * 2.0 * scale);
+    right_x -= fps_num_w;
+    gpu.draw_number(right_x, row1_y, fps_rounded, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
+    right_x -= 80.0;
+    gpu.draw_text(right_x, row1_y, b"FPS", [180.0/255.0, 180.0/255.0, 180.0/255.0, 1.0], scale);
+    right_x -= gap;
+    
+    // Speed (слева от FPS)
+    let speed_val = (speed * 10.0).round() as u32;
+    let speed_num_w = (speed_val.to_string().len() as f32 * 4.0 * 2.0 * scale);
+    right_x -= speed_num_w;
+    gpu.draw_number(right_x, row1_y, speed_val, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
+    right_x -= 30.0;
+    gpu.draw_text(right_x, row1_y, b"x", [180.0/255.0, 180.0/255.0, 180.0/255.0, 1.0], scale);
+    right_x -= gap;
+    
+    
+    // Weather (слева от Speed)
+    let weather_text_w = weather_label.len() as f32 * 4.0 * 2.0 * scale;
+    right_x -= weather_text_w;
+    gpu.draw_text(right_x, row1_y + 2.0, weather_label, [230.0/255.0, 230.0/255.0, 230.0/255.0, 1.0], scale);
+    right_x -= icon_size + 4.0;
+    gpu.draw_ui_resource_icon(right_x, row1_y, icon_size, weather_icon_col);
+    
+    // PAUSED (если активна, вторая строка)
+    if paused {
+        let paused_x = fw as f32 - pad - 200.0;
+        let paused_y = row1_y + icon_size + 20.0;
+        gpu.draw_text(paused_x, paused_y, b"PAUSED", [255.0/255.0, 120.0/255.0, 120.0/255.0, 1.0], scale);
+    }
     
     // Вторая строка: ресурсы
     let row2_y = row1_y + icon_size + gap;

@@ -946,9 +946,9 @@ fn run() -> Result<()> {
                             visible.wood,
                             pop_show,
                             selected_building,
-                            60.0, // fps (placeholder)
-                            1.0,  // speed (placeholder)
-                            false, // paused (placeholder)
+                            fps_ema,
+                            speed_mult,
+                            paused,
                             config.ui_scale_base,
                             ui_category,
                             day_progress,
