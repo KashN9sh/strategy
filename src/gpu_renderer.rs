@@ -1213,9 +1213,9 @@ impl GpuRenderer {
                     let iso_x = (mx - my) as f32 * half_w;
                     let iso_y = (mx + my) as f32 * half_h;
                     
-                    // Смещение здания вниз как в CPU версии
-                    let building_off = (half_h * 0.7); 
-                    let final_y = iso_y + building_off;
+                    // Смещение здания вверх (на тайле)
+                    let building_off = half_h * 0.7; 
+                    let final_y = iso_y - building_off; // вычитаем, чтобы поднять здание
                     
                     // Матрица трансформации здания (пиксельные координаты)
                     let transform = Mat4::from_scale_rotation_translation(
@@ -1313,7 +1313,7 @@ impl GpuRenderer {
             let transform = Mat4::from_scale_rotation_translation(
                 Vec3::new(citizen_size, citizen_size, 1.0),
                 glam::Quat::IDENTITY,
-                Vec3::new(iso_x, iso_y + y_offset, 0.0),
+                Vec3::new(iso_x, -(iso_y + y_offset), 0.0), // минус как у тайлов и зданий!
             );
             
             let instance = CitizenInstance {
