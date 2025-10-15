@@ -463,7 +463,7 @@ fn run() -> Result<()> {
                     let my = position.y as i32;
                     cursor_xy = IVec2::new(mx, my);
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
-                    hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h);
+                    hovered_tile = screen_to_tile_px(mx, my, width_i32, height_i32, cam_snap, atlas.half_w, atlas.half_h, zoom);
                     if left_mouse_down && road_mode {
                         // считаем только предпросмотр, без применения
                         if drag_anchor_tile.is_none() {
@@ -553,7 +553,7 @@ fn run() -> Result<()> {
                     atlas.ensure_zoom(zoom);
 
                     // Границы видимых тайлов через инверсию проекции
-                    let (min_tx, min_ty, max_tx, max_ty) = visible_tile_bounds_px(width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h);
+                    let (min_tx, min_ty, max_tx, max_ty) = visible_tile_bounds_px(width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h, zoom);
                     // Подготовим процедурный атлас дорог под текущий масштаб
                     road_atlas.ensure_zoom(atlas.half_w, atlas.half_h);
                     // Закажем генерацию колец чанков
@@ -1758,21 +1758,24 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
     }
 }
 
-fn screen_to_tile_px(mx: i32, my: i32, sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i32) -> Option<IVec2> {
-    // экран -> мир (в пикселях изометрии)
-    let dx = (mx - sw / 2) as f32 + cam_px.x;
-    let dy = (my - sh / 2) as f32 + cam_px.y;
+fn screen_to_tile_px(mx: i32, my: i32, sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i32, zoom: f32) -> Option<IVec2> {
+    // экран -> мир (с учетом zoom и камеры)
+    // GPU: world_x = (screen_x - sw/2) / zoom + cam_x
+    //      world_y = -(screen_y - sh/2) / zoom - cam_y  (камера с +cam_y, view матрица)
+    let wx = (mx - sw / 2) as f32 / zoom + cam_px.x;
+    let wy = (my - sh / 2) as f32 / zoom + cam_px.y;
+    
     let a = half_w as f32;
     let b = half_h as f32;
-    // обратное к: screen_x = (x - y)*a, screen_y = (x + y)*b
-    let tx = 0.5 * (dy / b + dx / a);
-    let ty = 0.5 * (dy / b - dx / a);
+    // обратное к изометрической проекции: iso_x = (mx - my)*a, iso_y = (mx + my)*b
+    let tx = 0.5 * (wy / b + wx / a);
+    let ty = 0.5 * (wy / b - wx / a);
     let ix = tx.floor() as i32;
     let iy = ty.floor() as i32;
     Some(IVec2::new(ix, iy))
 }
 
-fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i32) -> (i32, i32, i32, i32) {
+fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i32, zoom: f32) -> (i32, i32, i32, i32) {
     // по четырём углам экрана
     let corners = [
         (0, 0),
@@ -1785,7 +1788,7 @@ fn visible_tile_bounds_px(sw: i32, sh: i32, cam_px: Vec2, half_w: i32, half_h: i
     let mut max_tx = i32::MIN;
     let mut max_ty = i32::MIN;
     for (x, y) in corners {
-            if let Some(tp) = screen_to_tile_px(x, y, sw, sh, cam_px, half_w, half_h) {
+            if let Some(tp) = screen_to_tile_px(x, y, sw, sh, cam_px, half_w, half_h, zoom) {
             min_tx = min_tx.min(tp.x);
             min_ty = min_ty.min(tp.y);
             max_tx = max_tx.max(tp.x);
