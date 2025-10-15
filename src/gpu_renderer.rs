@@ -455,7 +455,7 @@ impl GpuRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         
-        // Загружаем спрайтшит
+        // Загружаем спрайтшит тайлов
         let spritesheet_bytes = include_bytes!("../assets/spritesheet.png");
         let spritesheet_image = image::load_from_memory(spritesheet_bytes)?;
         let spritesheet_rgba = spritesheet_image.to_rgba8();
@@ -503,6 +503,112 @@ impl GpuRenderer {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest, // для пиксельной графики
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
+        // Загружаем текстуру деревьев
+        let trees_bytes = include_bytes!("../assets/trees.png");
+        let trees_image = image::load_from_memory(trees_bytes)?;
+        let trees_rgba = trees_image.to_rgba8();
+        
+        let (trees_width, trees_height) = trees_rgba.dimensions();
+        
+        let trees_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Trees Texture"),
+            size: wgpu::Extent3d {
+                width: trees_width,
+                height: trees_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &trees_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &trees_rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * trees_width),
+                rows_per_image: Some(trees_height),
+            },
+            wgpu::Extent3d {
+                width: trees_width,
+                height: trees_height,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        let trees_view = trees_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let trees_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
+        // Загружаем текстуру зданий
+        let buildings_bytes = include_bytes!("../assets/buildings.png");
+        let buildings_image = image::load_from_memory(buildings_bytes)?;
+        let buildings_rgba = buildings_image.to_rgba8();
+        
+        let (buildings_width, buildings_height) = buildings_rgba.dimensions();
+        
+        let buildings_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Buildings Texture"),
+            size: wgpu::Extent3d {
+                width: buildings_width,
+                height: buildings_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &buildings_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &buildings_rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * buildings_width),
+                rows_per_image: Some(buildings_height),
+            },
+            wgpu::Extent3d {
+                width: buildings_width,
+                height: buildings_height,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        let buildings_view = buildings_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let buildings_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -586,6 +692,40 @@ impl GpuRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // Текстура деревьев
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Текстура зданий
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
             label: Some("texture_bind_group_layout"),
         });
@@ -600,6 +740,22 @@ impl GpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&spritesheet_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&trees_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&trees_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&buildings_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&buildings_sampler),
                 },
             ],
             label: Some("texture_bind_group"),
@@ -1172,8 +1328,8 @@ impl GpuRenderer {
         &mut self, 
         world: &mut crate::world::World, 
         buildings: &Vec<crate::types::Building>,
-        _building_atlas: &Option<crate::atlas::BuildingAtlas>,
-        _tree_atlas: &Option<crate::atlas::TreeAtlas>,
+        building_atlas: &Option<crate::atlas::BuildingAtlas>,
+        tree_atlas: &Option<crate::atlas::TreeAtlas>,
         tile_atlas: &crate::atlas::TileAtlas,
         min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
     ) {
@@ -1197,7 +1353,33 @@ impl GpuRenderer {
         let half_w = tile_atlas.half_w as f32;  
         let half_h = tile_atlas.half_h as f32;
         let tile_w_px = tile_atlas.half_w * 2 + 1;
-        let building_size = tile_w_px as f32; // размер здания = размеру тайла
+        
+        // Размер зданий - масштабируем до размера тайла, сохраняя пропорции
+        let (building_width, building_height) = if let Some(building_atlas) = building_atlas {
+            let original_w = building_atlas.w as f32;
+            let original_h = building_atlas.h as f32;
+            
+            // Масштабируем до размера тайла, сохраняя пропорции
+            let tile_size = tile_w_px as f32;
+            let scale = tile_size / original_w.max(original_h);
+            (original_w * scale, original_h * scale)
+        } else {
+            let tile_size = tile_w_px as f32;
+            (tile_size, tile_size)
+        };
+        
+        // Размер деревьев - масштабируем до размера тайла, сохраняя пропорции
+        let tile_size = tile_w_px as f32;
+        let (tree_width, tree_height) = if let Some(tree_atlas) = tree_atlas {
+            let original_w = tree_atlas.w as f32;
+            let original_h = tree_atlas.h as f32;
+            
+            // Масштабируем до размера тайла, сохраняя пропорции
+            let scale = tile_size / original_w.max(original_h);
+            (original_w * scale, original_h * scale * 0.6)
+        } else {
+            (tile_size, tile_size)
+        };
         
         for s in min_s..=max_s {
             for mx in min_tx..=max_tx {
@@ -1206,8 +1388,34 @@ impl GpuRenderer {
                 
                 // Сначала деревья (рисуем раньше для правильного порядка)
                 if world.has_tree(IVec2::new(mx, my)) {
-                    // TODO: Добавить рендеринг деревьев
-                    // let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as usize;
+                    let stage = world.tree_stage(IVec2::new(mx, my)).unwrap_or(2) as u32;
+                    
+                    // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как в CPU версии)
+                    let iso_x = (mx - my) as f32 * half_w;
+                    let iso_y = (mx + my) as f32 * half_h;
+                    
+                    // Смещение дерева вверх (немного меньше чем здания)
+                    let tree_off = half_h * 3.8; 
+                    // let tree_off = 46.0; 
+                    let final_y = iso_y - tree_off;
+                    
+                    // Матрица трансформации дерева (с правильными пропорциями)
+                    let transform = Mat4::from_scale_rotation_translation(
+                        glam::Vec3::new(tree_width, tree_height, 1.0),
+                        glam::Quat::IDENTITY,
+                        glam::Vec3::new(iso_x, -final_y, 0.0)
+                    );
+                    
+                    // Используем ID 100 + stage для деревьев
+                    let tree_id = 100 + stage;
+                    
+                    let instance = BuildingInstance {
+                        model_matrix: transform.to_cols_array_2d(),
+                        building_id: tree_id,
+                        tint_color: [1.0, 1.0, 1.0, 1.0],
+                        padding: [0; 3],
+                    };
+                    self.building_instances.push(instance);
                 }
                 
                 // Затем здания
@@ -1222,9 +1430,9 @@ impl GpuRenderer {
                     let building_off = half_h * 0.7; 
                     let final_y = iso_y - building_off; // вычитаем, чтобы поднять здание
                     
-                    // Матрица трансформации здания (пиксельные координаты)
+                    // Матрица трансформации здания (с правильными пропорциями)
                     let transform = Mat4::from_scale_rotation_translation(
-                        glam::Vec3::new(building_size, building_size, 1.0), // квадратные здания как тайлы
+                        glam::Vec3::new(building_width, building_height, 1.0),
                         glam::Quat::IDENTITY,
                         glam::Vec3::new(iso_x, -final_y, 0.0) // используем final_y с building_off
                     );

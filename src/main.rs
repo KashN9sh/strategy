@@ -253,6 +253,7 @@ fn run() -> Result<()> {
             }
             sprites.push(out);
         }
+        println!("Загружено {} спрайтов зданий из buildings.png", sprites.len());
         building_atlas = Some(BuildingAtlas { sprites, w: base_w as i32, h: ih as i32 });
     }
     // trees.png: N спрайтов по горизонтали (стадии роста 0..N-1), ширина = base_w (или 64), высота любая

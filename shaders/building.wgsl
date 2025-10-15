@@ -7,11 +7,23 @@ struct CameraUniform {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
-// Текстура spritesheet
+// Текстура spritesheet для тайлов и зданий
 @group(1) @binding(0)
 var t_spritesheet: texture_2d<f32>;
 @group(1) @binding(1)
 var s_spritesheet: sampler;
+
+// Текстура деревьев
+@group(1) @binding(2)
+var t_trees: texture_2d<f32>;
+@group(1) @binding(3)
+var s_trees: sampler;
+
+// Текстура зданий
+@group(1) @binding(4)
+var t_buildings: texture_2d<f32>;
+@group(1) @binding(5)
+var s_buildings: sampler;
 
 // Входящие данные вершины
 struct VertexInput {
@@ -77,57 +89,52 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(in.tint_color.rgb, in.tint_color.a * alpha);
     }
     
-    // Обычные здания
-    var color: vec4<f32>;
-    
-    // Цвета зданий по типу (соответствует BuildingKind enum)
-    switch building_id {
-        case 0u: { // House
-            color = vec4<f32>(0.8, 0.6, 0.4, 1.0); // коричневый
+    // Деревья (ID 100-102 = стадии 0-2) - рендерим из текстуры
+    if building_id >= 100u && building_id <= 102u {
+        let stage = building_id - 100u;
+        
+        // Текстура trees.png содержит 3 спрайта по горизонтали (0, 1, 2)
+        let tree_sprites = 3.0; // количество спрайтов
+        let sprite_x = f32(stage); // номер спрайта по горизонтали
+        
+        // Вычисляем UV координаты для конкретного спрайта дерева
+        let u = (sprite_x + in.tex_coords.x) / tree_sprites;
+        let v = in.tex_coords.y;
+        
+        // Сэмплируем текстуру деревьев
+        let tree_color = textureSample(t_trees, s_trees, vec2<f32>(u, v));
+        
+        // Отбрасываем полностью прозрачные пиксели
+        if tree_color.a < 0.01 {
+            discard;
         }
-        case 1u: { // Lumberjack
-            color = vec4<f32>(0.6, 0.4, 0.2, 1.0); // темно-коричневый
-        }
-        case 2u: { // Warehouse
-            color = vec4<f32>(0.6, 0.6, 0.6, 1.0); // серый
-        }
-        case 3u: { // Forester
-            color = vec4<f32>(0.4, 0.7, 0.3, 1.0); // зеленый
-        }
-        case 4u: { // StoneQuarry
-            color = vec4<f32>(0.7, 0.7, 0.6, 1.0); // светло-серый
-        }
-        case 5u: { // ClayPit
-            color = vec4<f32>(0.8, 0.5, 0.3, 1.0); // глиняный
-        }
-        case 6u: { // Kiln
-            color = vec4<f32>(0.9, 0.4, 0.2, 1.0); // красный
-        }
-        case 7u: { // WheatField
-            color = vec4<f32>(0.9, 0.8, 0.3, 1.0); // желтый
-        }
-        case 8u: { // Mill
-            color = vec4<f32>(0.9, 0.9, 0.8, 1.0); // белый
-        }
-        case 9u: { // Bakery
-            color = vec4<f32>(0.8, 0.7, 0.5, 1.0); // песочный
-        }
-        case 10u: { // Fishery
-            color = vec4<f32>(0.4, 0.6, 0.8, 1.0); // голубой
-        }
-        case 11u: { // IronMine
-            color = vec4<f32>(0.3, 0.3, 0.3, 1.0); // темно-серый
-        }
-        case 12u: { // Smelter
-            color = vec4<f32>(0.8, 0.3, 0.1, 1.0); // оранжевый
-        }
-        default: {
-            color = vec4<f32>(0.5, 0.5, 0.5, 1.0); // серый по умолчанию
-        }
+        
+        // Применяем tint_color
+        return tree_color * in.tint_color;
     }
     
-    // Применяем tint_color
-    color = color * in.tint_color;
+    // Обычные здания (ID 0-12) - рендерим из текстуры
+    if building_id <= 12u {
+        // Текстура buildings.png содержит только первые 6 спрайтов
+        let building_sprites = 6.0; // количество спрайтов в текстуре
+        let sprite_x = f32(building_id % 6u); // циклически используем доступные спрайты
+        
+        // Вычисляем UV координаты для конкретного спрайта здания
+        let u = (sprite_x + in.tex_coords.x) / building_sprites;
+        let v = in.tex_coords.y;
+        
+        // Сэмплируем текстуру зданий
+        let building_color = textureSample(t_buildings, s_buildings, vec2<f32>(u, v));
+        
+        // Отбрасываем полностью прозрачные пиксели
+        if building_color.a < 0.01 {
+            discard;
+        }
+        
+        // Применяем tint_color
+        return building_color * in.tint_color;
+    }
     
-    return color;
+    // Неизвестный ID - серый по умолчанию
+    return vec4<f32>(0.5, 0.5, 0.5, 1.0) * in.tint_color;
 }
