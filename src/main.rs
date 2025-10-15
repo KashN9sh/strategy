@@ -564,8 +564,8 @@ fn run() -> Result<()> {
                     // Обновляем камеру GPU рендерера
                     gpu_renderer.update_camera(cam_px.x, cam_px.y, zoom);
 
-                    // Подготавливаем тайлы для GPU рендеринга
-                    gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    // Подготавливаем тайлы для GPU рендеринга (с подсветкой при наведении)
+                    gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
                     
                     // Подготавливаем структуры (здания и деревья) для GPU рендеринга с правильной сортировкой
                     if buildings_dirty {
@@ -1768,8 +1768,8 @@ fn screen_to_tile_px(mx: i32, my: i32, sw: i32, sh: i32, cam_px: Vec2, half_w: i
     let a = half_w as f32;
     let b = half_h as f32;
     // обратное к изометрической проекции: iso_x = (mx - my)*a, iso_y = (mx + my)*b
-    let tx = 0.5 * (wy / b + wx / a);
-    let ty = 0.5 * (wy / b - wx / a);
+    let tx = 0.5 * (wy / b + wx / a) + 1.0;
+    let ty = 0.5 * (wy / b - wx / a) + 1.0;
     let ix = tx.floor() as i32;
     let iy = ty.floor() as i32;
     Some(IVec2::new(ix, iy))

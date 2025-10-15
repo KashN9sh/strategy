@@ -935,7 +935,7 @@ impl GpuRenderer {
     }
     
     // Подготовка тайлов для рендеринга (пиксельные координаты как в CPU)
-    pub fn prepare_tiles(&mut self, world: &mut World, atlas: &crate::atlas::TileAtlas, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32) {
+    pub fn prepare_tiles(&mut self, world: &mut World, atlas: &crate::atlas::TileAtlas, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32, hovered_tile: Option<glam::IVec2>) {
         self.tile_instances.clear();
         
         // Пиксельные размеры как в CPU версии
@@ -964,7 +964,12 @@ impl GpuRenderer {
                     TileKind::Water => 2,
                 };
                 
-                let tint = [1.0, 1.0, 1.0, 1.0]; // без тинта пока
+                // Подсветка при наведении - желтый тинт
+                let tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
+                    [1.3, 1.3, 0.7, 1.0] // желтоватый
+                } else {
+                    [1.0, 1.0, 1.0, 1.0] // без изменений
+                };
                 
                 self.tile_instances.push(TileInstance {
                     model_matrix: model_matrix.to_cols_array_2d(),

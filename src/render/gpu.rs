@@ -18,6 +18,7 @@ pub fn render_world(
     cam_x: f32,
     cam_y: f32,
     zoom: f32,
+    hovered_tile: Option<glam::IVec2>,
 ) -> anyhow::Result<()> {
     // Определяем видимые тайлы
     let (min_tx, min_ty, max_tx, max_ty) = calculate_visible_tiles(cam_x, cam_y, zoom, tile_atlas);
@@ -25,8 +26,8 @@ pub fn render_world(
     // Обновляем камеру
     gpu.update_camera(cam_x, cam_y, zoom);
     
-    // Подготавливаем тайлы
-    gpu.prepare_tiles(world, tile_atlas, min_tx, min_ty, max_tx, max_ty);
+    // Подготавливаем тайлы (с подсветкой при наведении)
+    gpu.prepare_tiles(world, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
     
     // Подготавливаем здания и деревья
     gpu.prepare_structures(world, buildings, building_atlas, tree_atlas, tile_atlas, min_tx, min_ty, max_tx, max_ty);
