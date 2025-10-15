@@ -35,6 +35,7 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
     @location(1) building_id: u32,
     @location(2) tint_color: vec4<f32>,
+    @location(3) model_pos: vec2<f32>, // позиция в модельном пространстве для кружка
 }
 
 // Вершинный шейдер
@@ -54,6 +55,7 @@ fn vs_main(
     out.tex_coords = model.tex_coords;
     out.building_id = instance.building_id;
     out.tint_color = instance.tint_color;
+    out.model_pos = model.position.xy; // сохраняем позицию для отрисовки кружка
     out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
     return out;
 }
@@ -61,10 +63,21 @@ fn vs_main(
 // Фрагментный шейдер
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Пока используем простые цвета для зданий
-    // Позже добавим текстуры зданий из spritesheet
-    
     let building_id = in.building_id;
+    
+    // building_id = 255 означает гражданина (рендерим как кружок)
+    if building_id == 255u {
+        // Отрисовка кружка: отбрасываем пиксели вне радиуса 0.5
+        let dist = length(in.model_pos);
+        if dist > 0.5 {
+            discard;
+        }
+        // Сглаживание краев кружка
+        let alpha = smoothstep(0.5, 0.45, dist);
+        return vec4<f32>(in.tint_color.rgb, in.tint_color.a * alpha);
+    }
+    
+    // Обычные здания
     var color: vec4<f32>;
     
     // Цвета зданий по типу (соответствует BuildingKind enum)

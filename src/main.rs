@@ -3,8 +3,9 @@ use glam::{IVec2, Vec2};
 mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
 mod world; use world::World;
 mod atlas; use atlas::{TileAtlas, BuildingAtlas};
-mod render { pub mod tiles; pub mod utils; pub mod map; }
+mod render; // GPU rendering module
 mod ui;
+mod ui_gpu; // GPU версия UI
 mod input;
 mod config;
 mod save;
@@ -13,11 +14,9 @@ mod jobs;
 mod controls;
 mod ui_interaction;
 mod game;
-use crate::WeatherKind as WK; // доступ к типу для внешних вызовов
 mod palette;
 mod gpu_renderer;
 use gpu_renderer::GpuRenderer;
-// use pixels::{Pixels, SurfaceTexture}; // заменяем на wgpu
 use std::time::Instant;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -574,6 +573,7 @@ fn run() -> Result<()> {
                         buildings_dirty = false;
                     }
                     gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    gpu_renderer.prepare_citizens(&citizens, &buildings, &atlas);
 
                     // TODO: Временно комментируем CPU рендеринг, пока не реализуем полный GPU пайплайн
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
@@ -936,64 +936,68 @@ fn run() -> Result<()> {
                             WeatherKind::Snow => (b"SNOW", [220,230,255,255]),
                         };
 
-                        // GPU UI рендеринг с полными данными из игры (как в CPU версии)
-                        gpu_renderer.clear_ui();
-                        
-                        // Верхняя панель (полная высота под две строки ресурсов)
-                        let panel_height = 100.0; 
-                        gpu_renderer.draw_ui_panel(0.0, 0.0, width_i32 as f32, panel_height);
-                        
-                        // Реальные ресурсы из игры (заменяем тестовые иконки)
-                        let icon_size = 16.0;
-                        let start_x = 10.0;
-                        let start_y = 30.0; // вторая строка под FPS/временем
-                        let gap = 70.0;
-                        
-                        // Первая строка ресурсов (основные материалы)
-                        gpu_renderer.draw_ui_resource_icon(start_x, start_y, icon_size, [0.6, 0.4, 0.2, 1.0]); // Дерево
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap, start_y, icon_size, [0.6, 0.6, 0.6, 1.0]); // Камень
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 2.0, start_y, icon_size, [0.8, 0.5, 0.3, 1.0]); // Глина
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 3.0, start_y, icon_size, [0.8, 0.3, 0.2, 1.0]); // Кирпич
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 4.0, start_y, icon_size, [0.9, 0.7, 0.2, 1.0]); // Пшеница
-                        
-                        // Вторая строка ресурсов (производные материалы)
-                        let row2_y = start_y + 25.0;
-                        gpu_renderer.draw_ui_resource_icon(start_x, row2_y, icon_size, [0.9, 0.9, 0.8, 1.0]); // Мука
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap, row2_y, icon_size, [0.9, 0.8, 0.3, 1.0]); // Хлеб
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 2.0, row2_y, icon_size, [0.4, 0.6, 0.8, 1.0]); // Рыба
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 3.0, row2_y, icon_size, [0.3, 0.3, 0.3, 1.0]); // Железная руда
-                        gpu_renderer.draw_ui_resource_icon(start_x + gap * 4.0, row2_y, icon_size, [0.5, 0.5, 0.7, 1.0]); // Железные слитки
-                        
-                        // Статусы граждан справа
-                        let citizen_x = width_i32 as f32 - 300.0;
-                        let citizen_y = 10.0;
-                        let citizen_gap = 50.0;
-                        
-                        // Статусы граждан (цвета из CPU версии)
-                        gpu_renderer.draw_ui_resource_icon(citizen_x, citizen_y, icon_size, [70.0/255.0, 160.0/255.0, 70.0/255.0, 1.0]); // Idle (зеленый)
-                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap, citizen_y, icon_size, [70.0/255.0, 110.0/255.0, 200.0/255.0, 1.0]); // Working (синий)
-                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 2.0, citizen_y, icon_size, [120.0/255.0, 120.0/255.0, 120.0/255.0, 1.0]); // Sleeping (серый)
-                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 3.0, citizen_y, icon_size, [210.0/255.0, 150.0/255.0, 70.0/255.0, 1.0]); // Hauling (оранжевый)
-                        gpu_renderer.draw_ui_resource_icon(citizen_x + citizen_gap * 4.0, citizen_y, icon_size, [80.0/255.0, 200.0/255.0, 200.0/255.0, 1.0]); // Fetching (бирюзовый)
-                        
-                        // Прогресс-бар дня внизу панели (как в CPU версии)
-                        let progress_y = panel_height - 4.0;
-                        let progress_w = (width_i32 as f32 * day_progress).clamp(0.0, width_i32 as f32);
-                        gpu_renderer.add_ui_rect(0.0, progress_y, width_i32 as f32, 4.0, [0.0, 0.0, 0.0, 0.5]); // фон
-                        gpu_renderer.add_ui_rect(0.0, progress_y, progress_w, 4.0, [220.0/255.0, 200.0/255.0, 120.0/255.0, 0.8]); // прогресс
-                        
-                        // TODO: Добавить текст с цифрами ресурсов (следующий шаг)
-                        // TODO: Добавить FPS, время суток в первой строке  
-                        // TODO: Добавить нижнюю панель с кнопками Build/Economy
-                        
-                        if console_open {
-                            // TODO: консоль на GPU
-                        }
-                        // TODO: панели зданий на GPU
+                        // GPU UI рендеринг через фабрику ui_gpu
+                        let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
+                        ui_gpu::draw_ui_gpu(
+                            &mut gpu_renderer,
+                            width_i32,
+                            height_i32,
+                            &visible,
+                            visible.wood,
+                            pop_show,
+                            selected_building,
+                            60.0, // fps (placeholder)
+                            1.0,  // speed (placeholder)
+                            false, // paused (placeholder)
+                            config.ui_scale_base,
+                            ui_category,
+                            day_progress,
+                            idle,
+                            working,
+                            sleeping,
+                            hauling,
+                            fetching,
+                            avg_hap,
+                            tax_rate,
+                            ui_tab,
+                            food_policy,
+                            wlabel,
+                            wcol_f32,
+                        );
                     } else {
                         // Если UI выключен, все равно очищаем
                         gpu_renderer.clear_ui();
                     }
+                    
+                    // Ночное освещение (затемнение) - поверх всего
+                    let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                    let angle = t * std::f32::consts::TAU;
+                    let daylight = 0.5 - 0.5 * angle.cos();
+                    let darkness = (1.0 - daylight).max(0.0);
+                    let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
+                    if night_strength > 0 {
+                        let alpha = night_strength as f32 / 255.0;
+                        gpu_renderer.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
+                    }
+                    
+                    // Погодные эффекты (цветные оверлеи)
+                    match weather {
+                        WeatherKind::Clear => {}
+                        WeatherKind::Rain => {
+                            // синий прохладный фильтр
+                            gpu_renderer.apply_screen_tint([40.0/255.0, 60.0/255.0, 100.0/255.0, 40.0/255.0]);
+                        }
+                        WeatherKind::Fog => {
+                            // сероватая дымка
+                            gpu_renderer.apply_screen_tint([160.0/255.0, 160.0/255.0, 160.0/255.0, 50.0/255.0]);
+                            // TODO: добавить анимированный туман
+                        }
+                        WeatherKind::Snow => {
+                            // холодный свет
+                            gpu_renderer.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
+                        }
+                    }
+                    // TODO: добавить частицы осадков (дождь, снег)
                     
                     // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {

@@ -98,6 +98,13 @@ pub struct UIRect {
     color: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct ScreenUniform {
+    screen_size: [f32; 2],
+    padding: [f32; 2],
+}
+
 
 impl TileInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 6] = [
@@ -231,6 +238,61 @@ impl BuildingInstance {
     }
 }
 
+// Структура для рендеринга граждан (используем building shader)
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct CitizenInstance {
+    pub model_matrix: [[f32; 4]; 4],
+    pub building_id: u32, // 255 = citizen marker
+    pub tint_color: [f32; 4],
+}
+
+impl CitizenInstance {
+    const ATTRIBS: [wgpu::VertexAttribute; 6] = [
+        // model_matrix
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 2) as wgpu::BufferAddress,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 3) as wgpu::BufferAddress,
+            shader_location: 5,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        // building_id
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4) as wgpu::BufferAddress,
+            shader_location: 6,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        // tint_color
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+            shader_location: 7,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+    ];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<CitizenInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -292,16 +354,23 @@ pub struct GpuRenderer {
     // Униформы
     camera_uniform: CameraUniform,
     
+    // UI экранные униформы (отдельно от мировой камеры)
+    screen_buffer: wgpu::Buffer,
+    screen_bind_group: wgpu::BindGroup,
+    screen_uniform: ScreenUniform,
+    
     // Текстуры
     texture_bind_group: Option<wgpu::BindGroup>,
     
     // Временные буферы для инстансов
     tile_instances: Vec<TileInstance>,
     building_instances: Vec<BuildingInstance>,
+    citizen_instances: Vec<CitizenInstance>,
     ui_rects: Vec<UIRect>,
     max_instances: usize,
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
+    citizen_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
 }
 
@@ -462,6 +531,42 @@ impl GpuRenderer {
             label: Some("camera_bind_group"),
         });
         
+        // Создаём screen uniform для UI (экранные координаты)
+        let screen_uniform = ScreenUniform {
+            screen_size: [size.width as f32, size.height as f32],
+            padding: [0.0, 0.0],
+        };
+        
+        let screen_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Screen Buffer"),
+            contents: bytemuck::cast_slice(&[screen_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        
+        // Создаём bind group layout для экрана (UI)
+        let screen_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("screen_bind_group_layout"),
+        });
+        
+        let screen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &screen_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_buffer.as_entire_binding(),
+            }],
+            label: Some("screen_bind_group"),
+        });
+        
         // Создаём bind group layout для текстур
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
@@ -557,6 +662,13 @@ impl GpuRenderer {
         let building_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Building Instance Buffer"),
             size: (std::mem::size_of::<BuildingInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let citizen_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Citizen Instance Buffer"),
+            size: (std::mem::size_of::<CitizenInstance>() * max_instances) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -665,10 +777,10 @@ impl GpuRenderer {
             push_constant_ranges: &[],
         });
         
-        // UI Rect пайплайн (только с камерой, без текстур)
+        // UI Rect пайплайн (с экранными координатами, без текстур)
         let ui_rect_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("UI Rect Render Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&screen_bind_group_layout],
             push_constant_ranges: &[],
         });
         
@@ -693,7 +805,7 @@ impl GpuRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,  // Отключаем culling для UI - плоские прямоугольники
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -760,13 +872,18 @@ impl GpuRenderer {
             camera_buffer,
             camera_bind_group,
             camera_uniform,
+            screen_buffer,
+            screen_bind_group,
+            screen_uniform,
             texture_bind_group: Some(texture_bind_group),
             tile_instances: Vec::new(),
             building_instances: Vec::new(),
+            citizen_instances: Vec::new(),
             ui_rects: Vec::new(),
             max_instances,
             tile_instance_buffer,
             building_instance_buffer,
+            citizen_instance_buffer,
             ui_rect_buffer,
         })
     }
@@ -777,6 +894,10 @@ impl GpuRenderer {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            
+            // Обновляем screen_uniform для UI при изменении размера экрана
+            self.screen_uniform.screen_size = [new_size.width as f32, new_size.height as f32];
+            self.queue.write_buffer(&self.screen_buffer, 0, bytemuck::cast_slice(&[self.screen_uniform]));
         }
     }
     
@@ -902,6 +1023,144 @@ impl GpuRenderer {
         // Цветная иконка ресурса
         self.add_ui_rect(x, y, size, size, color);
     }
+    
+    // Применяет полноэкранный tint (для погоды и ночного освещения)
+    pub fn apply_screen_tint(&mut self, color: [f32; 4]) {
+        let w = self.size.width as f32;
+        let h = self.size.height as f32;
+        self.add_ui_rect(0.0, 0.0, w, h, color);
+    }
+    
+    // Bitmap шрифт 3x5 для цифр и букв
+    fn get_glyph_pattern(ch: u8) -> [u8; 15] {
+        match ch.to_ascii_uppercase() {
+            b'0' => [1,1,1, 1,0,1, 1,0,1, 1,0,1, 1,1,1],
+            b'1' => [0,1,0, 1,1,0, 0,1,0, 0,1,0, 1,1,1],
+            b'2' => [1,1,1, 0,0,1, 1,1,1, 1,0,0, 1,1,1],
+            b'3' => [1,1,1, 0,0,1, 0,1,1, 0,0,1, 1,1,1],
+            b'4' => [1,0,1, 1,0,1, 1,1,1, 0,0,1, 0,0,1],
+            b'5' => [1,1,1, 1,0,0, 1,1,1, 0,0,1, 1,1,1],
+            b'6' => [1,1,1, 1,0,0, 1,1,1, 1,0,1, 1,1,1],
+            b'7' => [1,1,1, 0,0,1, 0,1,0, 0,1,0, 0,1,0],
+            b'8' => [1,1,1, 1,0,1, 1,1,1, 1,0,1, 1,1,1],
+            b'9' => [1,1,1, 1,0,1, 1,1,1, 0,0,1, 1,1,1],
+            b'A' => [0,1,0, 1,0,1, 1,1,1, 1,0,1, 1,0,1],
+            b'B' => [1,1,0, 1,0,1, 1,1,0, 1,0,1, 1,1,0],
+            b'C' => [0,1,1, 1,0,0, 1,0,0, 1,0,0, 0,1,1],
+            b'D' => [1,1,0, 1,0,1, 1,0,1, 1,0,1, 1,1,0],
+            b'E' => [1,1,1, 1,0,0, 1,1,0, 1,0,0, 1,1,1],
+            b'F' => [1,1,1, 1,0,0, 1,1,0, 1,0,0, 1,0,0],
+            b'G' => [0,1,1, 1,0,0, 1,0,1, 1,0,1, 0,1,1],
+            b'H' => [1,0,1, 1,0,1, 1,1,1, 1,0,1, 1,0,1],
+            b'I' => [1,1,1, 0,1,0, 0,1,0, 0,1,0, 1,1,1],
+            b'J' => [0,0,1, 0,0,1, 0,0,1, 1,0,1, 0,1,0],
+            b'K' => [1,0,1, 1,1,0, 1,0,0, 1,1,0, 1,0,1],
+            b'L' => [1,0,0, 1,0,0, 1,0,0, 1,0,0, 1,1,1],
+            b'M' => [1,0,1, 1,1,1, 1,0,1, 1,0,1, 1,0,1],
+            b'N' => [1,0,1, 1,1,1, 1,1,1, 1,0,1, 1,0,1],
+            b'O' => [0,1,0, 1,0,1, 1,0,1, 1,0,1, 0,1,0],
+            b'P' => [1,1,0, 1,0,1, 1,1,0, 1,0,0, 1,0,0],
+            b'Q' => [0,1,0, 1,0,1, 1,0,1, 1,1,0, 0,1,1],
+            b'R' => [1,1,0, 1,0,1, 1,1,0, 1,0,1, 1,0,1],
+            b'S' => [0,1,1, 1,0,0, 0,1,0, 0,0,1, 1,1,0],
+            b'T' => [1,1,1, 0,1,0, 0,1,0, 0,1,0, 0,1,0],
+            b'U' => [1,0,1, 1,0,1, 1,0,1, 1,0,1, 0,1,0],
+            b'V' => [1,0,1, 1,0,1, 1,0,1, 1,0,1, 0,1,0],
+            b'W' => [1,0,1, 1,0,1, 1,0,1, 1,1,1, 1,0,1],
+            b'X' => [1,0,1, 1,0,1, 0,1,0, 1,0,1, 1,0,1],
+            b'Y' => [1,0,1, 1,0,1, 0,1,0, 0,1,0, 0,1,0],
+            b'Z' => [1,1,1, 0,0,1, 0,1,0, 1,0,0, 1,1,1],
+            _ => [0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0],
+        }
+    }
+    
+    // Рисует один глиф bitmap шрифта 3x5
+    fn draw_glyph(&mut self, x: f32, y: f32, ch: u8, color: [f32; 4], scale: f32) {
+        let pattern = Self::get_glyph_pattern(ch);
+        let px = 2.0 * scale; // размер одного пикселя глифа
+        
+        for row in 0..5 {
+            for col in 0..3 {
+                if pattern[row * 3 + col] == 1 {
+                    let gx = x + col as f32 * px;
+                    let gy = y + row as f32 * px;
+                    self.add_ui_rect(gx, gy, px, px, color);
+                }
+            }
+        }
+    }
+    
+    // Рисует число (как draw_number в CPU версии)
+    pub fn draw_number(&mut self, x: f32, y: f32, mut n: u32, color: [f32; 4], scale: f32) {
+        let mut digits: [u8; 12] = [0; 12];
+        let mut len = 0;
+        
+        if n == 0 {
+            digits[0] = b'0';
+            len = 1;
+        } else {
+            while n > 0 && len < digits.len() {
+                let d = (n % 10) as u8;
+                n /= 10;
+                digits[len] = b'0' + d;
+                len += 1;
+            }
+        }
+        
+        let px = 2.0 * scale;
+        let char_width = 4.0 * px; // ширина символа с отступом
+        let mut current_x = x;
+        
+        for i in (0..len).rev() {
+            self.draw_glyph(current_x, y, digits[i], color, scale);
+            current_x += char_width;
+        }
+    }
+    
+    // Рисует текст
+    pub fn draw_text(&mut self, x: f32, y: f32, text: &[u8], color: [f32; 4], scale: f32) {
+        let px = 2.0 * scale;
+        let char_width = 4.0 * px;
+        let mut current_x = x;
+        
+        for &ch in text {
+            if ch == b' ' {
+                current_x += char_width;
+                continue;
+            }
+            self.draw_glyph(current_x, y, ch, color, scale);
+            current_x += char_width;
+        }
+    }
+    
+    // Рисует кнопку (прямоугольник с текстом)
+    pub fn draw_button(&mut self, x: f32, y: f32, w: f32, h: f32, text: &[u8], active: bool, scale: f32) {
+        // Цвета кнопки
+        let bg_color = if active { 
+            [185.0/255.0, 140.0/255.0, 95.0/255.0, 220.0/255.0] 
+        } else { 
+            [140.0/255.0, 105.0/255.0, 75.0/255.0, 180.0/255.0] 
+        };
+        
+        // Фон кнопки
+        self.add_ui_rect(x, y, w, h, bg_color);
+        
+        // Верхний блик
+        let band = (2.0 * scale).max(2.0);
+        self.add_ui_rect(x, y, w, band, [1.0, 1.0, 1.0, 0.27]);
+        
+        // Нижняя тень
+        self.add_ui_rect(x, y + h - band, w, band, [0.0, 0.0, 0.0, 0.23]);
+        
+        // Текст по центру
+        let px = 2.0 * scale;
+        let text_w = text.len() as f32 * 4.0 * px;
+        let text_h = 5.0 * px;
+        let text_x = x + (w - text_w) / 2.0;
+        let text_y = y + (h - text_h) / 2.0;
+        
+        self.draw_text(text_x, text_y, text, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
+    }
 
     // Подготовка структур (здания и деревья) для рендеринга с правильной сортировкой
     pub fn prepare_structures(
@@ -1004,6 +1263,78 @@ impl GpuRenderer {
         }
     }
     
+    pub fn prepare_citizens(
+        &mut self,
+        citizens: &Vec<crate::types::Citizen>,
+        buildings: &Vec<crate::types::Building>,
+        tile_atlas: &crate::atlas::TileAtlas,
+    ) {
+        use crate::palette::building_color;
+        use glam::{Mat4, Vec3};
+        
+        self.citizen_instances.clear();
+        
+        let half_w = tile_atlas.half_w as f32;
+        let half_h = tile_atlas.half_h as f32;
+        let citizen_size = (half_w * 0.7).max(12.0); // увеличенный размер маркера для видимости
+        
+        for c in citizens.iter() {
+            // Интерполяция позиции для движущихся граждан (как в CPU версии)
+            let (fx, fy) = if c.moving {
+                let dx = (c.target.x - c.pos.x) as f32;
+                let dy = (c.target.y - c.pos.y) as f32;
+                (c.pos.x as f32 + dx * c.progress, c.pos.y as f32 + dy * c.progress)
+            } else {
+                (c.pos.x as f32, c.pos.y as f32)
+            };
+            
+            // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (аналогично зданиям)
+            let iso_x = (fx - fy) * half_w;
+            let iso_y = (fx + fy) * half_h;
+            
+            // Смещение вверх от базы тайла (как в CPU: base_y - half_h/3)
+            let y_offset = -half_h / 3.0;
+            
+            // Цвет гражданина зависит от места работы
+            let mut col = [255.0/255.0, 230.0/255.0, 120.0/255.0, 1.0]; // желтоватый по умолчанию
+            if let Some(wp) = c.workplace {
+                if let Some(b) = buildings.iter().find(|b| b.pos == wp) {
+                    let bcol = building_color(b.kind);
+                    col = [
+                        bcol[0] as f32 / 255.0,
+                        bcol[1] as f32 / 255.0,
+                        bcol[2] as f32 / 255.0,
+                        1.0,
+                    ];
+                }
+            }
+            
+            // Матрица трансформации для гражданина
+            let transform = Mat4::from_scale_rotation_translation(
+                Vec3::new(citizen_size, citizen_size, 1.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(iso_x, iso_y + y_offset, 0.0),
+            );
+            
+            let instance = CitizenInstance {
+                model_matrix: transform.to_cols_array_2d(),
+                building_id: 255, // специальный ID для граждан
+                tint_color: col,
+            };
+            
+            self.citizen_instances.push(instance);
+        }
+        
+        // Обновляем буфер инстансов граждан
+        if !self.citizen_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.citizen_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.citizen_instances)
+            );
+        }
+    }
+    
     // Основная функция рендеринга
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -1012,6 +1343,15 @@ impl GpuRenderer {
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
+        
+        // Обновляем UI буфер ДО начала render pass
+        if !self.ui_rects.is_empty() {
+            self.queue.write_buffer(
+                &self.ui_rect_buffer,
+                0,
+                bytemuck::cast_slice(&self.ui_rects)
+            );
+        }
         
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1057,22 +1397,26 @@ impl GpuRenderer {
                     render_pass.draw_indexed(0..6, 0, 0..self.building_instances.len() as u32);
                 }
                 
-                // Рендерим UI прямоугольники
-                if !self.ui_rects.is_empty() {
-                    // Обновляем буфер UI инстансов
-                    self.queue.write_buffer(
-                        &self.ui_rect_buffer,
-                        0,
-                        bytemuck::cast_slice(&self.ui_rects)
-                    );
-                    
-                    render_pass.set_pipeline(&self.ui_rect_render_pipeline);
+                // Рендерим граждан (используем тот же pipeline что и для зданий)
+                if !self.citizen_instances.is_empty() {
+                    render_pass.set_pipeline(&self.building_render_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..)); // используем тот же quad
-                    render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(..));
-                    render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.ui_rects.len() as u32);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
+                    render_pass.set_vertex_buffer(1, self.citizen_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.citizen_instances.len() as u32);
                 }
+            }
+            
+            // Рендерим UI прямоугольники ПОСЛЕ карты (буфер уже обновлен до render pass)
+            if !self.ui_rects.is_empty() {
+                render_pass.set_pipeline(&self.ui_rect_render_pipeline);
+                render_pass.set_bind_group(0, &self.screen_bind_group, &[]); // используем экранные координаты
+                render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..)); // используем тот же quad
+                render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(..));
+                render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..6, 0, 0..self.ui_rects.len() as u32);
             }
         }
         
