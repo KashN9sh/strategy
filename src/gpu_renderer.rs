@@ -1362,7 +1362,7 @@ impl GpuRenderer {
             // Масштабируем до размера тайла, сохраняя пропорции
             let tile_size = tile_w_px as f32;
             let scale = tile_size / original_w.max(original_h);
-            (original_w * scale, original_h * scale)
+            (original_w * scale, original_h * scale * 0.5)
         } else {
             let tile_size = tile_w_px as f32;
             (tile_size, tile_size)
@@ -1427,14 +1427,14 @@ impl GpuRenderer {
                     let iso_y = (mx + my) as f32 * half_h;
                     
                     // Смещение здания вверх (на тайле)
-                    let building_off = half_h * 0.7; 
+                    let building_off = half_h * 2.0; 
                     let final_y = iso_y - building_off; // вычитаем, чтобы поднять здание
                     
                     // Матрица трансформации здания (с правильными пропорциями)
                     let transform = Mat4::from_scale_rotation_translation(
                         glam::Vec3::new(building_width, building_height, 1.0),
                         glam::Quat::IDENTITY,
-                        glam::Vec3::new(iso_x, -final_y, 0.0) // используем final_y с building_off
+                        glam::Vec3::new(iso_x, -final_y, 0.0) // используем -final_y как у деревьев
                     );
                     
                     // Конвертируем BuildingKind в u32 ID
