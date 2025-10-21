@@ -198,7 +198,7 @@ pub fn economy_new_day(citizens: &mut Vec<Citizen>, resources: &mut Resources, w
 
 pub fn plan_path(world: &World, c: &mut Citizen, goal: IVec2) {
     c.target = goal;
-    if let Some(path) = crate::path::astar(world, c.pos, goal, 50_000) {
+    if let Some(path) = crate::path::astar(world, c.pos, goal, 100_000) {
         c.path = path;
         c.path_index = 1;
         if c.path_index < c.path.len() {

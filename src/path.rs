@@ -32,11 +32,13 @@ fn tile_cost(world: &World, p: IVec2) -> Option<i32> {
             ch.tiles[(ly * crate::world::CHUNK_W + lx) as usize]
         })
         .unwrap_or(TileKind::Water);
+    
     // Сначала проверяем дорогу: если дорога есть — ходим всегда
     if world.is_road(p) {
         let on_water = matches!(kind, TileKind::Water);
         return Some(if on_water { 2 } else { 1 });
     }
+    
     match kind {
         TileKind::Water => None,
         _ => {

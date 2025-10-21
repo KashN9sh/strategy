@@ -93,6 +93,15 @@ pub struct BuildingInstance {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct RoadInstance {
+    model_matrix: [[f32; 4]; 4],
+    road_mask: u32, // битовая маска соединений (0-15)
+    tint_color: [f32; 4],
+    padding: [u32; 3], // выравнивание до 16 байт
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct UIRect {
     model_matrix: [[f32; 4]; 4],
     color: [f32; 4],
@@ -186,6 +195,52 @@ impl UIRect {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<UIRect>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+impl RoadInstance {
+    const ATTRIBS: [wgpu::VertexAttribute; 6] = [
+        // model_matrix (4 vec4)
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+            shader_location: 5,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        // road_mask
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+            shader_location: 6,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        // tint_color
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress + 4,
+            shader_location: 7,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+    ];
+    
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<RoadInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &Self::ATTRIBS,
         }
@@ -340,6 +395,7 @@ pub struct GpuRenderer {
     // Шейдеры и пайплайны
     tile_render_pipeline: wgpu::RenderPipeline,
     building_render_pipeline: wgpu::RenderPipeline,
+    road_render_pipeline: wgpu::RenderPipeline,
     ui_render_pipeline: wgpu::RenderPipeline,
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
@@ -361,16 +417,21 @@ pub struct GpuRenderer {
     
     // Текстуры
     texture_bind_group: Option<wgpu::BindGroup>,
+    road_texture_bind_group: Option<wgpu::BindGroup>,
     
     // Временные буферы для инстансов
     tile_instances: Vec<TileInstance>,
     building_instances: Vec<BuildingInstance>,
     citizen_instances: Vec<CitizenInstance>,
+    road_instances: Vec<RoadInstance>,
+    road_preview_instances: Vec<RoadInstance>,
     ui_rects: Vec<UIRect>,
     max_instances: usize,
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
     citizen_instance_buffer: wgpu::Buffer,
+    road_instance_buffer: wgpu::Buffer,
+    road_preview_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
 }
 
@@ -829,6 +890,20 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
+        let road_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Road Instance Buffer"),
+            size: (std::mem::size_of::<RoadInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let road_preview_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Road Preview Instance Buffer"),
+            size: (std::mem::size_of::<RoadInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
         let ui_rect_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("UI Rect Buffer"),
             size: (std::mem::size_of::<UIRect>() * max_instances) as wgpu::BufferAddress,
@@ -896,8 +971,44 @@ impl GpuRenderer {
             layout: Some(&building_render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &building_shader,
-                entry_point: "vs_main",
+                entry_point: "vs_main_building",
                 buffers: &[Vertex::desc(), BuildingInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &building_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
+        // Создаём render pipeline для дорог
+        let road_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Road Render Pipeline"),
+            layout: Some(&building_render_pipeline_layout), // используем тот же layout
+            vertex: wgpu::VertexState {
+                module: &building_shader,
+                entry_point: "vs_main_road",
+                buffers: &[Vertex::desc(), RoadInstance::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &building_shader,
@@ -1019,6 +1130,7 @@ impl GpuRenderer {
             size,
             tile_render_pipeline,
             building_render_pipeline,
+            road_render_pipeline,
             ui_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
@@ -1032,14 +1144,19 @@ impl GpuRenderer {
             screen_bind_group,
             screen_uniform,
             texture_bind_group: Some(texture_bind_group),
+            road_texture_bind_group: None,
             tile_instances: Vec::new(),
             building_instances: Vec::new(),
             citizen_instances: Vec::new(),
+            road_instances: Vec::new(),
+            road_preview_instances: Vec::new(),
             ui_rects: Vec::new(),
             max_instances,
             tile_instance_buffer,
             building_instance_buffer,
             citizen_instance_buffer,
+            road_instance_buffer,
+            road_preview_instance_buffer,
             ui_rect_buffer,
         })
     }
@@ -1548,6 +1665,124 @@ impl GpuRenderer {
         }
     }
     
+    pub fn prepare_roads(
+        &mut self,
+        world: &mut crate::world::World,
+        road_atlas: &crate::atlas::RoadAtlas,
+        tile_atlas: &crate::atlas::TileAtlas,
+        min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+    ) {
+        use glam::{Mat4, Vec3};
+        
+        self.road_instances.clear();
+        
+        let half_w = tile_atlas.half_w as f32;
+        let half_h = tile_atlas.half_h as f32;
+        
+        // Проходим по всем видимым тайлам и ищем дороги
+        for mx in min_tx..=max_tx {
+            for my in min_ty..=max_ty {
+                if !world.is_road(glam::IVec2::new(mx, my)) { continue; }
+                
+                // Вычисляем маску соединений дороги (как в CPU версии)
+                let mut mask = 0u8;
+                if world.is_road(glam::IVec2::new(mx, my - 1)) { mask |= 0b0001; } // север
+                if world.is_road(glam::IVec2::new(mx + 1, my)) { mask |= 0b0010; } // восток  
+                if world.is_road(glam::IVec2::new(mx, my + 1)) { mask |= 0b0100; } // юг
+                if world.is_road(glam::IVec2::new(mx - 1, my)) { mask |= 0b1000; } // запад
+                
+                // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как у зданий)
+                let iso_x = (mx - my) as f32 * half_w;
+                let iso_y = (mx + my) as f32 * half_h;
+                
+                // Матрица трансформации дороги (размер как у тайла)
+                let transform = Mat4::from_scale_rotation_translation(
+                    Vec3::new(half_w * 2.0, half_h * 2.0, 1.0),
+                    glam::Quat::IDENTITY,
+                    Vec3::new(iso_x, -iso_y, 0.0), // минус как у зданий
+                );
+                
+                let instance = RoadInstance {
+                    model_matrix: transform.to_cols_array_2d(),
+                    road_mask: mask as u32,
+                    tint_color: [1.0, 1.0, 1.0, 1.0], // белый цвет по умолчанию
+                    padding: [0; 3],
+                };
+                
+                self.road_instances.push(instance);
+            }
+        }
+        
+        // Обновляем буфер инстансов дорог
+        if !self.road_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.road_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.road_instances)
+            );
+        }
+    }
+    
+    pub fn clear_road_preview(&mut self) {
+        self.road_preview_instances.clear();
+    }
+    
+    pub fn prepare_road_preview(
+        &mut self,
+        preview_path: &[glam::IVec2],
+        is_building: bool,
+        tile_atlas: &crate::atlas::TileAtlas,
+    ) {
+        use glam::{Mat4, Vec3};
+        
+        self.road_preview_instances.clear();
+        
+        if preview_path.is_empty() {
+            return;
+        }
+        
+        let half_w = tile_atlas.half_w as f32;
+        let half_h = tile_atlas.half_h as f32;
+        
+        // Цвета для предпросмотра (как в CPU версии)
+        let tint_color = if is_building {
+            [0.47, 0.78, 0.47, 0.35] // зеленоватый для строительства
+        } else {
+            [0.78, 0.39, 0.39, 0.35] // красноватый для удаления
+        };
+        
+        for &pos in preview_path.iter() {
+            // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как у обычных дорог)
+            let iso_x = (pos.x - pos.y) as f32 * half_w;
+            let iso_y = (pos.x + pos.y) as f32 * half_h;
+            
+            // Матрица трансформации дороги (размер как у тайла)
+            let transform = Mat4::from_scale_rotation_translation(
+                Vec3::new(half_w * 2.0, half_h * 2.0, 1.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(iso_x, -iso_y, 0.0), // минус как у зданий
+            );
+            
+            let instance = RoadInstance {
+                model_matrix: transform.to_cols_array_2d(),
+                road_mask: 0, // простая маска для предпросмотра
+                tint_color,
+                padding: [0; 3],
+            };
+            
+            self.road_preview_instances.push(instance);
+        }
+        
+        // Обновляем буфер инстансов предпросмотра дорог
+        if !self.road_preview_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.road_preview_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.road_preview_instances)
+            );
+        }
+    }
+    
     // Основная функция рендеринга
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -1599,6 +1834,17 @@ impl GpuRenderer {
                     render_pass.draw_indexed(0..6, 0, 0..self.tile_instances.len() as u32);
                 }
                 
+                // Рендерим дороги (сразу после тайлов, но перед зданиями)
+                if !self.road_instances.is_empty() {
+                    render_pass.set_pipeline(&self.road_render_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
+                    render_pass.set_vertex_buffer(1, self.road_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.road_instances.len() as u32);
+                }
+                
                 // Рендерим здания
                 if !self.building_instances.is_empty() {
                     render_pass.set_pipeline(&self.building_render_pipeline);
@@ -1619,6 +1865,17 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(1, self.citizen_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     render_pass.draw_indexed(0..6, 0, 0..self.citizen_instances.len() as u32);
+                }
+                
+                // Рендерим предпросмотр дорог (поверх зданий и граждан)
+                if !self.road_preview_instances.is_empty() {
+                    render_pass.set_pipeline(&self.road_render_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
+                    render_pass.set_vertex_buffer(1, self.road_preview_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.road_preview_instances.len() as u32);
                 }
             }
             

@@ -31,13 +31,23 @@ struct VertexInput {
     @location(1) tex_coords: vec2<f32>,
 }
 
-// Входящие данные инстанса
-struct InstanceInput {
+// Входящие данные инстанса зданий
+struct BuildingInstanceInput {
     @location(2) model_matrix_0: vec4<f32>,
     @location(3) model_matrix_1: vec4<f32>,
     @location(4) model_matrix_2: vec4<f32>,
     @location(5) model_matrix_3: vec4<f32>,
     @location(6) building_id: u32,
+    @location(7) tint_color: vec4<f32>,
+}
+
+// Входящие данные инстанса дорог
+struct RoadInstanceInput {
+    @location(2) model_matrix_0: vec4<f32>,
+    @location(3) model_matrix_1: vec4<f32>,
+    @location(4) model_matrix_2: vec4<f32>,
+    @location(5) model_matrix_3: vec4<f32>,
+    @location(6) road_mask: u32,
     @location(7) tint_color: vec4<f32>,
 }
 
@@ -50,11 +60,11 @@ struct VertexOutput {
     @location(3) model_pos: vec2<f32>, // позиция в модельном пространстве для кружка
 }
 
-// Вершинный шейдер
+// Вершинный шейдер для зданий
 @vertex
-fn vs_main(
+fn vs_main_building(
     model: VertexInput,
-    instance: InstanceInput,
+    instance: BuildingInstanceInput,
 ) -> VertexOutput {
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
@@ -68,6 +78,28 @@ fn vs_main(
     out.building_id = instance.building_id;
     out.tint_color = instance.tint_color;
     out.model_pos = model.position.xy; // сохраняем позицию для отрисовки кружка
+    out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
+    return out;
+}
+
+// Вершинный шейдер для дорог
+@vertex
+fn vs_main_road(
+    model: VertexInput,
+    instance: RoadInstanceInput,
+) -> VertexOutput {
+    let model_matrix = mat4x4<f32>(
+        instance.model_matrix_0,
+        instance.model_matrix_1,
+        instance.model_matrix_2,
+        instance.model_matrix_3,
+    );
+    
+    var out: VertexOutput;
+    out.tex_coords = model.tex_coords;
+    out.building_id = 200 + instance.road_mask; // специальный ID для дорог (200+)
+    out.tint_color = instance.tint_color;
+    out.model_pos = model.position.xy;
     out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
     return out;
 }
@@ -133,6 +165,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         
         // Применяем tint_color
         return building_color * in.tint_color;
+    }
+    
+    // Дороги (ID 200-215) - рендерим процедурно
+    if building_id >= 200u && building_id <= 215u {
+        let road_mask = building_id - 200u;
+        
+        // Процедурная отрисовка дороги на основе маски соединений
+        // Пока используем простую заливку, позже можно добавить текстуру
+        let road_color = vec3<f32>(0.47, 0.43, 0.35); // коричневатый цвет дороги
+        
+        // Простая ромбическая форма дороги
+        let dist = length(in.model_pos);
+        if dist > 0.5 {
+            discard;
+        }
+        
+        // Применяем tint_color
+        return vec4<f32>(road_color, 1.0) * in.tint_color;
     }
     
     // Неизвестный ID - серый по умолчанию

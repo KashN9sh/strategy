@@ -524,6 +524,8 @@ fn run() -> Result<()> {
                         if road_mode {
                             if let Some(on) = drag_road_state {
                                 for p in preview_road_path.iter() { world.set_road(*p, on); }
+                                // Очищаем предпросмотр дорог после применения
+                                gpu_renderer.clear_road_preview();
                             }
                         }
                         drag_prev_tile = None;
@@ -575,6 +577,13 @@ fn run() -> Result<()> {
                     }
                     gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
                     gpu_renderer.prepare_citizens(&citizens, &buildings, &atlas);
+                    gpu_renderer.prepare_roads(&mut world, &road_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    
+                    // Предпросмотр дорог при перетаскивании
+                    if left_mouse_down && road_mode && !preview_road_path.is_empty() {
+                        let is_building = drag_road_state.unwrap_or(true);
+                        gpu_renderer.prepare_road_preview(&preview_road_path, is_building, &atlas);
+                    }
 
                     // TODO: Временно комментируем CPU рендеринг, пока не реализуем полный GPU пайплайн
                     let cam_snap = Vec2::new(cam_px.x.round(), cam_px.y.round());
