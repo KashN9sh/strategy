@@ -252,4 +252,243 @@ pub fn handle_left_click(
     false
 }
 
+/// Определяет, на какую кнопку наведен курсор (для тултипов)
+pub fn get_hovered_button(
+    cursor_xy: IVec2,
+    width_i32: i32,
+    height_i32: i32,
+    config: &Config,
+    ui_category: ui::UICategory,
+    ui_tab: ui::UITab,
+    paused: bool,
+    speed_mult: f32,
+) -> Option<&'static str> {
+    let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
+    let bottom_bar_h = ui::bottom_panel_height(ui_s);
+    let by0 = height_i32 - bottom_bar_h;
+    let padb = 8 * ui_s;
+    let btn_h = 18 * ui_s;
+    
+    // Кнопки управления (пауза, скорость)
+    let control_btn_w = ui::button_w_for(b"Pause", ui_s);
+    let control_x = width_i32 - padb - control_btn_w * 4 - 6 * ui_s * 3;
+    let control_y = by0 + padb;
+    
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, control_x, control_y, control_btn_w, btn_h) {
+        return Some(if paused { "Resume" } else { "Pause" });
+    }
+    
+    let speed_btn_w = ui::button_w_for(b"1x", ui_s);
+    let speed_x = control_x + control_btn_w + 6 * ui_s;
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, speed_x, control_y, speed_btn_w, btn_h) {
+        return Some("Speed 1x");
+    }
+    
+    let speed2_x = speed_x + speed_btn_w + 6 * ui_s;
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, speed2_x, control_y, speed_btn_w, btn_h) {
+        return Some("Speed 2x");
+    }
+    
+    let speed4_x = speed2_x + speed_btn_w + 6 * ui_s;
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, speed4_x, control_y, speed_btn_w, btn_h) {
+        return Some("Speed 4x");
+    }
+    
+    // Вкладки
+    let build_w = ui::button_w_for(b"Build", ui_s);
+    let econ_w = ui::button_w_for(b"Economy", ui_s);
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb, by0 + padb, build_w, btn_h) {
+        return Some("Build Tab");
+    }
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb + build_w + 6 * ui_s, by0 + padb, econ_w, btn_h) {
+        return Some("Economy Tab");
+    }
+    
+    // Если вкладка Economy — контролы экономики
+    if ui_tab == ui::UITab::Economy {
+        let lay = ui::layout_economy_panel(width_i32, height_i32, ui_s);
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h) {
+            return Some("Decrease Tax");
+        }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h) {
+            return Some("Increase Tax");
+        }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h) {
+            return Some("Balanced Food Policy");
+        }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h) {
+            return Some("Bread First Policy");
+        }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h) {
+            return Some("Fish First Policy");
+        }
+    }
+    
+    // Категории зданий
+    let cats = [
+        (ui::UICategory::Housing, "Housing"),
+        (ui::UICategory::Storage, "Storage"),
+        (ui::UICategory::Forestry, "Forestry"),
+        (ui::UICategory::Mining, "Mining"),
+        (ui::UICategory::Food, "Food"),
+        (ui::UICategory::Logistics, "Logistics"),
+    ];
+    let row_y = [by0 + padb + btn_h + 6 * ui_s, by0 + padb + (btn_h + 6 * ui_s) * 2];
+    let mut row: usize = 0;
+    let mut cx = padb;
+    for (cat, label) in cats.iter() {
+        let bw = ui::button_w_for(label.as_bytes(), ui_s);
+        if cx + bw > width_i32 - padb { 
+            row = (row + 1).min(row_y.len()-1); 
+            cx = padb; 
+        }
+        let y = row_y[row];
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, y, bw, btn_h) {
+            return Some(label);
+        }
+        cx += bw + 6 * ui_s;
+    }
+    
+    // Здания выбранной категории
+    let mut bx = padb;
+    let by2 = by0 + padb + (btn_h + 6 * ui_s) * 2;
+    let buildings_for_cat: &[BuildingKind] = match ui_category {
+        ui::UICategory::Housing => &[BuildingKind::House],
+        ui::UICategory::Storage => &[BuildingKind::Warehouse],
+        ui::UICategory::Forestry => &[BuildingKind::Lumberjack, BuildingKind::Forester],
+        ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln],
+        ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
+        ui::UICategory::Logistics => &[],
+    };
+    for &bk in buildings_for_cat.iter() {
+        let label = match bk {
+            BuildingKind::Lumberjack => "Lumberjack",
+            BuildingKind::House => "House",
+            BuildingKind::Warehouse => "Warehouse",
+            BuildingKind::Forester => "Forester",
+            BuildingKind::StoneQuarry => "Stone Quarry",
+            BuildingKind::ClayPit => "Clay Pit",
+            BuildingKind::Kiln => "Kiln",
+            BuildingKind::WheatField => "Wheat Field",
+            BuildingKind::Mill => "Mill",
+            BuildingKind::Bakery => "Bakery",
+            BuildingKind::Fishery => "Fishery",
+            BuildingKind::IronMine => "Iron Mine",
+            BuildingKind::Smelter => "Smelter",
+        };
+        let bw = ui::button_w_for(label.as_bytes(), ui_s);
+        if bx + bw > width_i32 - padb { break; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) {
+            return Some(label);
+        }
+        bx += bw + 6 * ui_s;
+    }
+    
+    None
+}
+
+/// Определяет, на какой ресурс наведен курсор (для тултипов)
+pub fn get_hovered_resource(
+    cursor_xy: IVec2,
+    width_i32: i32,
+    height_i32: i32,
+    config: &Config,
+    resources: &Resources,
+    total_wood: i32,
+    population: i32,
+    avg_happiness: f32,
+    tax_rate: f32,
+    citizens_idle: i32,
+    citizens_working: i32,
+    citizens_sleeping: i32,
+    citizens_hauling: i32,
+    citizens_fetching: i32,
+) -> Option<&'static str> {
+    let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
+    let panel_height = ui::top_panel_height(ui_s);
+    let pad = (8 * ui_s) as f32;
+    let icon_size = (10 * ui_s) as f32;
+    let gap = (6 * ui_s) as f32;
+    
+    // Проверяем, что курсор в верхней панели
+    if cursor_xy.y < panel_height {
+        let row1_y = pad;
+        let row2_y = row1_y + icon_size + gap;
+        let mut x = pad;
+        
+        // Первая строка: Population, Gold, Happiness, Tax, статусы граждан
+        // Population
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row1_y as i32, icon_size as i32, icon_size as i32) {
+            return Some("Population");
+        }
+        x += icon_size + 4.0;
+        x += ((population.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32)) + gap;
+        
+        // Gold
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row1_y as i32, icon_size as i32, icon_size as i32) {
+            return Some("Gold");
+        }
+        x += icon_size + 4.0;
+        x += ((resources.gold.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32)) + gap;
+        
+        // Happiness
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row1_y as i32, icon_size as i32, icon_size as i32) {
+            return Some("Happiness");
+        }
+        x += icon_size + 4.0;
+        let hap = avg_happiness.round().clamp(0.0, 100.0) as u32;
+        x += (hap.to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32)) + gap;
+        
+        // Tax
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row1_y as i32, icon_size as i32, icon_size as i32) {
+            return Some("Tax");
+        }
+        x += icon_size + 4.0;
+        let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
+        x += (taxp.to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32)) + gap;
+        
+        // Citizen status icons
+        let stat_icons = [
+            ("Idle", citizens_idle),
+            ("Working", citizens_working),
+            ("Sleeping", citizens_sleeping),
+            ("Hauling", citizens_hauling),
+            ("Fetching", citizens_fetching),
+        ];
+        
+        for (name, count) in stat_icons {
+            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row1_y as i32, icon_size as i32, icon_size as i32) {
+                return Some(name);
+            }
+            x += icon_size + 4.0;
+            x += (count.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32) + gap;
+        }
+        
+        // Вторая строка: ресурсы
+        x = pad;
+        let resources_list = [
+            ("Wood", total_wood),
+            ("Stone", resources.stone),
+            ("Clay", resources.clay),
+            ("Bricks", resources.bricks),
+            ("Wheat", resources.wheat),
+            ("Flour", resources.flour),
+            ("Bread", resources.bread),
+            ("Fish", resources.fish),
+            ("Iron Ore", resources.iron_ore),
+            ("Iron Ingots", resources.iron_ingots),
+        ];
+        
+        for (name, amount) in resources_list {
+            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, x as i32, row2_y as i32, icon_size as i32, icon_size as i32) {
+                return Some(name);
+            }
+            x += icon_size + 4.0;
+            x += (amount.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32) + gap;
+        }
+    }
+    
+    None
+}
+
 

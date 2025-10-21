@@ -920,6 +920,7 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
+        
 
         // Создаём render pipeline для тайлов с текстурами
         let tile_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

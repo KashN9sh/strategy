@@ -37,6 +37,12 @@ pub fn draw_ui_gpu(
     cam_x: f32,
     cam_y: f32,
     cell_size: i32,
+    // Данные для тултипов
+    cursor_x: f32,
+    cursor_y: f32,
+    hovered_building: Option<crate::types::Building>,
+    hovered_button: Option<&'static str>,
+    hovered_resource: Option<&'static str>,
 ) {
     gpu.clear_ui();
     
@@ -291,5 +297,292 @@ pub fn draw_ui_gpu(
         widget_w as i32, widget_h as i32,
         cell_size,
     );
+    
+    // === ТУЛТИПЫ ===
+    if let Some(building) = hovered_building {
+        // Подсчитываем работников для этого здания
+        let workers_current = 0; // TODO: подсчитать реальных работников
+        let workers_target = building.workers_target;
+        
+        draw_building_tooltip(
+            gpu,
+            cursor_x,
+            cursor_y,
+            building.kind,
+            workers_current,
+            workers_target,
+            scale,
+            fw as f32,
+            fh as f32,
+        );
+    } else if let Some(button_text) = hovered_button {
+        draw_button_tooltip(
+            gpu,
+            cursor_x,
+            cursor_y,
+            button_text,
+            scale,
+            fw as f32,
+            fh as f32,
+        );
+    } else if let Some(resource_name) = hovered_resource {
+        draw_resource_tooltip(
+            gpu,
+            cursor_x,
+            cursor_y,
+            resource_name,
+            resources,
+            total_wood,
+            population,
+            avg_happiness,
+            tax_rate,
+            citizens_idle,
+            citizens_working,
+            citizens_sleeping,
+            citizens_hauling,
+            citizens_fetching,
+            scale,
+            fw as f32,
+            fh as f32,
+        );
+    }
+}
+
+/// Рендеринг тултипа для здания
+pub fn draw_building_tooltip(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    building_kind: BuildingKind,
+    workers_current: i32,
+    workers_target: i32,
+    scale: f32,
+    screen_width: f32,
+    screen_height: f32,
+) {
+    let s = scale as i32;
+    let pad = (4 * s) as f32;
+    let line_height = (12 * s) as f32;
+    
+    // Получаем информацию о здании
+    let (name, prod, cons) = match building_kind {
+        BuildingKind::House => ("House", "Housing", None),
+        BuildingKind::Warehouse => ("Warehouse", "Storage", None),
+        BuildingKind::Lumberjack => ("Lumberjack", "+ Wood", None),
+        BuildingKind::Forester => ("Forester", "Forestry", None),
+        BuildingKind::StoneQuarry => ("Stone Quarry", "+ Stone", None),
+        BuildingKind::ClayPit => ("Clay Pit", "+ Clay", None),
+        BuildingKind::Kiln => ("Kiln", "+ Bricks", Some("- Clay, - Wood")),
+        BuildingKind::IronMine => ("Iron Mine", "+ Iron Ore", None),
+        BuildingKind::WheatField => ("Wheat Field", "+ Wheat", None),
+        BuildingKind::Mill => ("Mill", "+ Flour", Some("- Wheat")),
+        BuildingKind::Bakery => ("Bakery", "+ Bread", Some("- Flour, - Wood")),
+        BuildingKind::Smelter => ("Smelter", "+ Iron Ingot", Some("- Iron Ore, - Wood")),
+        BuildingKind::Fishery => ("Fishery", "+ Fish", None),
+    };
+    
+    // Вычисляем размер тултипа
+    let name_w = (name.len() as f32 * 4.0 * 2.0 * scale);
+    let prod_w = (prod.len() as f32 * 4.0 * 2.0 * scale);
+    let cons_w = cons.map(|c| (c.len() as f32 * 4.0 * 2.0 * scale)).unwrap_or(0.0);
+    let workers_w = (format!("Workers: {}/{}", workers_current, workers_target).len() as f32 * 4.0 * 2.0 * scale);
+    
+    let tooltip_w = [name_w, prod_w, cons_w, workers_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    let tooltip_h = line_height * 4.0 + pad * 2.0;
+    
+    // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
+    let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
+    let tooltip_y = (y - tooltip_h - 10.0).max(10.0);
+    
+    // Фон тултипа
+    gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.1, 0.1, 0.1, 0.9]);
+    gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.8]);
+    
+    // Текст тултипа
+    let mut text_y = tooltip_y + pad;
+    
+    // Название здания
+    gpu.draw_text(tooltip_x + pad, text_y, name.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale);
+    text_y += line_height;
+    
+    // Производство
+    gpu.draw_text(tooltip_x + pad, text_y, prod.as_bytes(), [0.7, 1.0, 0.7, 1.0], scale);
+    text_y += line_height;
+    
+    // Потребление
+    if let Some(cons_text) = cons {
+        gpu.draw_text(tooltip_x + pad, text_y, cons_text.as_bytes(), [1.0, 0.7, 0.7, 1.0], scale);
+        text_y += line_height;
+    }
+    
+    // Работники
+    let workers_text = format!("Workers: {}/{}", workers_current, workers_target);
+    gpu.draw_text(tooltip_x + pad, text_y, workers_text.as_bytes(), [1.0, 1.0, 0.7, 1.0], scale);
+}
+
+/// Рендеринг тултипа для кнопки интерфейса
+pub fn draw_button_tooltip(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    button_text: &str,
+    scale: f32,
+    screen_width: f32,
+    screen_height: f32,
+) {
+    let s = scale as i32;
+    let pad = (4 * s) as f32;
+    let line_height = (12 * s) as f32;
+    
+    // Получаем информацию о кнопке
+    let (name, description) = match button_text {
+        // Здания
+        "Lumberjack" => ("Lumberjack", "Produces wood from trees. Requires workers."),
+        "Forester" => ("Forester", "Plants new trees. Requires workers."),
+        "Stone Quarry" => ("Stone Quarry", "Mines stone from deposits. Requires workers."),
+        "Clay Pit" => ("Clay Pit", "Mines clay from deposits. Requires workers."),
+        "Iron Mine" => ("Iron Mine", "Mines iron ore from deposits. Requires workers."),
+        "Wheat Field" => ("Wheat Field", "Grows wheat for food. Requires workers."),
+        "Mill" => ("Mill", "Processes wheat into flour. Requires workers."),
+        "Bakery" => ("Bakery", "Bakes bread from flour. Requires workers."),
+        "Kiln" => ("Kiln", "Bakes clay into bricks. Requires workers."),
+        "Smelter" => ("Smelter", "Smelts iron ore into iron ingots. Requires workers."),
+        "Fishery" => ("Fishery", "Catches fish from water. Requires workers."),
+        "House" => ("House", "Provides housing for citizens."),
+        "Warehouse" => ("Warehouse", "Stores resources and goods."),
+        
+        // Управление
+        "Pause" => ("Pause", "Pause/unpause the game."),
+        "Resume" => ("Resume", "Resume the game."),
+        "Speed 1x" => ("Speed 1x", "Set game speed to normal."),
+        "Speed 2x" => ("Speed 2x", "Set game speed to 2x."),
+        "Speed 4x" => ("Speed 4x", "Set game speed to 4x."),
+        
+        // Вкладки
+        "Build Tab" => ("Build Tab", "Switch to building construction mode."),
+        "Economy Tab" => ("Economy Tab", "Switch to economy management mode."),
+        
+        // Категории
+        "Housing" => ("Housing", "Buildings for citizen housing."),
+        "Storage" => ("Storage", "Buildings for resource storage."),
+        "Forestry" => ("Forestry", "Buildings for wood production."),
+        "Mining" => ("Mining", "Buildings for resource extraction."),
+        "Food" => ("Food", "Buildings for food production."),
+        "Logistics" => ("Logistics", "Buildings for transportation."),
+        
+        // Экономика
+        "Decrease Tax" => ("Decrease Tax", "Lower the tax rate."),
+        "Increase Tax" => ("Increase Tax", "Raise the tax rate."),
+        "Balanced Food Policy" => ("Balanced Food Policy", "Equal distribution of bread and fish."),
+        "Bread First Policy" => ("Bread First Policy", "Prioritize bread distribution."),
+        "Fish First Policy" => ("Fish First Policy", "Prioritize fish distribution."),
+        
+        _ => (button_text, "Click to interact."),
+    };
+    
+    // Вычисляем размер тултипа
+    let name_w = name.len() as f32 * 4.0 * 2.0 * scale;
+    let desc_w = description.len() as f32 * 4.0 * 2.0 * scale;
+    
+    let tooltip_w = [name_w, desc_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    let tooltip_h = line_height * 2.0 + pad * 2.0;
+    
+    // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
+    let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
+    let tooltip_y = (y - tooltip_h - 10.0).max(10.0);
+    
+    // Фон тултипа
+    gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.1, 0.1, 0.1, 0.9]);
+    gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.8]);
+    
+    // Текст тултипа
+    let mut text_y = tooltip_y + pad;
+    
+    // Название кнопки
+    gpu.draw_text(tooltip_x + pad, text_y, name.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale);
+    text_y += line_height;
+    
+    // Описание
+    gpu.draw_text(tooltip_x + pad, text_y, description.as_bytes(), [0.8, 0.8, 0.8, 1.0], scale);
+}
+
+/// Рендеринг тултипа для ресурса
+pub fn draw_resource_tooltip(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    resource_name: &str,
+    resources: &Resources,
+    total_wood: i32,
+    population: i32,
+    avg_happiness: f32,
+    tax_rate: f32,
+    citizens_idle: i32,
+    citizens_working: i32,
+    citizens_sleeping: i32,
+    citizens_hauling: i32,
+    citizens_fetching: i32,
+    scale: f32,
+    screen_width: f32,
+    screen_height: f32,
+) {
+    let s = scale as i32;
+    let pad = (4 * s) as f32;
+    let line_height = (12 * s) as f32;
+    
+    // Получаем информацию о ресурсе
+    let (name, description, current_value) = match resource_name {
+        "Population" => ("Population", "Total number of citizens in your city.", population),
+        "Gold" => ("Gold", "Currency used for building construction and maintenance.", resources.gold),
+        "Happiness" => ("Happiness", "Overall citizen satisfaction. Affects productivity.", avg_happiness.round() as i32),
+        "Tax" => ("Tax Rate", "Percentage of income collected as taxes.", (tax_rate * 100.0).round() as i32),
+        "Idle" => ("Idle Citizens", "Citizens without assigned work.", citizens_idle),
+        "Working" => ("Working Citizens", "Citizens currently employed in buildings.", citizens_working),
+        "Sleeping" => ("Sleeping Citizens", "Citizens resting at home.", citizens_sleeping),
+        "Hauling" => ("Hauling Citizens", "Citizens transporting goods.", citizens_hauling),
+        "Fetching" => ("Fetching Citizens", "Citizens gathering resources.", citizens_fetching),
+        "Wood" => ("Wood", "Basic construction material. Produced by lumberjacks.", total_wood),
+        "Stone" => ("Stone", "Building material. Mined from stone quarries.", resources.stone),
+        "Clay" => ("Clay", "Raw material for bricks. Mined from clay pits.", resources.clay),
+        "Bricks" => ("Bricks", "Processed clay. Made in kilns.", resources.bricks),
+        "Wheat" => ("Wheat", "Grain crop. Grown in wheat fields.", resources.wheat),
+        "Flour" => ("Flour", "Processed wheat. Made in mills.", resources.flour),
+        "Bread" => ("Bread", "Food for citizens. Baked in bakeries.", resources.bread),
+        "Fish" => ("Fish", "Food for citizens. Caught by fisheries.", resources.fish),
+        "Iron Ore" => ("Iron Ore", "Raw metal. Mined from iron mines.", resources.iron_ore),
+        "Iron Ingots" => ("Iron Ingots", "Processed metal. Made in smelters.", resources.iron_ingots),
+        _ => (resource_name, "Resource information.", 0),
+    };
+    
+    // Вычисляем размер тултипа
+    let name_w = name.len() as f32 * 4.0 * 2.0 * scale;
+    let desc_w = description.len() as f32 * 4.0 * 2.0 * scale;
+    let value_w = (format!("Current: {}", current_value).len() as f32 * 4.0 * 2.0 * scale);
+    
+    let tooltip_w = [name_w, desc_w, value_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    let tooltip_h = line_height * 3.0 + pad * 2.0;
+    
+    // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
+    let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
+    let tooltip_y = (y - tooltip_h - 10.0).max(10.0);
+    
+    // Фон тултипа
+    gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.1, 0.1, 0.1, 0.9]);
+    gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.8]);
+    
+    // Текст тултипа
+    let mut text_y = tooltip_y + pad;
+    
+    // Название ресурса
+    gpu.draw_text(tooltip_x + pad, text_y, name.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale);
+    text_y += line_height;
+    
+    // Описание
+    gpu.draw_text(tooltip_x + pad, text_y, description.as_bytes(), [0.8, 0.8, 0.8, 1.0], scale);
+    text_y += line_height;
+    
+    // Текущее значение
+    let value_text = format!("Current: {}", current_value);
+    gpu.draw_text(tooltip_x + pad, text_y, value_text.as_bytes(), [1.0, 1.0, 0.7, 1.0], scale);
 }
 

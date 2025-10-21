@@ -939,6 +939,51 @@ fn run() -> Result<()> {
                             WeatherKind::Snow => (b"SNOW", [220,230,255,255]),
                         };
 
+                        // Определяем наведенное здание для тултипа
+                        let hovered_building = if let Some(tp) = hovered_tile {
+                            buildings.iter().find(|b| b.pos == tp).cloned()
+                        } else {
+                            None
+                        };
+                        
+                        // Определяем наведенную кнопку для тултипа
+                        let hovered_button = if hovered_building.is_none() {
+                            ui_interaction::get_hovered_button(
+                                cursor_xy,
+                                width_i32,
+                                height_i32,
+                                &config,
+                                ui_category,
+                                ui_tab,
+                                paused,
+                                speed_mult,
+                            )
+                        } else {
+                            None
+                        };
+                        
+                        // Определяем наведенный ресурс для тултипа
+                        let hovered_resource = if hovered_building.is_none() && hovered_button.is_none() {
+                            ui_interaction::get_hovered_resource(
+                                cursor_xy,
+                                width_i32,
+                                height_i32,
+                                &config,
+                                &visible,
+                                visible.wood,
+                                pop_show,
+                                avg_hap,
+                                tax_rate,
+                                idle,
+                                working,
+                                sleeping,
+                                hauling,
+                                fetching,
+                            )
+                        } else {
+                            None
+                        };
+                        
                         // GPU UI рендеринг через фабрику ui_gpu
                         let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
                         ui_gpu::draw_ui_gpu(
@@ -972,6 +1017,12 @@ fn run() -> Result<()> {
                             cam_px.x,
                             cam_px.y,
                             MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1),
+                            // Данные для тултипов
+                            cursor_xy.x as f32,
+                            cursor_xy.y as f32,
+                            hovered_building,
+                            hovered_button,
+                            hovered_resource,
                         );
                     } else {
                         // Если UI выключен, все равно очищаем
