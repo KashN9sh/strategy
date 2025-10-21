@@ -1693,7 +1693,7 @@ impl GpuRenderer {
                 
                 // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как у зданий)
                 let iso_x = (mx - my) as f32 * half_w;
-                let iso_y = (mx + my) as f32 * half_h;
+                let iso_y = ((mx + my) as f32 * half_h) - half_h * 0.5;
                 
                 // Матрица трансформации дороги (размер как у тайла)
                 let transform = Mat4::from_scale_rotation_translation(
@@ -1754,7 +1754,7 @@ impl GpuRenderer {
         for &pos in preview_path.iter() {
             // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как у обычных дорог)
             let iso_x = (pos.x - pos.y) as f32 * half_w;
-            let iso_y = (pos.x + pos.y) as f32 * half_h;
+            let iso_y = ((pos.x + pos.y) as f32 * half_h) - half_h * 0.5;
             
             // Матрица трансформации дороги (размер как у тайла)
             let transform = Mat4::from_scale_rotation_translation(

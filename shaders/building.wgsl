@@ -175,9 +175,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Пока используем простую заливку, позже можно добавить текстуру
         let road_color = vec3<f32>(0.47, 0.43, 0.35); // коричневатый цвет дороги
         
-        // Простая ромбическая форма дороги
-        let dist = length(in.model_pos);
-        if dist > 0.5 {
+        // Изометрическая форма дороги (ромб)
+        let iso_x = in.model_pos.x;
+        let iso_y = in.model_pos.y;
+        // Изометрическая проверка: |x| + |y| <= 0.5
+        if abs(iso_x) + abs(iso_y) > 0.5 {
             discard;
         }
         
