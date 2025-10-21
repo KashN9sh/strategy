@@ -426,6 +426,7 @@ pub struct GpuRenderer {
     road_instances: Vec<RoadInstance>,
     road_preview_instances: Vec<RoadInstance>,
     ui_rects: Vec<UIRect>,
+    minimap_instances: Vec<UIRect>,
     max_instances: usize,
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
@@ -433,6 +434,7 @@ pub struct GpuRenderer {
     road_instance_buffer: wgpu::Buffer,
     road_preview_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
+    minimap_buffer: wgpu::Buffer,
 }
 
 impl GpuRenderer {
@@ -911,6 +913,13 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
+        let minimap_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Minimap Buffer"),
+            size: (std::mem::size_of::<UIRect>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
 
         // Создаём render pipeline для тайлов с текстурами
         let tile_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1151,6 +1160,7 @@ impl GpuRenderer {
             road_instances: Vec::new(),
             road_preview_instances: Vec::new(),
             ui_rects: Vec::new(),
+            minimap_instances: Vec::new(),
             max_instances,
             tile_instance_buffer,
             building_instance_buffer,
@@ -1158,6 +1168,7 @@ impl GpuRenderer {
             road_instance_buffer,
             road_preview_instance_buffer,
             ui_rect_buffer,
+            minimap_buffer,
         })
     }
     
@@ -1727,6 +1738,167 @@ impl GpuRenderer {
         self.road_preview_instances.clear();
     }
     
+    pub fn prepare_minimap(
+        &mut self,
+        world: &mut crate::world::World,
+        buildings: &[crate::types::Building],
+        cam_x: f32,
+        cam_y: f32,
+        minimap_x: i32,
+        minimap_y: i32,
+        minimap_w: i32,
+        minimap_h: i32,
+        cell_size: i32,
+    ) {
+        use crate::types::TileKind;
+        
+        self.minimap_instances.clear();
+        
+        // Границы миникарты в тайлах (динамические вокруг камеры)
+        let cam_tile_x = (cam_x / 64.0) as i32; // преобразуем координаты камеры в тайлы
+        let cam_tile_y = (cam_y / 32.0) as i32;
+        
+        // Размер области миникарты в тайлах (соответствует размеру виджета)
+        let map_radius = 30; // радиус области вокруг камеры
+        
+        let min_tx = cam_tile_x - map_radius;
+        let min_ty = cam_tile_y - map_radius;
+        let max_tx = cam_tile_x + map_radius;
+        let max_ty = cam_tile_y + map_radius;
+        
+        // Добавляем тестовый квадрат в левый верхний угол миникарты
+        let test_transform = glam::Mat4::from_scale_rotation_translation(
+            glam::Vec3::new(20.0, 20.0, 1.0),
+            glam::Quat::IDENTITY,
+            glam::Vec3::new(minimap_x as f32 + 10.0, minimap_y as f32 + 10.0, 0.0),
+        );
+        
+        self.minimap_instances.push(UIRect {
+            model_matrix: test_transform.to_cols_array_2d(),
+            color: [1.0, 0.0, 0.0, 1.0], // ярко-красный тестовый квадрат
+        });
+        
+        // Рендерим тайлы миникарты (упрощенная версия для тестирования)
+        for tx in min_tx..=max_tx {
+            for ty in min_ty..=max_ty {
+                let tile_kind = world.get_tile(tx, ty);
+                let color = match tile_kind {
+                    TileKind::Grass => [0.2, 0.6, 0.2, 1.0], // зеленый
+                    TileKind::Forest => [0.1, 0.4, 0.1, 1.0], // темно-зеленый
+                    TileKind::Water => [0.2, 0.4, 0.8, 1.0], // синий
+                };
+                
+                let x = minimap_x + (tx - min_tx) * cell_size;
+                let y = minimap_y + (ty - min_ty) * cell_size;
+                
+                // Проверяем, что координаты в пределах миникарты
+                if x >= minimap_x && x < minimap_x + minimap_w && 
+                   y >= minimap_y && y < minimap_y + minimap_h {
+                    
+                    let transform = glam::Mat4::from_scale_rotation_translation(
+                        glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
+                        glam::Quat::IDENTITY,
+                        glam::Vec3::new(x as f32, y as f32, 0.0),
+                    );
+                    
+                    self.minimap_instances.push(UIRect {
+                        model_matrix: transform.to_cols_array_2d(),
+                        color,
+                    });
+                }
+            }
+        }
+        
+        // Рендерим здания на миникарте
+        for building in buildings {
+            // Проверяем, что здание в области миникарты
+            if building.pos.x < min_tx || building.pos.x > max_tx ||
+               building.pos.y < min_ty || building.pos.y > max_ty {
+                continue;
+            }
+            
+            // Преобразуем координаты здания в координаты миникарты
+            let map_x = minimap_x + (building.pos.x - min_tx) * cell_size;
+            let map_y = minimap_y + (building.pos.y - min_ty) * cell_size;
+            
+            if map_x >= minimap_x && map_x < minimap_x + minimap_w &&
+               map_y >= minimap_y && map_y < minimap_y + minimap_h {
+                
+                let building_color = match building.kind {
+                    crate::types::BuildingKind::House => [0.8, 0.6, 0.4, 1.0], // коричневый
+                    crate::types::BuildingKind::Warehouse => [0.6, 0.4, 0.2, 1.0], // темно-коричневый
+                    crate::types::BuildingKind::Lumberjack => [0.4, 0.2, 0.1, 1.0], // очень темно-коричневый
+                    crate::types::BuildingKind::Forester => [0.3, 0.5, 0.2, 1.0], // зеленый
+                    crate::types::BuildingKind::StoneQuarry => [0.5, 0.5, 0.5, 1.0], // серый
+                    crate::types::BuildingKind::ClayPit => [0.6, 0.4, 0.2, 1.0], // коричневый
+                    crate::types::BuildingKind::Kiln => [0.7, 0.5, 0.3, 1.0], // светло-коричневый
+                    crate::types::BuildingKind::IronMine => [0.3, 0.3, 0.3, 1.0], // темно-серый
+                    crate::types::BuildingKind::WheatField => [0.8, 0.8, 0.2, 1.0], // желтый
+                    crate::types::BuildingKind::Mill => [0.7, 0.7, 0.7, 1.0], // светло-серый
+                    crate::types::BuildingKind::Bakery => [0.9, 0.7, 0.4, 1.0], // светло-коричневый
+                    crate::types::BuildingKind::Smelter => [0.4, 0.4, 0.6, 1.0], // сине-серый
+                    crate::types::BuildingKind::Fishery => [0.2, 0.6, 0.8, 1.0], // голубой
+                };
+                
+                let transform = glam::Mat4::from_scale_rotation_translation(
+                    glam::Vec3::new((cell_size / 2) as f32, (cell_size / 2) as f32, 1.0),
+                    glam::Quat::IDENTITY,
+                    glam::Vec3::new(map_x as f32, map_y as f32, 0.0),
+                );
+                
+                self.minimap_instances.push(UIRect {
+                    model_matrix: transform.to_cols_array_2d(),
+                    color: building_color,
+                });
+            }
+        }
+        
+        // Рендерим дороги на миникарте
+        for tx in min_tx..=max_tx {
+            for ty in min_ty..=max_ty {
+                if !world.is_road(glam::IVec2::new(tx, ty)) { continue; }
+                
+                // Преобразуем координаты дороги в координаты миникарты
+                let map_x = minimap_x + (tx - min_tx) * cell_size;
+                let map_y = minimap_y + (ty - min_ty) * cell_size;
+                
+                // Проверяем, что дорога в пределах миникарты
+                if map_x >= minimap_x && map_x < minimap_x + minimap_w &&
+                   map_y >= minimap_y && map_y < minimap_y + minimap_h {
+                    
+                    let transform = glam::Mat4::from_scale_rotation_translation(
+                        glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
+                        glam::Quat::IDENTITY,
+                        glam::Vec3::new(map_x as f32, map_y as f32, 0.0),
+                    );
+                    
+                    self.minimap_instances.push(UIRect {
+                        model_matrix: transform.to_cols_array_2d(),
+                        color: [0.47, 0.43, 0.35, 1.0], // тот же цвет, что и в основном мире
+                    });
+                }
+            }
+        }
+        
+        // Показываем область видимости камеры (центр миникарты)
+        let center_x = minimap_x + minimap_w / 2;
+        let center_y = minimap_y + minimap_h / 2;
+        
+        // Показываем область видимости камеры в центре миникарты
+        let transform = glam::Mat4::from_scale_rotation_translation(
+            glam::Vec3::new((cell_size * 2) as f32, (cell_size * 2) as f32, 1.0),
+            glam::Quat::IDENTITY,
+            glam::Vec3::new(center_x as f32, center_y as f32, 0.0),
+        );
+        
+        self.minimap_instances.push(UIRect {
+            model_matrix: transform.to_cols_array_2d(),
+            color: [1.0, 1.0, 0.0, 0.5], // полупрозрачный желтый
+        });
+        
+        // Буфер миникарты будет обновлен в render()
+    }
+    
     pub fn prepare_road_preview(
         &mut self,
         preview_path: &[glam::IVec2],
@@ -1798,6 +1970,15 @@ impl GpuRenderer {
                 &self.ui_rect_buffer,
                 0,
                 bytemuck::cast_slice(&self.ui_rects)
+            );
+        }
+        
+        // Обновляем буфер миникарты ДО начала render pass
+        if !self.minimap_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.minimap_buffer,
+                0,
+                bytemuck::cast_slice(&self.minimap_instances)
             );
         }
         
@@ -1887,6 +2068,16 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..self.ui_rects.len() as u32);
+            }
+            
+            // Рендерим миникарту (поверх UI)
+            if !self.minimap_instances.is_empty() {
+                render_pass.set_pipeline(&self.ui_rect_render_pipeline);
+                render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, self.minimap_buffer.slice(..));
+                render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
             }
         }
         

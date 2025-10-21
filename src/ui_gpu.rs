@@ -31,6 +31,12 @@ pub fn draw_ui_gpu(
     food_policy: FoodPolicy,
     weather_label: &[u8],
     weather_icon_col: [f32; 4],
+    // Данные для миникарты
+    world: &mut crate::world::World,
+    buildings: &[crate::types::Building],
+    cam_x: f32,
+    cam_y: f32,
+    cell_size: i32,
 ) {
     gpu.clear_ui();
     
@@ -261,5 +267,29 @@ pub fn draw_ui_gpu(
         
         gpu.draw_button(current_x, econ_y, 50.0, btn_h, b"Fish", food_policy == FoodPolicy::FishFirst, btn_scale);
     }
+    
+    // === МИНИКАРТА ===
+    // Рендерим миникарту в правом нижнем углу
+    let pad = (8 * s) as f32;
+    let base_cell = (2 * s) as f32;
+    let base_w_tiles = 80.0;  // уменьшаем ширину
+    let base_h_tiles = 60.0;  // уменьшаем высоту
+    let widget_w = base_w_tiles * base_cell;
+    let widget_h = base_h_tiles * base_cell;
+    let minimap_x = fw as f32 - pad - widget_w;
+    let minimap_y = fh as f32 - ui::bottom_panel_height(s) as f32 - pad - widget_h;
+    
+    // Рамка миникарты
+    gpu.add_ui_rect(minimap_x - 2.0, minimap_y - 2.0, widget_w + 4.0, widget_h + 4.0, [0.2, 0.2, 0.2, 1.0]);
+    gpu.add_ui_rect(minimap_x, minimap_y, widget_w, widget_h, [0.1, 0.1, 0.1, 0.8]);
+    
+    // Подготавливаем миникарту
+    gpu.prepare_minimap(
+        world, buildings,
+        cam_x, cam_y,
+        minimap_x as i32, minimap_y as i32, 
+        widget_w as i32, widget_h as i32,
+        cell_size,
+    );
 }
 

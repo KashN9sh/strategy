@@ -782,14 +782,7 @@ fn run() -> Result<()> {
                         }
                     }
 
-                    // Мини-карта как UI-виджет (поверх осадков и эффектов)
-                    ui::draw_minimap_widget(
-                        frame, width_i32, height_i32, ui::ui_scale(height_i32, config.ui_scale_base),
-                        &mut world, &buildings,
-                        cam_px, atlas.half_w, atlas.half_h,
-                        min_tx, min_ty, max_tx, max_ty,
-                        MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1), cursor_xy.x, cursor_xy.y,
-                    );
+                    // Мини-карта теперь рендерится в ui_gpu::draw_ui_gpu()
 
                     // Отрисовка найденного пути в дебаг-режиме
                     if let (true, Some(path)) = (path_debug_mode, &last_path) {
@@ -973,6 +966,12 @@ fn run() -> Result<()> {
                             food_policy,
                             wlabel,
                             wcol_f32,
+                            // Данные для миникарты
+                            &mut world,
+                            &buildings,
+                            cam_px.x,
+                            cam_px.y,
+                            MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1),
                         );
                     } else {
                         // Если UI выключен, все равно очищаем
