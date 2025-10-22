@@ -1642,9 +1642,9 @@ impl GpuRenderer {
                                    Mat4::from_scale(Vec3::new(tile_size, tile_size, 1.0));
                 
                 let tile_id = match kind {
-                    TileKind::Grass => 0,
-                    TileKind::Forest => 1,
-                    TileKind::Water => 2,
+                    TileKind::Grass => 22,
+                    TileKind::Forest => 40, 
+                    TileKind::Water => 110,
                 };
                 
                 // Определяем биом для тинтинга
@@ -2345,6 +2345,48 @@ impl GpuRenderer {
                         model_matrix: transform.to_cols_array_2d(),
                         color,
                     });
+                }
+            }
+        }
+        
+        // Рендерим депозиты ресурсов на миникарте
+        for tx in min_tx..=max_tx {
+            for ty in min_ty..=max_ty {
+                let pos = glam::IVec2::new(tx, ty);
+                
+                // Проверяем наличие депозитов
+                let has_clay = world.has_clay_deposit(pos);
+                let has_stone = world.has_stone_deposit(pos);
+                let has_iron = world.has_iron_deposit(pos);
+                
+                if has_clay || has_stone || has_iron {
+                    let x = minimap_x + (tx - min_tx) * cell_size;
+                    let y = minimap_y + (ty - min_ty) * cell_size;
+                    
+                    // Проверяем, что координаты в пределах миникарты
+                    if x >= minimap_x && x < minimap_x + minimap_w && 
+                       y >= minimap_y && y < minimap_y + minimap_h {
+                        
+                        // Определяем цвет депозита (приоритет: железо > камень > глина)
+                        let deposit_color = if has_iron {
+                            [0.3, 0.3, 0.3, 0.8] // темно-серый для железа
+                        } else if has_stone {
+                            [0.6, 0.6, 0.6, 0.8] // серый для камня
+                        } else {
+                            [0.8, 0.6, 0.4, 0.8] // коричневый для глины
+                        };
+                        
+                        let transform = glam::Mat4::from_scale_rotation_translation(
+                            glam::Vec3::new(cell_size as f32 * 0.6, cell_size as f32 * 0.6, 1.0),
+                            glam::Quat::IDENTITY,
+                            glam::Vec3::new(x as f32, y as f32, 0.0),
+                        );
+                        
+                        self.minimap_instances.push(UIRect {
+                            model_matrix: transform.to_cols_array_2d(),
+                            color: deposit_color,
+                        });
+                    }
                 }
             }
         }

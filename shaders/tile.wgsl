@@ -67,27 +67,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sprite_width = 1.0 / sprites_per_row;
     let sprite_height = 1.0 / sprite_rows;
     
-    // Определяем позицию спрайта в атласе для каждого типа тайла
-    var sprite_x: f32;
-    var sprite_y: f32;
+    // Универсальная логика вычисления позиции спрайта в атласе 11x11
+    let tile_id = in.tile_id;
     
-    if (in.tile_id == 0.0) {
-        // Трава - row 2 согласно CPU коду
-        sprite_x = 0.0; // первый столбец в ряду
-        sprite_y = 2.0; // row 2
-    } else if (in.tile_id == 1.0) {
-        // Лес - пробуем найти в том же ряду что трава
-        sprite_x = 3.0; // попробуем 4-й столбец
-        sprite_y = 2.0; // row 2
-    } else if (in.tile_id == 2.0) {
-        // Вода - последний ряд в сетке 11x11
-        sprite_x = 0.0;
-        sprite_y = 10.0; // последний ряд (индекс 10)
-    } else {
-        // По умолчанию - первый тайл
-        sprite_x = 0.0;
-        sprite_y = 0.0;
-    }
+    // Вычисляем позицию спрайта в сетке
+    let sprite_x = tile_id % sprites_per_row;
+    let sprite_y = floor(tile_id / sprites_per_row);
     
     // Преобразуем в UV координаты
     let uv_x = (sprite_x + in.tex_coords.x) * sprite_width;
