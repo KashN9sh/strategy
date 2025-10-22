@@ -43,6 +43,10 @@ pub fn draw_ui_gpu(
     hovered_building: Option<crate::types::Building>,
     hovered_button: Option<&'static str>,
     hovered_resource: Option<&'static str>,
+    // Данные для консоли
+    console_open: bool,
+    console_input: &str,
+    console_log: &[String],
 ) {
     gpu.clear_ui();
     
@@ -346,6 +350,11 @@ pub fn draw_ui_gpu(
             fh as f32,
         );
     }
+    
+    // Рендерим консоль, если она открыта
+    if console_open {
+        draw_console_gpu(gpu, fw, fh, s, console_input, console_log);
+    }
 }
 
 /// Рендеринг тултипа для здания
@@ -584,5 +593,38 @@ pub fn draw_resource_tooltip(
     // Текущее значение
     let value_text = format!("Current: {}", current_value);
     gpu.draw_text(tooltip_x + pad, text_y, value_text.as_bytes(), [1.0, 1.0, 0.7, 1.0], scale);
+}
+
+/// Рендеринг консоли разработчика
+pub fn draw_console_gpu(
+    gpu: &mut GpuRenderer,
+    fw: i32,
+    fh: i32,
+    s: i32,
+    input: &str,
+    log: &[String],
+) {
+    let pad = 8 * s;
+    let px = 2 * s;
+    let line_h = 5 * px + 4 * s;
+    let lines_visible = 6usize;
+    let height = pad + (lines_visible as i32) * line_h + pad + line_h; // лог + строка ввода
+    let y0 = fh - height;
+    
+    // Фон консоли
+    gpu.add_ui_rect(0.0, y0 as f32, fw as f32, height as f32, [0.0, 0.0, 0.0, 0.7]);
+    
+    // Последние строки лога
+    let start = log.len().saturating_sub(lines_visible);
+    let mut y = y0 + pad;
+    for line in &log[start..] {
+        gpu.draw_text(pad as f32, y as f32, line.as_bytes(), [0.86, 0.86, 0.86, 1.0], s as f32);
+        y += line_h;
+    }
+    
+    // Строка ввода с префиксом
+    gpu.draw_text(pad as f32, y as f32, b"> ", [0.86, 0.86, 0.7, 1.0], s as f32);
+    let prefix_w = ui::text_w(b"> ", s);
+    gpu.draw_text((pad + prefix_w) as f32, y as f32, input.as_bytes(), [0.9, 0.9, 0.9, 1.0], s as f32);
 }
 

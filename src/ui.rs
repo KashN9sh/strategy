@@ -112,7 +112,7 @@ pub fn button_w_for(label: &[u8], s: i32) -> i32 {
     text_w + 12 * s // паддинги
 }
 
-fn text_w(label: &[u8], s: i32) -> i32 { (label.len() as i32) * 4 * (2 * s) }
+pub fn text_w(label: &[u8], s: i32) -> i32 { (label.len() as i32) * 4 * (2 * s) }
 
 fn number_w(mut n: u32, s: i32) -> i32 {
     let mut len = 0; if n == 0 { len = 1; }

@@ -1023,6 +1023,10 @@ fn run() -> Result<()> {
                             hovered_building,
                             hovered_button,
                             hovered_resource,
+                            // Данные для консоли
+                            console_open,
+                            &console_input,
+                            &console_log,
                         );
                     } else {
                         // Если UI выключен, все равно очищаем
