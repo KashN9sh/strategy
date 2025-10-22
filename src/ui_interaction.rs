@@ -294,13 +294,18 @@ pub fn get_hovered_button(
         return Some("Speed 4x");
     }
     
-    // Вкладки
-    let build_w = ui::button_w_for(b"Build", ui_s);
-    let econ_w = ui::button_w_for(b"Economy", ui_s);
-    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb, by0 + padb, build_w, btn_h) {
+    // Вкладки (с теми же минимальными размерами, что и в ui_gpu.rs)
+    let build_w = ui::button_w_for(b"Build", ui_s).max(60);
+    let econ_w = ui::button_w_for(b"Economy", ui_s).max(80);
+    let build_x = padb;
+    let build_y = by0 + padb;
+    let econ_x = padb + build_w + 6; // фиксированный отступ 6, как в ui_gpu.rs
+    let econ_y = by0 + padb;
+    
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, build_x, build_y, build_w, btn_h) {
         return Some("Build Tab");
     }
-    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb + build_w + 6 * ui_s, by0 + padb, econ_w, btn_h) {
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, econ_x, econ_y, econ_w, btn_h) {
         return Some("Economy Tab");
     }
     
@@ -333,25 +338,22 @@ pub fn get_hovered_button(
         (ui::UICategory::Food, "Food"),
         (ui::UICategory::Logistics, "Logistics"),
     ];
-    let row_y = [by0 + padb + btn_h + 6 * ui_s, by0 + padb + (btn_h + 6 * ui_s) * 2];
-    let mut row: usize = 0;
+    let cat_y = by0 + padb + btn_h + 6; // фиксированный отступ 6
     let mut cx = padb;
     for (cat, label) in cats.iter() {
-        let bw = ui::button_w_for(label.as_bytes(), ui_s);
+        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(60); // та же логика, что в ui_gpu.rs
         if cx + bw > width_i32 - padb { 
-            row = (row + 1).min(row_y.len()-1); 
-            cx = padb; 
+            break; // останавливаемся, если не влезает
         }
-        let y = row_y[row];
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, y, bw, btn_h) {
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, cat_y, bw, btn_h) {
             return Some(label);
         }
-        cx += bw + 6 * ui_s;
+        cx += bw + 6; // фиксированный отступ 6
     }
     
     // Здания выбранной категории
     let mut bx = padb;
-    let by2 = by0 + padb + (btn_h + 6 * ui_s) * 2;
+    let by2 = by0 + padb + btn_h + 6 + btn_h + 6; // две строки с фиксированными отступами 6
     let buildings_for_cat: &[BuildingKind] = match ui_category {
         ui::UICategory::Housing => &[BuildingKind::House],
         ui::UICategory::Storage => &[BuildingKind::Warehouse],
@@ -366,7 +368,7 @@ pub fn get_hovered_button(
             BuildingKind::House => "House",
             BuildingKind::Warehouse => "Warehouse",
             BuildingKind::Forester => "Forester",
-            BuildingKind::StoneQuarry => "Stone Quarry",
+            BuildingKind::StoneQuarry => "Quarry",
             BuildingKind::ClayPit => "Clay Pit",
             BuildingKind::Kiln => "Kiln",
             BuildingKind::WheatField => "Wheat Field",
@@ -376,12 +378,12 @@ pub fn get_hovered_button(
             BuildingKind::IronMine => "Iron Mine",
             BuildingKind::Smelter => "Smelter",
         };
-        let bw = ui::button_w_for(label.as_bytes(), ui_s);
+        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же логика, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) {
             return Some(label);
         }
-        bx += bw + 6 * ui_s;
+        bx += bw + 6; // фиксированный отступ 6
     }
     
     None
