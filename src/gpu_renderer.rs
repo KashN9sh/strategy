@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::atlas::TileAtlas;
 use crate::world::World;
-use crate::types::{TileKind, WeatherKind};
+use crate::types::{TileKind, WeatherKind, BuildingKind};
 
 // Структуры для передачи данных в GPU
 
@@ -27,6 +27,35 @@ impl WeatherUniform {
             time: 0.0,
             intensity: 0.0,
             padding: 0.0,
+        }
+    }
+}
+
+// Структуры для частиц зданий
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct BuildingParticle {
+    pub position: [f32; 2],    // Позиция частицы
+    pub velocity: [f32; 2],    // Скорость частицы
+    pub life: f32,             // Время жизни (0.0-1.0)
+    pub size: f32,             // Размер частицы
+    pub color: [f32; 4],       // Цвет частицы
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct BuildingParticleUniform {
+    pub time: f32,
+    pub particle_count: u32,
+    pub padding: [f32; 2],
+}
+
+impl BuildingParticleUniform {
+    pub fn new() -> Self {
+        Self {
+            time: 0.0,
+            particle_count: 0,
+            padding: [0.0; 2],
         }
     }
 }
@@ -435,6 +464,14 @@ pub struct GpuRenderer {
     weather_bind_group: wgpu::BindGroup,
     weather_uniform: WeatherUniform,
     weather_pipeline: wgpu::RenderPipeline,
+    
+    // Частицы зданий
+    building_particles: Vec<BuildingParticle>,
+    building_particle_buffer: wgpu::Buffer,
+    building_particle_storage_buffer: wgpu::Buffer,
+    building_particle_bind_group: wgpu::BindGroup,
+    building_particle_uniform: BuildingParticleUniform,
+    building_particle_pipeline: wgpu::RenderPipeline,
     
     // UI экранные униформы (отдельно от мировой камеры)
     screen_buffer: wgpu::Buffer,
@@ -1255,6 +1292,124 @@ impl GpuRenderer {
             multiview: None,
         });
         
+        // Инициализация частиц зданий
+        let building_particle_uniform = BuildingParticleUniform::new();
+        let building_particle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Building Particle Buffer"),
+            size: std::mem::size_of::<BuildingParticleUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let building_particle_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Building Particle Storage Buffer"),
+            size: (std::mem::size_of::<BuildingParticle>() * 1000) as u64, // Максимум 1000 частиц
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let building_particle_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            label: Some("building_particle_bind_group_layout"),
+        });
+        
+        let building_particle_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &building_particle_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: building_particle_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: building_particle_storage_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("building_particle_bind_group"),
+        });
+        
+        // Загружаем шейдер частиц зданий
+        let building_particle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Building Particle Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/building_particles.wgsl").into()),
+        });
+        
+        let building_particle_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Building Particle Pipeline Layout"),
+            bind_group_layouts: &[&building_particle_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let building_particle_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Building Particle Pipeline"),
+            layout: Some(&building_particle_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &building_particle_shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &building_particle_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
         Ok(Self {
             surface,
             device,
@@ -1277,6 +1432,12 @@ impl GpuRenderer {
             weather_bind_group,
             weather_uniform,
             weather_pipeline,
+            building_particles: Vec::new(),
+            building_particle_buffer,
+            building_particle_storage_buffer,
+            building_particle_bind_group,
+            building_particle_uniform,
+            building_particle_pipeline,
             screen_buffer,
             screen_bind_group,
             screen_uniform,
@@ -1362,6 +1523,87 @@ impl GpuRenderer {
             0,
             bytemuck::cast_slice(&[self.weather_uniform])
         );
+    }
+    
+    // Обновление частиц зданий
+    pub fn update_building_particles(&mut self, buildings: &[crate::types::Building], time: f32) {
+        self.building_particles.clear();
+        
+        for building in buildings {
+            match building.kind {
+                BuildingKind::Smelter => {
+                    // Искры от плавильни
+                    if building.timer_ms > 0 {
+                        for _ in 0..3 {
+                            let angle = (time * 2.0 + building.pos.x as f32 + building.pos.y as f32) % (std::f32::consts::TAU);
+                            let speed = 0.5 + (time * 0.1) % 0.3;
+                            
+                            self.building_particles.push(BuildingParticle {
+                                position: [building.pos.x as f32 * 32.0 + 16.0, building.pos.y as f32 * 32.0 + 16.0],
+                                velocity: [angle.cos() * speed, angle.sin() * speed - 0.2],
+                                life: 1.0,
+                                size: 2.0 + (time * 0.1) % 1.0,
+                                color: [1.0, 0.8, 0.2, 0.8], // Оранжевые искры
+                            });
+                        }
+                    }
+                }
+                BuildingKind::Kiln | BuildingKind::Bakery => {
+                    // Дым от печи/пекарни
+                    if building.timer_ms > 0 {
+                        for _ in 0..2 {
+                            let offset_x = (time * 0.5 + building.pos.x as f32) % 1.0 - 0.5;
+                            let offset_y = (time * 0.3 + building.pos.y as f32) % 1.0 - 0.5;
+                            
+                            self.building_particles.push(BuildingParticle {
+                                position: [building.pos.x as f32 * 32.0 + 16.0 + offset_x * 8.0, building.pos.y as f32 * 32.0 + 16.0 + offset_y * 8.0],
+                                velocity: [0.0, -0.3],
+                                life: 1.0,
+                                size: 3.0 + (time * 0.1) % 2.0,
+                                color: [0.6, 0.6, 0.6, 0.6], // Серый дым
+                            });
+                        }
+                    }
+                }
+                BuildingKind::Mill => {
+                    // Пыль от мельницы
+                    if building.timer_ms > 0 {
+                        for _ in 0..2 {
+                            let angle = (time * 3.0 + building.pos.x as f32 + building.pos.y as f32) % (std::f32::consts::TAU);
+                            let radius = 8.0 + (time * 0.2) % 4.0;
+                            
+                            self.building_particles.push(BuildingParticle {
+                                position: [building.pos.x as f32 * 32.0 + 16.0 + angle.cos() * radius, building.pos.y as f32 * 32.0 + 16.0 + angle.sin() * radius],
+                                velocity: [angle.cos() * 0.1, angle.sin() * 0.1],
+                                life: 1.0,
+                                size: 1.5 + (time * 0.1) % 1.0,
+                                color: [0.9, 0.9, 0.8, 0.7], // Бежевая пыль
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // Обновляем униформы
+        self.building_particle_uniform.time = time;
+        self.building_particle_uniform.particle_count = self.building_particles.len() as u32;
+        
+        // Записываем данные в буферы
+        self.queue.write_buffer(
+            &self.building_particle_buffer,
+            0,
+            bytemuck::cast_slice(&[self.building_particle_uniform])
+        );
+        
+        if !self.building_particles.is_empty() {
+            self.queue.write_buffer(
+                &self.building_particle_storage_buffer,
+                0,
+                bytemuck::cast_slice(&self.building_particles)
+            );
+        }
     }
     
     // Подготовка тайлов для рендеринга (пиксельные координаты как в CPU)

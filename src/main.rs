@@ -1071,6 +1071,9 @@ fn run() -> Result<()> {
                         world_clock_ms / 1000.0,
                     );
                     
+                    // Обновляем частицы зданий
+                    gpu_renderer.update_building_particles(&buildings, world_clock_ms / 1000.0);
+                    
                     // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {
                         eprintln!("gpu_renderer.render() failed: {err}");
