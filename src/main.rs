@@ -146,6 +146,7 @@ fn run() -> Result<()> {
     let mut road_mode = false;
     let mut path_debug_mode = false;
     let mut biome_overlay_debug = false;
+    let mut biome_debug_mode = false;
     let mut path_sel_a: Option<IVec2> = None;
     let mut path_sel_b: Option<IVec2> = None;
     let mut last_path: Option<Vec<IVec2>> = None;
@@ -371,7 +372,7 @@ fn run() -> Result<()> {
                                     if !console_input.is_empty() {
                                         let cmd = console_input.clone();
                                         console_log.push(format!("> {}", cmd));
-                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms, &mut world, &mut biome_overlay_debug);
+                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms, &mut world, &mut biome_overlay_debug, &mut biome_debug_mode);
                                         console_input.clear();
                                     }
                                     return;
@@ -1048,6 +1049,11 @@ fn run() -> Result<()> {
                             console_open,
                             &console_input,
                             &console_log,
+                            // Данные для отладки биома
+                            biome_debug_mode,
+                            zoom,
+                            atlas.half_w,
+                            atlas.half_h,
                         );
                     } else {
                         // Если UI выключен, все равно очищаем
@@ -1778,7 +1784,7 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
     }
 }
 
-fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool) {
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool, biome_debug_mode: &mut bool) {
     let trimmed = cmd.trim();
     if trimmed.is_empty() { return; }
     let mut parts = trimmed.split_whitespace();
@@ -1788,6 +1794,8 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
             log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>, biome <swamp_thr rocky_thr|overlay>, biome-overlay".to_string());
         }
         "debug" => {
+            *biome_debug_mode = !*biome_debug_mode;
+            log.push(format!("Debug mode: {}", if *biome_debug_mode { "ON" } else { "OFF" }));
             log.push(format!("Current weather: {:?}", weather));
             log.push(format!("Weather intensity: {}", match weather {
                 WeatherKind::Clear => 0.0,

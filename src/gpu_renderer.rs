@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::atlas::TileAtlas;
 use crate::world::World;
-use crate::types::{TileKind, WeatherKind, BuildingKind};
+use crate::types::{TileKind, WeatherKind, BuildingKind, BiomeKind};
 
 // Структуры для передачи данных в GPU
 
@@ -1647,11 +1647,28 @@ impl GpuRenderer {
                     TileKind::Water => 2,
                 };
                 
-                // Подсветка при наведении - желтый тинт
+                // Определяем биом для тинтинга
+                let biome = world.biome(glam::IVec2::new(mx, my));
+                
+                // Применяем тинт биома (более яркий)
+                let biome_tint = match (kind, biome) {
+                    (TileKind::Grass, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],   // темный коричневый оттенок
+                    (TileKind::Grass, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],   // светлый серый оттенок
+                    (TileKind::Forest, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],  // темный коричневый оттенок для леса
+                    (TileKind::Forest, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],  // светлый серый оттенок для леса
+                    _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
+                };
+                
+                // Подсветка при наведении - желтый тинт поверх биомного
                 let tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
-                    [1.3, 1.3, 0.7, 1.0] // желтоватый
+                    [
+                        biome_tint[0] * 1.3,
+                        biome_tint[1] * 1.3, 
+                        biome_tint[2] * 0.7,
+                        biome_tint[3]
+                    ]
                 } else {
-                    [1.0, 1.0, 1.0, 1.0] // без изменений
+                    biome_tint
                 };
                 
                 self.tile_instances.push(TileInstance {
@@ -2253,7 +2270,7 @@ impl GpuRenderer {
         minimap_h: i32,
         cell_size: i32,
     ) {
-        use crate::types::TileKind;
+        use crate::types::{TileKind, BiomeKind};
         
         self.minimap_instances.clear();
         
@@ -2281,15 +2298,35 @@ impl GpuRenderer {
             color: [1.0, 0.0, 0.0, 1.0], // ярко-красный тестовый квадрат
         });
         
-        // Рендерим тайлы миникарты (упрощенная версия для тестирования)
+        // Рендерим тайлы миникарты с тинтами биомов
         for tx in min_tx..=max_tx {
             for ty in min_ty..=max_ty {
                 let tile_kind = world.get_tile(tx, ty);
-                let color = match tile_kind {
+                let biome = world.biome(glam::IVec2::new(tx, ty));
+                
+                // Базовые цвета тайлов
+                let base_color = match tile_kind {
                     TileKind::Grass => [0.2, 0.6, 0.2, 1.0], // зеленый
                     TileKind::Forest => [0.1, 0.4, 0.1, 1.0], // темно-зеленый
                     TileKind::Water => [0.2, 0.4, 0.8, 1.0], // синий
                 };
+                
+                // Применяем тинт биома (те же значения, что и в основном рендерере)
+                let biome_tint = match (tile_kind, biome) {
+                    (TileKind::Grass, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],   // темный коричневый оттенок
+                    (TileKind::Grass, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],   // светлый серый оттенок
+                    (TileKind::Forest, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],  // темный коричневый оттенок для леса
+                    (TileKind::Forest, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],  // светлый серый оттенок для леса
+                    _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
+                };
+                
+                // Применяем тинт к базовому цвету
+                let color = [
+                    base_color[0] * biome_tint[0],
+                    base_color[1] * biome_tint[1], 
+                    base_color[2] * biome_tint[2],
+                    base_color[3] * biome_tint[3]
+                ];
                 
                 let x = minimap_x + (tx - min_tx) * cell_size;
                 let y = minimap_y + (ty - min_ty) * cell_size;

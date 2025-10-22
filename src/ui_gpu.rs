@@ -4,6 +4,7 @@
 use crate::gpu_renderer::GpuRenderer;
 use crate::types::{Resources, BuildingKind, FoodPolicy};
 use crate::ui::{self, UICategory, UITab};
+use glam;
 
 /// GPU версия draw_ui - использует GpuRenderer вместо CPU frame buffer
 pub fn draw_ui_gpu(
@@ -47,6 +48,11 @@ pub fn draw_ui_gpu(
     console_open: bool,
     console_input: &str,
     console_log: &[String],
+    // Данные для отладки биома
+    biome_debug_mode: bool,
+    zoom: f32,
+    atlas_half_w: i32,
+    atlas_half_h: i32,
 ) {
     gpu.clear_ui();
     
@@ -351,6 +357,42 @@ pub fn draw_ui_gpu(
         );
     }
     
+    // Тултип отладки биома
+    if biome_debug_mode {
+        // Определяем позицию тайла под курсором
+        let tile_pos = screen_to_tile_px(
+            cursor_x as i32, 
+            cursor_y as i32, 
+            fw, 
+            fh, 
+            glam::Vec2::new(cam_x, cam_y), 
+            atlas_half_w, // half_w - половина ширины тайла из атласа
+            atlas_half_h, // half_h - половина высоты тайла из атласа
+            zoom // zoom из параметра функции
+        );
+        
+        if let Some(tp) = tile_pos {
+            let biome = world.biome(tp);
+            let biome_name = match biome {
+                crate::types::BiomeKind::Meadow => "Meadow",
+                crate::types::BiomeKind::Swamp => "Swamp", 
+                crate::types::BiomeKind::Rocky => "Rocky",
+            };
+            
+            draw_biome_debug_tooltip(
+                gpu,
+                cursor_x,
+                cursor_y,
+                biome_name,
+                tp.x,
+                tp.y,
+                scale,
+                fw as f32,
+                fh as f32,
+            );
+        }
+    }
+    
     // Рендерим консоль, если она открыта
     if console_open {
         draw_console_gpu(gpu, fw, fh, s, console_input, console_log);
@@ -626,5 +668,90 @@ pub fn draw_console_gpu(
     gpu.draw_text(pad as f32, y as f32, b"> ", [0.86, 0.86, 0.7, 1.0], s as f32);
     let prefix_w = ui::text_w(b"> ", s);
     gpu.draw_text((pad + prefix_w) as f32, y as f32, input.as_bytes(), [0.9, 0.9, 0.9, 1.0], s as f32);
+}
+
+/// Преобразование экранных координат в координаты тайла
+fn screen_to_tile_px(
+    mx: i32, 
+    my: i32, 
+    sw: i32, 
+    sh: i32, 
+    cam_px: glam::Vec2, 
+    half_w: i32, 
+    half_h: i32, 
+    zoom: f32
+) -> Option<glam::IVec2> {
+    // экран -> мир (с учетом zoom и камеры)
+    // GPU: world_x = (screen_x - sw/2) / zoom + cam_x
+    //      world_y = -(screen_y - sh/2) / zoom - cam_y  (камера с +cam_y, view матрица)
+    let wx = (mx - sw / 2) as f32 / zoom + cam_px.x;
+    let wy = (my - sh / 2) as f32 / zoom + cam_px.y;
+    
+    let a = half_w as f32;
+    let b = half_h as f32;
+    // обратное к изометрической проекции: iso_x = (mx - my)*a, iso_y = (mx + my)*b
+    let tx = 0.5 * (wy / b + wx / a) + 1.0;
+    let ty = 0.5 * (wy / b - wx / a) + 1.0;
+    let ix = tx.floor() as i32;
+    let iy = ty.floor() as i32;
+    Some(glam::IVec2::new(ix, iy))
+}
+
+/// Рендеринг тултипа отладки биома
+pub fn draw_biome_debug_tooltip(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    biome_name: &str,
+    tile_x: i32,
+    tile_y: i32,
+    scale: f32,
+    screen_width: f32,
+    screen_height: f32,
+) {
+    let pad = 8.0 * scale;
+    let line_height = 16.0 * scale;
+    
+    // Текст тултипа
+    let title = "Biome Debug";
+    let biome_text = format!("Biome: {}", biome_name);
+    let pos_text = format!("Position: ({}, {})", tile_x, tile_y);
+    
+    // Вычисляем размеры тултипа
+    let title_w = ui::text_w(title.as_bytes(), scale as i32) as f32;
+    let biome_w = ui::text_w(biome_text.as_bytes(), scale as i32) as f32;
+    let pos_w = ui::text_w(pos_text.as_bytes(), scale as i32) as f32;
+    let tooltip_w = (title_w.max(biome_w).max(pos_w) + pad * 2.0).max(120.0);
+    let tooltip_h = line_height * 3.0 + pad * 2.0;
+    
+    // Позиционирование тултипа
+    let mut tooltip_x = x + 10.0;
+    let mut tooltip_y = y - tooltip_h - 10.0;
+    
+    // Ограничиваем тултип границами экрана
+    if tooltip_x + tooltip_w > screen_width {
+        tooltip_x = screen_width - tooltip_w - 10.0;
+    }
+    if tooltip_y < 0.0 {
+        tooltip_y = y + 10.0;
+    }
+    
+    // Фон тултипа
+    gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.8]);
+    gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.9]);
+    
+    // Текст тултипа
+    let mut text_y = tooltip_y + pad;
+    
+    // Заголовок
+    gpu.draw_text(tooltip_x + pad, text_y, title.as_bytes(), [1.0, 1.0, 0.0, 1.0], scale);
+    text_y += line_height;
+    
+    // Биом
+    gpu.draw_text(tooltip_x + pad, text_y, biome_text.as_bytes(), [0.8, 1.0, 0.8, 1.0], scale);
+    text_y += line_height;
+    
+    // Позиция
+    gpu.draw_text(tooltip_x + pad, text_y, pos_text.as_bytes(), [0.8, 0.8, 1.0, 1.0], scale);
 }
 
