@@ -59,6 +59,8 @@ pub struct Building {
     pub workers_target: i32,
     // Для домов: вместимость жильцов (у остальных 0)
     pub capacity: i32,
+    // Подсветка при наведении/выборе
+    pub is_highlighted: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]

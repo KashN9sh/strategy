@@ -575,7 +575,7 @@ fn run() -> Result<()> {
                         buildings.sort_by_key(|b| b.pos.x + b.pos.y);
                         buildings_dirty = false;
                     }
-                    gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
                     gpu_renderer.prepare_citizens(&citizens, &buildings, &atlas);
                     gpu_renderer.prepare_roads(&mut world, &road_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
                     
@@ -583,6 +583,18 @@ fn run() -> Result<()> {
                     if left_mouse_down && road_mode && !preview_road_path.is_empty() {
                         let is_building = drag_road_state.unwrap_or(true);
                         gpu_renderer.prepare_road_preview(&preview_road_path, is_building, &atlas);
+                    }
+                    
+                    // Предпросмотр зданий при наведении (если не в режиме дорог)
+                    if !road_mode {
+                        if let Some(tile_pos) = hovered_tile {
+                            let is_allowed = ui_interaction::building_allowed_at(&mut world, selected_building, tile_pos);
+                            gpu_renderer.prepare_building_preview(selected_building, tile_pos, is_allowed, &building_atlas, &atlas);
+                        } else {
+                            gpu_renderer.clear_building_preview();
+                        }
+                    } else {
+                        gpu_renderer.clear_building_preview();
                     }
 
                     // TODO: Временно комментируем CPU рендеринг, пока не реализуем полный GPU пайплайн
@@ -945,6 +957,15 @@ fn run() -> Result<()> {
                         } else {
                             None
                         };
+                        
+                        // Обновляем подсветку зданий
+                        for building in &mut buildings {
+                            building.is_highlighted = if let Some(ref hovered) = hovered_building {
+                                building.pos == hovered.pos
+                            } else {
+                                false
+                            };
+                        }
                         
                         // Определяем наведенную кнопку для тултипа
                         let hovered_button = if hovered_building.is_none() {

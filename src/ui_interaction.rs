@@ -229,7 +229,7 @@ pub fn handle_left_click(
                 world.occupy(tp);
                 let default_workers = match *selected_building { BuildingKind::House | BuildingKind::Warehouse => 0, _ => 1 };
                 let capacity = match *selected_building { BuildingKind::House => 2, _ => 0 };
-                buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers, capacity });
+                buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers, capacity, is_highlighted: false });
                 // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
                 if *selected_building == BuildingKind::Warehouse {
                     warehouses.push(WarehouseStore { pos: tp, ..Default::default() });

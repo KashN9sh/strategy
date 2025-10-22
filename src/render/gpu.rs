@@ -30,7 +30,7 @@ pub fn render_world(
     gpu.prepare_tiles(world, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
     
     // Подготавливаем здания и деревья
-    gpu.prepare_structures(world, buildings, building_atlas, tree_atlas, tile_atlas, min_tx, min_ty, max_tx, max_ty);
+    gpu.prepare_structures(world, buildings, building_atlas, tree_atlas, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
     
     // Подготавливаем граждан
     gpu.prepare_citizens(citizens, buildings, tile_atlas);

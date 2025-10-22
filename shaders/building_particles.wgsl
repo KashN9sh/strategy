@@ -1,5 +1,10 @@
 // Шейдер для частиц зданий (искры, дым, пыль)
 
+// Униформы камеры
+struct CameraUniform {
+    view_proj: mat4x4<f32>,
+}
+
 struct BuildingParticle {
     position: vec2<f32>,
     velocity: vec2<f32>,

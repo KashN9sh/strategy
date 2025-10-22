@@ -70,6 +70,7 @@ impl SaveData {
                 timer_ms: sb.timer_ms,
                 workers_target: sb.workers_target,
                 capacity: sb.capacity,
+                is_highlighted: false,
             })
             .collect()
     }

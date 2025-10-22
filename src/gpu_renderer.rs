@@ -488,6 +488,7 @@ pub struct GpuRenderer {
     citizen_instances: Vec<CitizenInstance>,
     road_instances: Vec<RoadInstance>,
     road_preview_instances: Vec<RoadInstance>,
+    building_preview_instances: Vec<BuildingInstance>,
     ui_rects: Vec<UIRect>,
     minimap_instances: Vec<UIRect>,
     max_instances: usize,
@@ -496,6 +497,7 @@ pub struct GpuRenderer {
     citizen_instance_buffer: wgpu::Buffer,
     road_instance_buffer: wgpu::Buffer,
     road_preview_instance_buffer: wgpu::Buffer,
+    building_preview_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
     minimap_buffer: wgpu::Buffer,
 }
@@ -965,6 +967,13 @@ impl GpuRenderer {
         let road_preview_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Road Preview Instance Buffer"),
             size: (std::mem::size_of::<RoadInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let building_preview_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Building Preview Instance Buffer"),
+            size: (std::mem::size_of::<BuildingInstance>() * max_instances) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1448,6 +1457,7 @@ impl GpuRenderer {
             citizen_instances: Vec::new(),
             road_instances: Vec::new(),
             road_preview_instances: Vec::new(),
+            building_preview_instances: Vec::new(),
             ui_rects: Vec::new(),
             minimap_instances: Vec::new(),
             max_instances,
@@ -1456,6 +1466,7 @@ impl GpuRenderer {
             citizen_instance_buffer,
             road_instance_buffer,
             road_preview_instance_buffer,
+            building_preview_instance_buffer,
             ui_rect_buffer,
             minimap_buffer,
         })
@@ -1848,6 +1859,7 @@ impl GpuRenderer {
         tree_atlas: &Option<crate::atlas::TreeAtlas>,
         tile_atlas: &crate::atlas::TileAtlas,
         min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+        highlighted_building: Option<glam::IVec2>, // Позиция выделенного здания
     ) {
         use crate::types::BuildingKind;
         use glam::{Mat4, IVec2};
@@ -1970,10 +1982,18 @@ impl GpuRenderer {
                         BuildingKind::Smelter => 12,
                     };
                     
+                    // Подсветка здания при наведении
+                    let is_highlighted = highlighted_building.map_or(false, |pos| pos.x == mx && pos.y == my);
+                    let tint_color = if is_highlighted {
+                        [1.3, 1.3, 1.0, 1.0] // Желтоватое свечение при наведении
+                    } else {
+                        [1.0, 1.0, 1.0, 1.0] // Белый цвет по умолчанию
+                    };
+                    
                     let instance = BuildingInstance {
                         model_matrix: transform.to_cols_array_2d(),
                         building_id,
-                        tint_color: [1.0, 1.0, 1.0, 1.0], // белый цвет по умолчанию
+                        tint_color,
                         padding: [0; 3],
                     };
                     
@@ -2124,6 +2144,101 @@ impl GpuRenderer {
     
     pub fn clear_road_preview(&mut self) {
         self.road_preview_instances.clear();
+    }
+    
+    pub fn prepare_building_preview(
+        &mut self,
+        building_kind: crate::types::BuildingKind,
+        tile_pos: glam::IVec2,
+        is_allowed: bool,
+        building_atlas: &Option<crate::atlas::BuildingAtlas>,
+        tile_atlas: &crate::atlas::TileAtlas,
+    ) {
+        use crate::types::BuildingKind;
+        use glam::{Mat4, Vec3};
+        
+        self.building_preview_instances.clear();
+        
+        if building_atlas.is_none() { return; }
+        
+        let half_w = tile_atlas.half_w as f32;
+        let half_h = tile_atlas.half_h as f32;
+        let tile_w_px = tile_atlas.half_w * 2 + 1;
+        
+        // Размер зданий - масштабируем до размера тайла, сохраняя пропорции (как в prepare_structures)
+        let (building_width, building_height) = if let Some(building_atlas) = building_atlas {
+            let original_w = building_atlas.w as f32;
+            let original_h = building_atlas.h as f32;
+            
+            // Масштабируем до размера тайла, сохраняя пропорции
+            let tile_size = tile_w_px as f32;
+            let scale = tile_size / original_w.max(original_h);
+            (original_w * scale, original_h * scale * 0.5)
+        } else {
+            let tile_size = tile_w_px as f32;
+            (tile_size, tile_size)
+        };
+        
+        // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ
+        let iso_x = (tile_pos.x - tile_pos.y) as f32 * half_w;
+        let iso_y = (tile_pos.x + tile_pos.y) as f32 * half_h;
+        
+        // Смещение здания вверх (на тайле)
+        let building_off = half_h * 2.0;
+        let final_y = iso_y - building_off;
+        
+        // Матрица трансформации здания
+        let transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(building_width, building_height, 1.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(iso_x, -final_y, 0.0)
+        );
+        
+        // Конвертируем BuildingKind в u32 ID
+        let building_id = match building_kind {
+            BuildingKind::House => 0,
+            BuildingKind::Lumberjack => 1,
+            BuildingKind::Warehouse => 2,
+            BuildingKind::Forester => 3,
+            BuildingKind::StoneQuarry => 4,
+            BuildingKind::ClayPit => 5,
+            BuildingKind::Kiln => 6,
+            BuildingKind::WheatField => 7,
+            BuildingKind::Mill => 8,
+            BuildingKind::Bakery => 9,
+            BuildingKind::Fishery => 10,
+            BuildingKind::IronMine => 11,
+            BuildingKind::Smelter => 12,
+        };
+        
+        // Цвет предпросмотра: зеленоватый если можно построить, красноватый если нельзя
+        let tint_color = if is_allowed {
+            [0.5, 1.0, 0.5, 0.6] // Зеленоватый полупрозрачный
+        } else {
+            [1.0, 0.5, 0.5, 0.6] // Красноватый полупрозрачный
+        };
+        
+        let instance = BuildingInstance {
+            model_matrix: transform.to_cols_array_2d(),
+            building_id,
+            tint_color,
+            padding: [0; 3],
+        };
+        
+        self.building_preview_instances.push(instance);
+        
+        // Обновляем буфер инстансов предпросмотра зданий
+        if !self.building_preview_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.building_preview_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.building_preview_instances)
+            );
+        }
+    }
+    
+    pub fn clear_building_preview(&mut self) {
+        self.building_preview_instances.clear();
     }
     
     pub fn prepare_minimap(
@@ -2445,6 +2560,17 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(1, self.road_preview_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     render_pass.draw_indexed(0..6, 0, 0..self.road_preview_instances.len() as u32);
+                }
+                
+                // Рендерим предпросмотр зданий (поверх всего остального)
+                if !self.building_preview_instances.is_empty() {
+                    render_pass.set_pipeline(&self.building_render_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, self.building_preview_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.building_preview_instances.len() as u32);
                 }
             }
             
