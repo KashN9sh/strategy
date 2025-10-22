@@ -7,9 +7,29 @@ use anyhow::Result;
 
 use crate::atlas::TileAtlas;
 use crate::world::World;
-use crate::types::TileKind;
+use crate::types::{TileKind, WeatherKind};
 
 // Структуры для передачи данных в GPU
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct WeatherUniform {
+    pub weather_type: u32, // 0=Clear, 1=Rain, 2=Fog, 3=Snow
+    pub time: f32,
+    pub intensity: f32,
+    pub padding: f32,
+}
+
+impl WeatherUniform {
+    pub fn new() -> Self {
+        Self {
+            weather_type: 0,
+            time: 0.0,
+            intensity: 0.0,
+            padding: 0.0,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -409,6 +429,12 @@ pub struct GpuRenderer {
     
     // Униформы
     camera_uniform: CameraUniform,
+    
+    // Погодные эффекты
+    weather_buffer: wgpu::Buffer,
+    weather_bind_group: wgpu::BindGroup,
+    weather_uniform: WeatherUniform,
+    weather_pipeline: wgpu::RenderPipeline,
     
     // UI экранные униформы (отдельно от мировой камеры)
     screen_buffer: wgpu::Buffer,
@@ -1132,6 +1158,103 @@ impl GpuRenderer {
             multiview: None,
         });
         
+        // Создаем погодные эффекты
+        let weather_uniform = WeatherUniform::new();
+        
+        let weather_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Weather Buffer"),
+            contents: bytemuck::cast_slice(&[weather_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        
+        let weather_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+            label: Some("weather_bind_group_layout"),
+        });
+        
+        let weather_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &weather_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: weather_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: screen_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("weather_bind_group"),
+        });
+        
+        // Загружаем шейдер погоды
+        let weather_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Weather Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/weather.wgsl").into()),
+        });
+        
+        let weather_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Weather Pipeline Layout"),
+            bind_group_layouts: &[&weather_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let weather_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Weather Pipeline"),
+            layout: Some(&weather_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &weather_shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &weather_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
         Ok(Self {
             surface,
             device,
@@ -1150,6 +1273,10 @@ impl GpuRenderer {
             camera_buffer,
             camera_bind_group,
             camera_uniform,
+            weather_buffer,
+            weather_bind_group,
+            weather_uniform,
+            weather_pipeline,
             screen_buffer,
             screen_bind_group,
             screen_uniform,
@@ -1216,6 +1343,24 @@ impl GpuRenderer {
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform])
+        );
+    }
+    
+    // Обновление погодных эффектов
+    pub fn update_weather(&mut self, weather: WeatherKind, time: f32, intensity: f32) {
+        self.weather_uniform.weather_type = match weather {
+            WeatherKind::Clear => 0,
+            WeatherKind::Rain => 1,
+            WeatherKind::Fog => 2,
+            WeatherKind::Snow => 3,
+        };
+        self.weather_uniform.time = time;
+        self.weather_uniform.intensity = intensity;
+        
+        self.queue.write_buffer(
+            &self.weather_buffer,
+            0,
+            bytemuck::cast_slice(&[self.weather_uniform])
         );
     }
     
@@ -2079,6 +2224,13 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(1, self.minimap_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
+            }
+            
+            // Рендерим погодные эффекты (поверх всего, кроме тултипов)
+            if self.weather_uniform.weather_type != 0 {
+                render_pass.set_pipeline(&self.weather_pipeline);
+                render_pass.set_bind_group(0, &self.weather_bind_group, &[]);
+                render_pass.draw(0..3, 0..1); // Полноэкранный треугольник
             }
         }
         

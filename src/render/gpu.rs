@@ -96,6 +96,7 @@ pub fn apply_environment_effects(
     gpu: &mut GpuRenderer,
     weather: crate::WeatherKind,
     day_progress: f32,
+    time: f32,
 ) {
     use crate::WeatherKind;
     
@@ -110,19 +111,15 @@ pub fn apply_environment_effects(
         gpu.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
     }
     
-    // Погодные эффекты
-    match weather {
-        WeatherKind::Clear => {}
-        WeatherKind::Rain => {
-            gpu.apply_screen_tint([40.0/255.0, 60.0/255.0, 100.0/255.0, 40.0/255.0]);
-        }
-        WeatherKind::Fog => {
-            gpu.apply_screen_tint([160.0/255.0, 160.0/255.0, 160.0/255.0, 50.0/255.0]);
-        }
-        WeatherKind::Snow => {
-            gpu.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
-        }
-    }
+    // Обновляем погодные эффекты в GPU
+    let intensity = match weather {
+        WeatherKind::Clear => 0.0,
+        WeatherKind::Rain => 0.8,
+        WeatherKind::Fog => 0.6,
+        WeatherKind::Snow => 0.7,
+    };
+    
+    gpu.update_weather(crate::types::WeatherKind::from(weather), time, intensity);
 }
 
 // === Вспомогательные функции для обратной совместимости ===
