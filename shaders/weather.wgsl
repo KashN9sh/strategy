@@ -55,23 +55,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     
     if (weather.weather_type == 1u) {
-        // Rain - синие капли
+        // Rain - синие капли под углом 45 градусов
         let rain_intensity = weather.intensity;
         
-        // Создаем паттерн дождя
-        let rain_scale = 0.1;
-        let rain_speed = 2.0;
-        let rain_offset = time * rain_speed;
+        // Скорость дождя
+        let rain_speed = 5.0;
+        let rain_offset = fract(time * rain_speed);
         
-        // Вертикальные полосы дождя
-        let rain_x = uv.x * 20.0 + rain_offset;
-        let rain_y = uv.y * 30.0 + rain_offset * 0.7;
+        // Поворачиваем координаты на 45 градусов
+        let angle = 0.3; // 45 градусов в радианах
+        let cos_a = cos(angle);
+        let sin_a = sin(angle);
         
-        let rain_noise = fract(sin(rain_x) * 43758.5453) * fract(sin(rain_y) * 43758.5453);
-        let rain_strength = smoothstep(0.8, 1.0, rain_noise) * rain_intensity;
+        // Поворачиваем UV координаты
+        let rotated_x = uv.x * cos_a - uv.y * sin_a;
+        let rotated_y = uv.x * sin_a + uv.y * cos_a;
         
-        if (rain_strength > 0.1) {
-            color = vec4<f32>(0.3, 0.5, 0.8, rain_strength * 0.6);
+        // Создаем наклонные линии дождя
+        let rain_x = fract(rotated_x * 100.0);
+        let rain_y = fract(rotated_y * 40.0 + rain_offset);
+        
+        // Наклонные линии дождя (больше частиц)
+        let is_rain = step(0.5, rain_x) * rain_y;
+        let rain_strength = is_rain * rain_intensity;
+        
+        if (rain_strength > 0.05) {
+            color = vec4<f32>(0.2, 0.4, 1.0, rain_strength * 0.9);
         }
     }
     
@@ -79,39 +88,48 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Fog - серый туман
         let fog_intensity = weather.intensity;
         
-        // Создаем волнообразный туман
-        let fog_scale = 0.05;
-        let fog_speed = 0.5;
+        // Простой волнообразный туман
+        let fog_speed = 0.3;
         let fog_offset = time * fog_speed;
         
-        let fog_x = uv.x * 10.0 + fog_offset;
-        let fog_y = uv.y * 10.0 + fog_offset * 0.3;
+        let fog_x = uv.x * 8.0 + fog_offset;
+        let fog_y = uv.y * 8.0 + fog_offset * 0.5;
         
         let fog_noise = sin(fog_x) * cos(fog_y) * 0.5 + 0.5;
         let fog_strength = fog_noise * fog_intensity;
         
-        if (fog_strength > 0.1) {
-            color = vec4<f32>(0.7, 0.7, 0.7, fog_strength * 0.4);
+        if (fog_strength > 0.05) {
+            color = vec4<f32>(0.6, 0.6, 0.6, fog_strength * 0.6);
         }
     }
     
     if (weather.weather_type == 3u) {
-        // Snow - белые снежинки
+        // Snow - белые снежинки под углом 45 градусов
         let snow_intensity = weather.intensity;
         
-        // Создаем паттерн снега
-        let snow_scale = 0.08;
-        let snow_speed = 0.8;
-        let snow_offset = time * snow_speed;
+        // Скорость снега
+        let snow_speed = 1.0;
+        let snow_offset = fract(time * snow_speed);
         
-        let snow_x = uv.x * 15.0 + snow_offset;
-        let snow_y = uv.y * 20.0 + snow_offset * 0.5;
+        // Поворачиваем координаты на 45 градусов
+        let angle = 0.3; // 45 градусов в радианах
+        let cos_a = cos(angle);
+        let sin_a = sin(angle);
         
-        let snow_noise = fract(sin(snow_x) * 43758.5453) * fract(sin(snow_y) * 43758.5453);
-        let snow_strength = smoothstep(0.7, 1.0, snow_noise) * snow_intensity;
+        // Поворачиваем UV координаты
+        let rotated_x = uv.x * cos_a - uv.y * sin_a;
+        let rotated_y = uv.x * sin_a + uv.y * cos_a;
+        
+        // Создаем наклонные снежинки
+        let snow_grid_x = fract(rotated_x * 40.0 + sin(rotated_y * 10.0 + time) * 0.2);
+        let snow_grid_y = fract(rotated_y * 50.0 + snow_offset);
+        
+        // Наклонные снежинки как точки (больше частиц)
+        let is_snowflake = step(0.7, snow_grid_x) * step(0.7, snow_grid_y);
+        let snow_strength = is_snowflake * snow_intensity;
         
         if (snow_strength > 0.1) {
-            color = vec4<f32>(0.9, 0.9, 1.0, snow_strength * 0.8);
+            color = vec4<f32>(0.95, 0.95, 1.0, snow_strength);
         }
     }
     

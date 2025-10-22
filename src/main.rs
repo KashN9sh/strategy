@@ -1061,7 +1061,15 @@ fn run() -> Result<()> {
                             gpu_renderer.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
                         }
                     }
-                    // TODO: добавить частицы осадков (дождь, снег)
+                    
+                    // Применяем погодные эффекты (частицы)
+                    let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                    render::gpu::apply_environment_effects(
+                        &mut gpu_renderer,
+                        weather,
+                        day_progress,
+                        world_clock_ms / 1000.0,
+                    );
                     
                     // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {
@@ -1754,6 +1762,15 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
     match head.to_ascii_lowercase().as_str() {
         "help" => {
             log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>, biome <swamp_thr rocky_thr|overlay>, biome-overlay".to_string());
+        }
+        "debug" => {
+            log.push(format!("Current weather: {:?}", weather));
+            log.push(format!("Weather intensity: {}", match weather {
+                WeatherKind::Clear => 0.0,
+                WeatherKind::Rain => 0.8,
+                WeatherKind::Fog => 0.6,
+                WeatherKind::Snow => 0.7,
+            }));
         }
         "weather" => {
             if let Some(arg) = parts.next() {
