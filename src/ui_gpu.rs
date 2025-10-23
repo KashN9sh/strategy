@@ -199,6 +199,11 @@ pub fn draw_ui_gpu(
     current_x += build_w + 6.0;
     
     gpu.draw_button(current_x, tab_y, economy_w, btn_h, b"Economy", ui_tab == UITab::Economy, btn_scale);
+    current_x += economy_w + 6.0;
+    
+    // Кнопка для депозитов ресурсов
+    let deposits_w = (ui::button_w_for(b"Deposits", s) as f32).max(80.0);
+    gpu.draw_button(current_x, tab_y, deposits_w, btn_h, b"Deposits", show_deposits, btn_scale);
     
     if ui_tab == UITab::Build {
         // Категории зданий (вторая строка)
@@ -528,6 +533,8 @@ pub fn draw_button_tooltip(
         "Balanced Food Policy" => ("Balanced Food Policy", "Equal distribution of bread and fish."),
         "Bread First Policy" => ("Bread First Policy", "Prioritize bread distribution."),
         "Fish First Policy" => ("Fish First Policy", "Prioritize fish distribution."),
+        
+        "Deposits" => ("Deposits", "Toggle resource deposits display on/off."),
         
         _ => (button_text, "Click to interact."),
     };

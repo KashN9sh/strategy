@@ -54,6 +54,7 @@ pub fn handle_left_click(
     path_sel_a: &mut Option<IVec2>,
     path_sel_b: &mut Option<IVec2>,
     last_path: &mut Option<Vec<IVec2>>,
+    show_deposits: &mut bool,
 ) -> bool {
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let _bar_h = ui::top_panel_height(ui_s);
@@ -88,6 +89,15 @@ pub fn handle_left_click(
     let build_w = ui::button_w_for(b"Build", s); let econ_w = ui::button_w_for(b"Economy", s);
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb, by0 + padb, build_w, btn_h) { *ui_tab = ui::UITab::Build; return true; }
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb + build_w + 6 * s, by0 + padb, econ_w, btn_h) { *ui_tab = ui::UITab::Economy; return true; }
+    
+    // Кнопка депозитов
+    let deposits_w = ui::button_w_for(b"Deposits", s).max(80);
+    let deposits_x = padb + build_w + 6 * s + econ_w + 6 * s;
+    let deposits_y = by0 + padb;
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, deposits_x, deposits_y, deposits_w, btn_h) { 
+        *show_deposits = !*show_deposits; 
+        return true; 
+    }
 
     // Если вкладка Economy — клики по её контролам
     if *ui_tab == ui::UITab::Economy {
@@ -307,6 +317,14 @@ pub fn get_hovered_button(
     }
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, econ_x, econ_y, econ_w, btn_h) {
         return Some("Economy Tab");
+    }
+    
+    // Кнопка депозитов
+    let deposits_w = ui::button_w_for(b"Deposits", ui_s).max(80);
+    let deposits_x = econ_x + econ_w + 6;
+    let deposits_y = by0 + padb;
+    if ui::point_in_rect(cursor_xy.x, cursor_xy.y, deposits_x, deposits_y, deposits_w, btn_h) {
+        return Some("Deposits");
     }
     
     // Если вкладка Economy — контролы экономики

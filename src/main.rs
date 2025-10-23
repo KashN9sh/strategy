@@ -507,7 +507,7 @@ fn run() -> Result<()> {
                                 &mut selected_building, &mut active_building_panel,
                                 &mut world, &mut buildings, &mut buildings_dirty, &mut citizens, &mut population,
                                 &mut warehouses, &mut resources, &mut road_mode, &mut path_debug_mode,
-                                &mut path_sel_a, &mut path_sel_b, &mut last_path,
+                                &mut path_sel_a, &mut path_sel_b, &mut last_path, &mut show_deposits,
                             ) { return; }
                         }
                         // остальная часть обработки ЛКМ остаётся прежней (клика по миру вне UI)
