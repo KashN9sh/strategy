@@ -349,7 +349,7 @@ pub struct CitizenInstance {
     pub model_matrix: [[f32; 4]; 4],
     pub building_id: u32, // 255 = citizen marker
     pub tint_color: [f32; 4],
-    pub emotion: u32, // 0=sad, 1=neutral, 2=happy
+    pub emotion: u32, // 0=спокойный, 1=счастливый, 2=злой
     pub state: u32,   // 0=idle, 1=working, 2=sleeping, 3=hauling, 4=fetching
 }
 
@@ -2227,12 +2227,13 @@ impl GpuRenderer {
             );
             
             // Определяем эмоцию на основе счастья
+            // 0=спокойный, 1=счастливый, 2=злой
             let emotion = if c.happiness < 30 {
-                0 // sad
+                2 // злой
             } else if c.happiness < 70 {
-                1 // neutral
+                0 // спокойный
             } else {
-                2 // happy
+                1 // счастливый
             };
             
             // Определяем состояние
@@ -2362,8 +2363,8 @@ impl GpuRenderer {
         };
         
         // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ
-        let iso_x = (tile_pos.x - tile_pos.y) as f32 * half_w;
-        let iso_y = (tile_pos.x + tile_pos.y) as f32 * half_h;
+        let iso_x = (tile_pos.x as f32 - tile_pos.y as f32) * half_w;
+        let iso_y = (tile_pos.x as f32 + tile_pos.y as f32) * half_h;
         
         // Смещение здания вверх (на тайле)
         let building_off = half_h * 2.0;

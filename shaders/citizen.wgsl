@@ -102,7 +102,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             // Вычисляем UV координаты для лица
             let face_uv = (in.model_pos - face_center) / face_size * 0.5 + 0.5;
             
-            // Определяем какой спрайт лица использовать (0=sad, 1=neutral, 2=happy)
+            // Определяем какой спрайт лица использовать (0=спокойный, 1=счастливый, 2=злой)
             let face_sprite = f32(in.emotion);
             let face_sprites = 3.0; // количество спрайтов в текстуре
             

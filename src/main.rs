@@ -983,6 +983,8 @@ fn run() -> Result<()> {
                                 ui_tab,
                                 paused,
                                 speed_mult,
+                                tax_rate,
+                                food_policy,
                             )
                         } else {
                             None

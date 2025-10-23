@@ -99,14 +99,57 @@ pub fn handle_left_click(
         return true; 
     }
 
-    // Если вкладка Economy — клики по её контролам
+    // Если вкладка Economy — клики по её контролам (динамический расчет)
     if *ui_tab == ui::UITab::Economy {
-        let lay = ui::layout_economy_panel(width_i32, height_i32, s);
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h) { *tax_rate = (*tax_rate - config.tax_step).max(config.tax_min); return true; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h) { *tax_rate = (*tax_rate + config.tax_step).min(config.tax_max); return true; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h) { *food_policy = FoodPolicy::Balanced; return true; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h) { *food_policy = FoodPolicy::BreadFirst; return true; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h) { *food_policy = FoodPolicy::FishFirst; return true; }
+        let control_y = by0 + padb + btn_h + 6 * ui_s; // вторая строка (контролы налогов)
+        let policy_y = control_y + btn_h + 6 * ui_s; // третья строка (политика еды)
+        
+        // Динамический расчет координат для налогов (как в ui_gpu.rs)
+        let mut current_x = padb;
+        let tax_label_w = ((3 * 4 * 2 * ui_s) + 12).max(40); // "TAX"
+        current_x += tax_label_w + 6 * ui_s;
+        
+        let taxp = (*tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
+        let tax_num_w = ((taxp.to_string().len() as i32 * 4 * 2 * ui_s) + 12).max(60);
+        current_x += tax_num_w + 6 * ui_s;
+        
+        // Кнопки изменения налогов
+        let minus_btn_w = ((1 * 4 * 2 * ui_s) + 12).max(30); // "-"
+        let plus_btn_w = ((1 * 4 * 2 * ui_s) + 12).max(30); // "+"
+        
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, control_y, minus_btn_w, btn_h) { 
+            *tax_rate = (*tax_rate - config.tax_step).max(config.tax_min); 
+            return true; 
+        }
+        current_x += minus_btn_w + 6 * ui_s;
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, control_y, plus_btn_w, btn_h) { 
+            *tax_rate = (*tax_rate + config.tax_step).min(config.tax_max); 
+            return true; 
+        }
+        
+        // Динамический расчет координат для политики еды
+        current_x = padb;
+        let policy_label_w = ((11 * 4 * 2 * ui_s) + 12).max(100); // "FOOD POLICY"
+        current_x += policy_label_w + 6 * ui_s;
+        
+        // Кнопки политики еды
+        let food_policies: &[(FoodPolicy, &[u8])] = &[
+            (FoodPolicy::Balanced, b"Balanced"),
+            (FoodPolicy::BreadFirst, b"Bread"),
+            (FoodPolicy::FishFirst, b"Fish"),
+        ];
+        
+        for (policy, label) in food_policies.iter() {
+            let btn_w = ((label.len() as i32 * 4 * 2 * ui_s) + 12).max(50);
+            if current_x + btn_w > width_i32 - padb {
+                break;
+            }
+            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, policy_y, btn_w, btn_h) { 
+                *food_policy = *policy; 
+                return true; 
+            }
+            current_x += btn_w + 6 * ui_s;
+        }
     }
 
     // клик по категориям (Build): 2-я строка, с переносом
@@ -272,6 +315,8 @@ pub fn get_hovered_button(
     ui_tab: ui::UITab,
     paused: bool,
     speed_mult: f32,
+    tax_rate: f32,
+    food_policy: FoodPolicy,
 ) -> Option<&'static str> {
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let bottom_bar_h = ui::bottom_panel_height(ui_s);
@@ -327,23 +372,53 @@ pub fn get_hovered_button(
         return Some("Deposits");
     }
     
-    // Если вкладка Economy — контролы экономики
+    // Если вкладка Economy — контролы экономики (динамический расчет)
     if ui_tab == ui::UITab::Economy {
-        let lay = ui::layout_economy_panel(width_i32, height_i32, ui_s);
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_minus_x, lay.tax_minus_y, lay.tax_minus_w, lay.tax_minus_h) {
+        let control_y = by0 + padb + btn_h + 6 * ui_s; // вторая строка (контролы налогов)
+        let policy_y = control_y + btn_h + 6 * ui_s; // третья строка (политика еды)
+        
+        // Динамический расчет координат для налогов (как в ui_gpu.rs)
+        let mut current_x = padb;
+        let tax_label_w = ((3 * 4 * 2 * ui_s) + 12).max(40); // "TAX"
+        current_x += tax_label_w + 6 * ui_s;
+        
+        let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
+        let tax_num_w = ((taxp.to_string().len() as i32 * 4 * 2 * ui_s) + 12).max(60);
+        current_x += tax_num_w + 6 * ui_s;
+        
+        // Кнопки изменения налогов
+        let minus_btn_w = ((1 * 4 * 2 * ui_s) + 12).max(30); // "-"
+        let plus_btn_w = ((1 * 4 * 2 * ui_s) + 12).max(30); // "+"
+        
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, control_y, minus_btn_w, btn_h) {
             return Some("Decrease Tax");
         }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.tax_plus_x, lay.tax_plus_y, lay.tax_plus_w, lay.tax_plus_h) {
+        current_x += minus_btn_w + 6 * ui_s;
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, control_y, plus_btn_w, btn_h) {
             return Some("Increase Tax");
         }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bal_x, lay.policy_bal_y, lay.policy_bal_w, lay.policy_bal_h) {
-            return Some("Balanced Food Policy");
-        }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_bread_x, lay.policy_bread_y, lay.policy_bread_w, lay.policy_bread_h) {
-            return Some("Bread First Policy");
-        }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, lay.policy_fish_x, lay.policy_fish_y, lay.policy_fish_w, lay.policy_fish_h) {
-            return Some("Fish First Policy");
+        
+        // Динамический расчет координат для политики еды
+        current_x = padb;
+        let policy_label_w = ((11 * 4 * 2 * ui_s) + 12).max(100); // "FOOD POLICY"
+        current_x += policy_label_w + 6 * ui_s;
+        
+        // Кнопки политики еды
+        let food_policies: &[(FoodPolicy, &[u8], &str)] = &[
+            (FoodPolicy::Balanced, b"Balanced", "Balanced Food Policy"),
+            (FoodPolicy::BreadFirst, b"Bread", "Bread First Policy"),
+            (FoodPolicy::FishFirst, b"Fish", "Fish First Policy"),
+        ];
+        
+        for (policy, label, tooltip) in food_policies.iter() {
+            let btn_w = ((label.len() as i32 * 4 * 2 * ui_s) + 12).max(50);
+            if current_x + btn_w > width_i32 - padb {
+                break;
+            }
+            if ui::point_in_rect(cursor_xy.x, cursor_xy.y, current_x, policy_y, btn_w, btn_h) {
+                return Some(tooltip);
+            }
+            current_x += btn_w + 6 * ui_s;
         }
     }
     

@@ -264,30 +264,54 @@ pub fn draw_ui_gpu(
             current_x += btn_w + 6.0 * scale;
         }
     } else {
-        // Economy panel
+        // Economy panel - упрощенная версия с динамическим расчетом
+        
+        // === ВТОРАЯ СТРОКА: Контролы налогов ===
         current_x = pad;
-        let econ_y = tab_y + btn_h + 6.0;
+        let control_y = tab_y + btn_h + 6.0;
         
-        // TAX
-        gpu.draw_text(current_x, econ_y + 5.0, b"TAX", [200.0/255.0, 200.0/255.0, 200.0/255.0, 1.0], btn_scale);
-        current_x += 40.0;
+        // TAX контролы - динамический расчет
+        let tax_label_w = (3.0 * 4.0 * 2.0 * scale + 12.0).max(40.0); // "TAX"
+        gpu.draw_text(current_x, control_y + 5.0, b"TAX", [200.0/255.0, 200.0/255.0, 200.0/255.0, 1.0], btn_scale);
+        current_x += tax_label_w + 6.0 * scale;
         
-        let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
-        gpu.draw_number(current_x, econ_y + 5.0, taxp, [1.0, 1.0, 1.0, 1.0], btn_scale);
-        current_x += 60.0;
+        let taxp = tax_rate as u32;
+        let tax_num_w = (taxp.to_string().len() as f32 * 4.0 * 2.0 * scale + 12.0).max(60.0);
+        gpu.draw_number(current_x, control_y + 5.0, taxp, [1.0, 1.0, 1.0, 1.0], btn_scale);
+        current_x += tax_num_w + 6.0 * scale;
         
-        // FOOD
-        gpu.draw_text(current_x, econ_y + 5.0, b"FOOD", [200.0/255.0, 200.0/255.0, 200.0/255.0, 1.0], btn_scale);
-        current_x += 60.0;
+        // Кнопки изменения налогов - динамический расчет
+        let minus_btn_w = (1.0 * 4.0 * 2.0 * scale + 12.0).max(30.0); // "-"
+        let plus_btn_w = (1.0 * 4.0 * 2.0 * scale + 12.0).max(30.0); // "+"
         
-        // Food policy buttons
-        gpu.draw_button(current_x, econ_y, 80.0, btn_h, b"Balanced", food_policy == FoodPolicy::Balanced, btn_scale);
-        current_x += 86.0;
+        gpu.draw_button(current_x, control_y, minus_btn_w, btn_h, b"-", false, btn_scale);
+        current_x += minus_btn_w + 6.0 * scale;
+        gpu.draw_button(current_x, control_y, plus_btn_w, btn_h, b"+", false, btn_scale);
+        current_x += plus_btn_w + 6.0 * scale;
         
-        gpu.draw_button(current_x, econ_y, 60.0, btn_h, b"Bread", food_policy == FoodPolicy::BreadFirst, btn_scale);
-        current_x += 66.0;
+        // === ТРЕТЬЯ СТРОКА: Политика еды ===
+        current_x = pad;
+        let policy_y = control_y + btn_h + 6.0;
         
-        gpu.draw_button(current_x, econ_y, 50.0, btn_h, b"Fish", food_policy == FoodPolicy::FishFirst, btn_scale);
+        let policy_label_w = (11.0 * 4.0 * 2.0 * scale + 12.0).max(100.0); // "FOOD POLICY"
+        gpu.draw_text(current_x, policy_y + 5.0, b"FOOD POLICY", [200.0/255.0, 200.0/255.0, 200.0/255.0, 1.0], btn_scale);
+        current_x += policy_label_w + 6.0 * scale;
+        
+        // Food policy buttons - динамический расчет
+        let food_policies: &[(FoodPolicy, &[u8])] = &[
+            (FoodPolicy::Balanced, b"Balanced"),
+            (FoodPolicy::BreadFirst, b"Bread"),
+            (FoodPolicy::FishFirst, b"Fish"),
+        ];
+        
+        for (policy, label) in food_policies.iter() {
+            let btn_w = (label.len() as f32 * 4.0 * 2.0 * scale + 12.0).max(50.0);
+            if current_x + btn_w > fw as f32 - pad {
+                break;
+            }
+            gpu.draw_button(current_x, policy_y, btn_w, btn_h, *label, *policy == food_policy, btn_scale);
+            current_x += btn_w + 6.0 * scale;
+        }
     }
     
     // === МИНИКАРТА ===
@@ -316,7 +340,9 @@ pub fn draw_ui_gpu(
     
     // === ТУЛТИПЫ ===
     if let Some(building) = hovered_building {
-        // Подсчитываем работников для этого здания
+        // Показываем тултип здания только на вкладке Build
+        if ui_tab == UITab::Build {
+            // Подсчитываем работников для этого здания
         let workers_current = 0; // TODO: подсчитать реальных работников
         let workers_target = building.workers_target;
         
@@ -331,16 +357,32 @@ pub fn draw_ui_gpu(
             fw as f32,
             fh as f32,
         );
+        }
     } else if let Some(button_text) = hovered_button {
-        draw_button_tooltip(
-            gpu,
-            cursor_x,
-            cursor_y,
-            button_text,
-            scale,
-            fw as f32,
-            fh as f32,
-        );
+        // Показываем тултипы кнопок только на соответствующих вкладках
+        let should_show_tooltip = match ui_tab {
+            UITab::Build => true, // На вкладке Build показываем все тултипы кнопок
+            UITab::Economy => {
+                // На вкладке Economy показываем только тултипы экономических кнопок
+                button_text.contains("TAX") || 
+                button_text.contains("FOOD") || 
+                button_text.contains("BALANCED") || 
+                button_text.contains("BREAD") || 
+                button_text.contains("FISH")
+            }
+        };
+        
+        if should_show_tooltip {
+            draw_button_tooltip(
+                gpu,
+                cursor_x,
+                cursor_y,
+                button_text,
+                scale,
+                fw as f32,
+                fh as f32,
+            );
+        }
     } else if let Some(resource_name) = hovered_resource {
         draw_resource_tooltip(
             gpu,
