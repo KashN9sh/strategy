@@ -25,6 +25,7 @@ var t_buildings: texture_2d<f32>;
 @group(1) @binding(5)
 var s_buildings: sampler;
 
+
 // Входящие данные вершины
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -50,6 +51,7 @@ struct RoadInstanceInput {
     @location(6) road_mask: u32,
     @location(7) tint_color: vec4<f32>,
 }
+
 
 // Выходящие данные вершинного шейдера
 struct VertexOutput {
@@ -104,22 +106,12 @@ fn vs_main_road(
     return out;
 }
 
+
 // Фрагментный шейдер
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let building_id = in.building_id;
     
-    // building_id = 255 означает гражданина (рендерим как кружок)
-    if building_id == 255u {
-        // Отрисовка кружка: отбрасываем пиксели вне радиуса 0.5
-        let dist = length(in.model_pos);
-        if dist > 0.5 {
-            discard;
-        }
-        // Сглаживание краев кружка
-        let alpha = smoothstep(0.5, 0.45, dist);
-        return vec4<f32>(in.tint_color.rgb, in.tint_color.a * alpha);
-    }
     
     // Деревья (ID 100-102 = стадии 0-2) - рендерим из текстуры
     if building_id >= 100u && building_id <= 102u {

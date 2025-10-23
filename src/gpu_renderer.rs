@@ -349,10 +349,12 @@ pub struct CitizenInstance {
     pub model_matrix: [[f32; 4]; 4],
     pub building_id: u32, // 255 = citizen marker
     pub tint_color: [f32; 4],
+    pub emotion: u32, // 0=sad, 1=neutral, 2=happy
+    pub state: u32,   // 0=idle, 1=working, 2=sleeping, 3=hauling, 4=fetching
 }
 
 impl CitizenInstance {
-    const ATTRIBS: [wgpu::VertexAttribute; 6] = [
+    const ATTRIBS: [wgpu::VertexAttribute; 8] = [
         // model_matrix
         wgpu::VertexAttribute {
             offset: 0,
@@ -385,6 +387,18 @@ impl CitizenInstance {
             offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
             shader_location: 7,
             format: wgpu::VertexFormat::Float32x4,
+        },
+        // emotion
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>() + std::mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+            shader_location: 8,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        // state
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>() + std::mem::size_of::<[f32; 4]>() + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+            shader_location: 9,
+            format: wgpu::VertexFormat::Uint32,
         },
     ];
 
@@ -445,6 +459,7 @@ pub struct GpuRenderer {
     tile_render_pipeline: wgpu::RenderPipeline,
     building_render_pipeline: wgpu::RenderPipeline,
     road_render_pipeline: wgpu::RenderPipeline,
+    citizen_render_pipeline: wgpu::RenderPipeline,
     ui_render_pipeline: wgpu::RenderPipeline,
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
@@ -480,7 +495,10 @@ pub struct GpuRenderer {
     
     // Текстуры
     texture_bind_group: Option<wgpu::BindGroup>,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
     road_texture_bind_group: Option<wgpu::BindGroup>,
+    faces_texture_bind_group: Option<wgpu::BindGroup>,
+    faces_bind_group_layout: wgpu::BindGroupLayout,
     
     // Временные буферы для инстансов
     tile_instances: Vec<TileInstance>,
@@ -854,6 +872,23 @@ impl GpuRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // Текстура лиц
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
             label: Some("texture_bind_group_layout"),
         });
@@ -884,6 +919,15 @@ impl GpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&buildings_sampler),
+                },
+                // Текстура лиц (пока заглушка)
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&spritesheet_view), // временно используем spritesheet
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&spritesheet_sampler), // временно используем spritesheet sampler
                 },
             ],
             label: Some("texture_bind_group"),
@@ -1094,6 +1138,77 @@ impl GpuRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &building_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
+        // Создаём шейдер для граждан
+        let citizen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Citizen Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/citizen.wgsl").into()),
+        });
+        
+        // Создаём bind group layout для лиц
+        let faces_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Faces Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        
+        // Создаём render pipeline для граждан
+        let citizen_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Citizen Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout, &faces_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let citizen_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Citizen Render Pipeline"),
+            layout: Some(&citizen_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &citizen_shader,
+                entry_point: "vs_main_citizen",
+                buffers: &[Vertex::desc(), CitizenInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &citizen_shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -1428,6 +1543,7 @@ impl GpuRenderer {
             tile_render_pipeline,
             building_render_pipeline,
             road_render_pipeline,
+            citizen_render_pipeline,
             ui_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
@@ -1451,7 +1567,10 @@ impl GpuRenderer {
             screen_bind_group,
             screen_uniform,
             texture_bind_group: Some(texture_bind_group),
+            texture_bind_group_layout,
             road_texture_bind_group: None,
+            faces_texture_bind_group: None,
+            faces_bind_group_layout,
             tile_instances: Vec::new(),
             building_instances: Vec::new(),
             citizen_instances: Vec::new(),
@@ -2107,10 +2226,31 @@ impl GpuRenderer {
                 Vec3::new(iso_x, -(iso_y + y_offset), 0.0), // минус как у тайлов и зданий!
             );
             
+            // Определяем эмоцию на основе счастья
+            let emotion = if c.happiness < 30 {
+                0 // sad
+            } else if c.happiness < 70 {
+                1 // neutral
+            } else {
+                2 // happy
+            };
+            
+            // Определяем состояние
+            let state = match c.state {
+                crate::types::CitizenState::Idle => 0,
+                crate::types::CitizenState::Working => 1,
+                crate::types::CitizenState::Sleeping => 2,
+                crate::types::CitizenState::GoingToDeposit => 3,
+                crate::types::CitizenState::GoingToFetch => 4,
+                crate::types::CitizenState::GoingToWork | crate::types::CitizenState::GoingHome => 0, // считаем как idle
+            };
+            
             let instance = CitizenInstance {
                 model_matrix: transform.to_cols_array_2d(),
                 building_id: 255, // специальный ID для граждан
                 tint_color: col,
+                emotion,
+                state,
             };
             
             self.citizen_instances.push(instance);
@@ -2644,15 +2784,17 @@ impl GpuRenderer {
                     render_pass.draw_indexed(0..6, 0, 0..self.building_instances.len() as u32);
                 }
                 
-                // Рендерим граждан (используем тот же pipeline что и для зданий)
+                // Рендерим граждан с эмоциями (используем отдельный pipeline)
                 if !self.citizen_instances.is_empty() {
-                    render_pass.set_pipeline(&self.building_render_pipeline);
-                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                    render_pass.set_bind_group(1, texture_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
-                    render_pass.set_vertex_buffer(1, self.citizen_instance_buffer.slice(..));
-                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.citizen_instances.len() as u32);
+                    if let Some(ref faces_bind_group) = self.faces_texture_bind_group {
+                        render_pass.set_pipeline(&self.citizen_render_pipeline);
+                        render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                        render_pass.set_bind_group(1, faces_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
+                        render_pass.set_vertex_buffer(1, self.citizen_instance_buffer.slice(..));
+                        render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        render_pass.draw_indexed(0..6, 0, 0..self.citizen_instances.len() as u32);
+                    }
                 }
                 
                 // Рендерим предпросмотр дорог (поверх зданий и граждан)
@@ -2716,6 +2858,77 @@ impl GpuRenderer {
     pub fn load_texture_atlas(&mut self, atlas: &TileAtlas) -> Result<()> {
         // TODO: реализовать загрузку текстурного атласа
         // Пока создадим простую заглушку
+        Ok(())
+    }
+    
+    pub fn load_faces_texture(&mut self) -> Result<()> {
+        // Загружаем текстуру лиц из faces.png
+        if let Ok(img) = image::open("assets/faces.png") {
+            let img = img.to_rgba8();
+            let (width, height) = img.dimensions();
+            
+            let texture_size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Faces Texture"),
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &img,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+                texture_size,
+            );
+            
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Faces Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+            
+            // Создаем bind group только для текстуры лиц
+            self.faces_texture_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Faces Bind Group"),
+                layout: &self.faces_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            }));
+        }
+        
         Ok(())
     }
 }

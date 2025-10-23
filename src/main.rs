@@ -100,6 +100,9 @@ fn run() -> Result<()> {
 
     let size = window.inner_size();
     let mut gpu_renderer = pollster::block_on(GpuRenderer::new(window.clone()))?;
+    
+    // Загружаем текстуру лиц
+    gpu_renderer.load_faces_texture()?;
 
     // Конфиг
     let (config, input) = config::load_or_create("config.toml")?;
