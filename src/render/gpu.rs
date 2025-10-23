@@ -27,7 +27,7 @@ pub fn render_world(
     gpu.update_camera(cam_x, cam_y, zoom);
     
     // Подготавливаем тайлы (с подсветкой при наведении)
-    gpu.prepare_tiles(world, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
+    gpu.prepare_tiles(world, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile, false);
     
     // Подготавливаем здания и деревья
     gpu.prepare_structures(world, buildings, building_atlas, tree_atlas, tile_atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);

@@ -50,6 +50,7 @@ pub fn draw_ui_gpu(
     console_log: &[String],
     // Данные для отладки биома
     biome_debug_mode: bool,
+    show_deposits: bool,
     zoom: f32,
     atlas_half_w: i32,
     atlas_half_h: i32,

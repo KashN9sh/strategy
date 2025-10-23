@@ -1618,7 +1618,7 @@ impl GpuRenderer {
     }
     
     // Подготовка тайлов для рендеринга (пиксельные координаты как в CPU)
-    pub fn prepare_tiles(&mut self, world: &mut World, atlas: &crate::atlas::TileAtlas, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32, hovered_tile: Option<glam::IVec2>) {
+    pub fn prepare_tiles(&mut self, world: &mut World, atlas: &crate::atlas::TileAtlas, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32, hovered_tile: Option<glam::IVec2>, show_deposits: bool) {
         self.tile_instances.clear();
         
         // Пиксельные размеры как в CPU версии
@@ -1641,34 +1641,59 @@ impl GpuRenderer {
                 let model_matrix = Mat4::from_translation(Vec3::new(iso_x, -iso_y, 0.0)) * 
                                    Mat4::from_scale(Vec3::new(tile_size, tile_size, 1.0));
                 
-                let tile_id = match kind {
-                    TileKind::Grass => 22,
-                    TileKind::Forest => 40, 
-                    TileKind::Water => 110,
-                };
+                // Проверяем наличие депозитов ресурсов
+                let pos = glam::IVec2::new(mx, my);
+                let has_clay = world.has_clay_deposit(pos);
+                let has_stone = world.has_stone_deposit(pos);
+                let has_iron = world.has_iron_deposit(pos);
                 
-                // Определяем биом для тинтинга
-                let biome = world.biome(glam::IVec2::new(mx, my));
-                
-                // Применяем тинт биома (более яркий)
-                let biome_tint = match (kind, biome) {
-                    (TileKind::Grass, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],   // темный коричневый оттенок
-                    (TileKind::Grass, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],   // светлый серый оттенок
-                    (TileKind::Forest, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],  // темный коричневый оттенок для леса
-                    (TileKind::Forest, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],  // светлый серый оттенок для леса
-                    _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
-                };
-                
-                // Подсветка при наведении - желтый тинт поверх биомного
-                let tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
-                    [
-                        biome_tint[0] * 1.3,
-                        biome_tint[1] * 1.3, 
-                        biome_tint[2] * 0.7,
-                        biome_tint[3]
-                    ]
+                let (tile_id, tint) = if show_deposits && (has_clay || has_stone || has_iron) {
+                    // Депозит ресурса - используем тайл (6, 5) из spritesheet.png
+                    let deposit_tile_id = 61; // тайл (6, 1) - попробуем другой
+                    
+                    // Определяем цвет депозита (приоритет: железо > камень > глина)
+                    let deposit_tint = if has_iron {
+                        [0.3, 0.3, 0.3, 1.0] // темно-серый для железа
+                    } else if has_stone {
+                        [0.6, 0.6, 0.6, 1.0] // серый для камня
+                    } else {
+                        [0.8, 0.6, 0.4, 1.0] // коричневый для глины
+                    };
+                    
+                    (deposit_tile_id, deposit_tint)
                 } else {
-                    biome_tint
+                    // Обычный тайл
+                    let tile_id = match kind {
+                        TileKind::Grass => 22,
+                        TileKind::Forest => 40, 
+                        TileKind::Water => 110,
+                    };
+                    
+                    // Определяем биом для тинтинга
+                    let biome = world.biome(glam::IVec2::new(mx, my));
+                    
+                    // Применяем тинт биома (более яркий)
+                    let biome_tint = match (kind, biome) {
+                        (TileKind::Grass, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],   // темный коричневый оттенок
+                        (TileKind::Grass, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],   // светлый серый оттенок
+                        (TileKind::Forest, BiomeKind::Swamp) => [0.4, 0.3, 0.2, 1.0],  // темный коричневый оттенок для леса
+                        (TileKind::Forest, BiomeKind::Rocky) => [0.8, 0.8, 0.8, 1.0],  // светлый серый оттенок для леса
+                        _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
+                    };
+                    
+                    // Подсветка при наведении - желтый тинт поверх биомного
+                    let tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
+                        [
+                            biome_tint[0] * 1.3,
+                            biome_tint[1] * 1.3, 
+                            biome_tint[2] * 0.7,
+                            biome_tint[3]
+                        ]
+                    } else {
+                        biome_tint
+                    };
+                    
+                    (tile_id, tint)
                 };
                 
                 self.tile_instances.push(TileInstance {

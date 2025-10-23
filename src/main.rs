@@ -147,6 +147,7 @@ fn run() -> Result<()> {
     let mut path_debug_mode = false;
     let mut biome_overlay_debug = false;
     let mut biome_debug_mode = false;
+    let mut show_deposits = false;
     let mut path_sel_a: Option<IVec2> = None;
     let mut path_sel_b: Option<IVec2> = None;
     let mut last_path: Option<Vec<IVec2>> = None;
@@ -372,7 +373,7 @@ fn run() -> Result<()> {
                                     if !console_input.is_empty() {
                                         let cmd = console_input.clone();
                                         console_log.push(format!("> {}", cmd));
-                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms, &mut world, &mut biome_overlay_debug, &mut biome_debug_mode);
+                                        handle_console_command(&cmd, &mut console_log, &mut resources, &mut weather, &mut world_clock_ms, &mut world, &mut biome_overlay_debug, &mut biome_debug_mode, &mut show_deposits);
                                         console_input.clear();
                                     }
                                     return;
@@ -569,7 +570,7 @@ fn run() -> Result<()> {
                     gpu_renderer.update_camera(cam_px.x, cam_px.y, zoom);
 
                     // Подготавливаем тайлы для GPU рендеринга (с подсветкой при наведении)
-                    gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
+                    gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile, show_deposits);
                     
                     // Подготавливаем структуры (здания и деревья) для GPU рендеринга с правильной сортировкой
                     if buildings_dirty {
@@ -1051,6 +1052,7 @@ fn run() -> Result<()> {
                             &console_log,
                             // Данные для отладки биома
                             biome_debug_mode,
+                            show_deposits,
                             zoom,
                             atlas.half_w,
                             atlas.half_h,
@@ -1784,14 +1786,14 @@ fn overlay_fog(frame: &mut [u8], fw: i32, fh: i32, t_ms: f32) {
     }
 }
 
-fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool, biome_debug_mode: &mut bool) {
+fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Resources, weather: &mut WeatherKind, world_clock_ms: &mut f32, world: &mut World, biome_overlay_debug: &mut bool, biome_debug_mode: &mut bool, show_deposits: &mut bool) {
     let trimmed = cmd.trim();
     if trimmed.is_empty() { return; }
     let mut parts = trimmed.split_whitespace();
     let Some(head) = parts.next() else { return; };
     match head.to_ascii_lowercase().as_str() {
         "help" => {
-            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>, biome <swamp_thr rocky_thr|overlay>, biome-overlay".to_string());
+            log.push("Commands: help, weather <clear|rain|fog|snow>, gold <±N>, set gold <N>, time <day|night|dawn|dusk|<0..1>>, biome <swamp_thr rocky_thr|overlay>, biome-overlay, debug, deposits".to_string());
         }
         "debug" => {
             *biome_debug_mode = !*biome_debug_mode;
@@ -1803,6 +1805,10 @@ fn handle_console_command(cmd: &str, log: &mut Vec<String>, resources: &mut Reso
                 WeatherKind::Fog => 0.6,
                 WeatherKind::Snow => 0.7,
             }));
+        }
+        "deposits" => {
+            *show_deposits = !*show_deposits;
+            log.push(format!("Resource deposits: {}", if *show_deposits { "ON" } else { "OFF" }));
         }
         "weather" => {
             if let Some(arg) = parts.next() {
