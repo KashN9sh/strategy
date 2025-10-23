@@ -2821,7 +2821,14 @@ impl GpuRenderer {
                 }
             }
             
-            // Рендерим UI прямоугольники ПОСЛЕ карты (буфер уже обновлен до render pass)
+            // Рендерим погодные эффекты ПЕРЕД UI
+            if self.weather_uniform.weather_type != 0 {
+                render_pass.set_pipeline(&self.weather_pipeline);
+                render_pass.set_bind_group(0, &self.weather_bind_group, &[]);
+                render_pass.draw(0..3, 0..1); // Полноэкранный треугольник
+            }
+            
+            // Рендерим UI прямоугольники ПОСЛЕ погодных эффектов
             if !self.ui_rects.is_empty() {
                 render_pass.set_pipeline(&self.ui_rect_render_pipeline);
                 render_pass.set_bind_group(0, &self.screen_bind_group, &[]); // используем экранные координаты
@@ -2839,13 +2846,6 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(1, self.minimap_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
-            }
-            
-            // Рендерим погодные эффекты (поверх всего, кроме тултипов)
-            if self.weather_uniform.weather_type != 0 {
-                render_pass.set_pipeline(&self.weather_pipeline);
-                render_pass.set_bind_group(0, &self.weather_bind_group, &[]);
-                render_pass.draw(0..3, 0..1); // Полноэкранный треугольник
             }
         }
         

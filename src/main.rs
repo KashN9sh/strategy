@@ -1012,101 +1012,102 @@ fn run() -> Result<()> {
                             None
                         };
                         
-                        // GPU UI рендеринг через фабрику ui_gpu
-                        let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
-                        ui_gpu::draw_ui_gpu(
-                            &mut gpu_renderer,
-                            width_i32,
-                            height_i32,
-                            &visible,
-                            visible.wood,
-                            pop_show,
-                            selected_building,
-                            fps_ema,
-                            speed_mult,
-                            paused,
-                            config.ui_scale_base,
-                            ui_category,
-                            day_progress,
-                            idle,
-                            working,
-                            sleeping,
-                            hauling,
-                            fetching,
-                            avg_hap,
-                            tax_rate,
-                            ui_tab,
-                            food_policy,
-                            wlabel,
-                            wcol_f32,
-                            // Данные для миникарты
-                            &mut world,
-                            &buildings,
-                            cam_px.x,
-                            cam_px.y,
-                            MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1),
-                            // Данные для тултипов
-                            cursor_xy.x as f32,
-                            cursor_xy.y as f32,
-                            hovered_building,
-                            hovered_button,
-                            hovered_resource,
-                            // Данные для консоли
-                            console_open,
-                            &console_input,
-                            &console_log,
-                            // Данные для отладки биома
-                            biome_debug_mode,
-                            show_deposits,
-                            zoom,
-                            atlas.half_w,
-                            atlas.half_h,
-                        );
-                    } else {
-                        // Если UI выключен, все равно очищаем
-                        gpu_renderer.clear_ui();
+                // Ночное освещение (затемнение) - ПЕРЕД UI
+                let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                let angle = t * std::f32::consts::TAU;
+                let daylight = 0.5 - 0.5 * angle.cos();
+                let darkness = (1.0 - daylight).max(0.0);
+                let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
+                if night_strength > 0 {
+                    let alpha = night_strength as f32 / 255.0;
+                    gpu_renderer.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
+                }
+                
+                // Погодные эффекты (цветные оверлеи) - ПЕРЕД UI
+                match weather {
+                    WeatherKind::Clear => {}
+                    WeatherKind::Rain => {
+                        // синий прохладный фильтр
+                        gpu_renderer.apply_screen_tint([40.0/255.0, 60.0/255.0, 100.0/255.0, 40.0/255.0]);
                     }
-                    
-                    // Ночное освещение (затемнение) - поверх всего
-                    let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                    let angle = t * std::f32::consts::TAU;
-                    let daylight = 0.5 - 0.5 * angle.cos();
-                    let darkness = (1.0 - daylight).max(0.0);
-                    let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
-                    if night_strength > 0 {
-                        let alpha = night_strength as f32 / 255.0;
-                        gpu_renderer.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
+                    WeatherKind::Fog => {
+                        // сероватая дымка
+                        gpu_renderer.apply_screen_tint([160.0/255.0, 160.0/255.0, 160.0/255.0, 50.0/255.0]);
+                        // TODO: добавить анимированный туман
                     }
-                    
-                    // Погодные эффекты (цветные оверлеи)
-                    match weather {
-                        WeatherKind::Clear => {}
-                        WeatherKind::Rain => {
-                            // синий прохладный фильтр
-                            gpu_renderer.apply_screen_tint([40.0/255.0, 60.0/255.0, 100.0/255.0, 40.0/255.0]);
-                        }
-                        WeatherKind::Fog => {
-                            // сероватая дымка
-                            gpu_renderer.apply_screen_tint([160.0/255.0, 160.0/255.0, 160.0/255.0, 50.0/255.0]);
-                            // TODO: добавить анимированный туман
-                        }
-                        WeatherKind::Snow => {
-                            // холодный свет
-                            gpu_renderer.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
-                        }
+                    WeatherKind::Snow => {
+                        // холодный свет
+                        gpu_renderer.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
                     }
+                }
+
+                 // Применяем погодные эффекты (частицы)
+                 let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                 render::gpu::apply_environment_effects(
+                     &mut gpu_renderer,
+                     weather,
+                     day_progress,
+                     world_clock_ms / 1000.0,
+                 );
+                 
+                 // Обновляем частицы зданий
+                 gpu_renderer.update_building_particles(&buildings, world_clock_ms / 1000.0);
+                
+                // GPU UI рендеринг через фабрику ui_gpu - ПОСЛЕ эффектов
+                let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
+                ui_gpu::draw_ui_gpu(
+                    &mut gpu_renderer,
+                    width_i32,
+                    height_i32,
+                    &visible,
+                    visible.wood,
+                    pop_show,
+                    selected_building,
+                    fps_ema,
+                    speed_mult,
+                    paused,
+                    config.ui_scale_base,
+                    ui_category,
+                    day_progress,
+                    idle,
+                    working,
+                    sleeping,
+                    hauling,
+                    fetching,
+                    avg_hap,
+                    tax_rate,
+                    ui_tab,
+                    food_policy,
+                    wlabel,
+                    wcol_f32,
+                    // Данные для миникарты
+                    &mut world,
+                    &buildings,
+                    cam_px.x,
+                    cam_px.y,
+                    MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1),
+                    // Данные для тултипов
+                    cursor_xy.x as f32,
+                    cursor_xy.y as f32,
+                    hovered_building,
+                    hovered_button,
+                    hovered_resource,
+                    // Данные для консоли
+                    console_open,
+                    &console_input,
+                    &console_log,
+                    // Данные для отладки биома
+                    biome_debug_mode,
+                    show_deposits,
+                    zoom,
+                    atlas.half_w,
+                    atlas.half_h,
+                );
+            } else {
+                // Если UI выключен, все равно очищаем
+                gpu_renderer.clear_ui();
+            }
                     
-                    // Применяем погодные эффекты (частицы)
-                    let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                    render::gpu::apply_environment_effects(
-                        &mut gpu_renderer,
-                        weather,
-                        day_progress,
-                        world_clock_ms / 1000.0,
-                    );
-                    
-                    // Обновляем частицы зданий
-                    gpu_renderer.update_building_particles(&buildings, world_clock_ms / 1000.0);
                     
                     // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {
