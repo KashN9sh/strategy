@@ -121,7 +121,7 @@ pub fn handle_left_click(
     let row_y = [by0 + padb + btn_h + 6 * s, by0 + padb + (btn_h + 6 * s) * 2];
     let mut row: usize = 0; let mut cx = padb;
     for (cat, label) in cats.iter() {
-        let bw = ui::button_w_for(label, s);
+        let bw = ((label.len() as i32) * 4 * 2 * s + 12).max(60); // та же формула, что в ui_gpu.rs
         if cx + bw > width_i32 - padb { row = (row + 1).min(row_y.len()-1); cx = padb; }
         let y = row_y[row];
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, y, bw, btn_h) { *ui_category = *cat; return true; }
@@ -153,7 +153,7 @@ pub fn handle_left_click(
             BuildingKind::IronMine => b"Iron Mine".as_ref(),
             BuildingKind::Smelter => b"Smelter".as_ref(),
         };
-        let bw = ui::button_w_for(label, ui_s);
+        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { *selected_building = bk; return true; }
         bx += bw + 6 * ui_s;
@@ -309,7 +309,7 @@ pub fn get_hovered_button(
     let econ_w = ui::button_w_for(b"Economy", ui_s).max(80);
     let build_x = padb;
     let build_y = by0 + padb;
-    let econ_x = padb + build_w + 6; // фиксированный отступ 6, как в ui_gpu.rs
+    let econ_x = padb + build_w + 6 * ui_s; // используем масштабированный отступ, как в handle_left_click
     let econ_y = by0 + padb;
     
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, build_x, build_y, build_w, btn_h) {
@@ -321,7 +321,7 @@ pub fn get_hovered_button(
     
     // Кнопка депозитов
     let deposits_w = ui::button_w_for(b"Deposits", ui_s).max(80);
-    let deposits_x = econ_x + econ_w + 6;
+    let deposits_x = econ_x + econ_w + 6 * ui_s;
     let deposits_y = by0 + padb;
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, deposits_x, deposits_y, deposits_w, btn_h) {
         return Some("Deposits");
@@ -356,22 +356,21 @@ pub fn get_hovered_button(
         (ui::UICategory::Food, "Food"),
         (ui::UICategory::Logistics, "Logistics"),
     ];
-    let cat_y = by0 + padb + btn_h + 6; // фиксированный отступ 6
-    let mut cx = padb;
+    let row_y = [by0 + padb + btn_h + 6 * ui_s, by0 + padb + (btn_h + 6 * ui_s) * 2];
+    let mut row: usize = 0; let mut cx = padb;
     for (cat, label) in cats.iter() {
-        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(60); // та же логика, что в ui_gpu.rs
-        if cx + bw > width_i32 - padb { 
-            break; // останавливаемся, если не влезает
-        }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, cat_y, bw, btn_h) {
+        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(60); // та же формула, что в ui_gpu.rs
+        if cx + bw > width_i32 - padb { row = (row + 1).min(row_y.len()-1); cx = padb; }
+        let y = row_y[row];
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, cx, y, bw, btn_h) {
             return Some(label);
         }
-        cx += bw + 6; // фиксированный отступ 6
+        cx += bw + 6 * ui_s;
     }
     
     // Здания выбранной категории
     let mut bx = padb;
-    let by2 = by0 + padb + btn_h + 6 + btn_h + 6; // две строки с фиксированными отступами 6
+    let by2 = by0 + padb + btn_h + 6 * ui_s + btn_h + 6 * ui_s; // две строки с масштабированными отступами
     let buildings_for_cat: &[BuildingKind] = match ui_category {
         ui::UICategory::Housing => &[BuildingKind::House],
         ui::UICategory::Storage => &[BuildingKind::Warehouse],
@@ -396,12 +395,12 @@ pub fn get_hovered_button(
             BuildingKind::IronMine => "Iron Mine",
             BuildingKind::Smelter => "Smelter",
         };
-        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же логика, что в ui_gpu.rs
+        let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
         if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) {
             return Some(label);
         }
-        bx += bw + 6; // фиксированный отступ 6
+        bx += bw + 6 * ui_s; // используем масштабированный отступ
     }
     
     None

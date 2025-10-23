@@ -196,10 +196,10 @@ pub fn draw_ui_gpu(
     let economy_w = (ui::button_w_for(b"Economy", s) as f32).max(80.0);
     
     gpu.draw_button(current_x, tab_y, build_w, btn_h, b"Build", ui_tab == UITab::Build, btn_scale);
-    current_x += build_w + 6.0;
+    current_x += build_w + 6.0 * scale;
     
     gpu.draw_button(current_x, tab_y, economy_w, btn_h, b"Economy", ui_tab == UITab::Economy, btn_scale);
-    current_x += economy_w + 6.0;
+    current_x += economy_w + 6.0 * scale;
     
     // Кнопка для депозитов ресурсов
     let deposits_w = (ui::button_w_for(b"Deposits", s) as f32).max(80.0);
@@ -225,7 +225,7 @@ pub fn draw_ui_gpu(
                 break;
             }
             gpu.draw_button(current_x, cat_y, btn_w, btn_h, *label, *cat == category, btn_scale);
-            current_x += btn_w + 6.0;
+            current_x += btn_w + 6.0 * scale;
         }
         
         // Здания выбранной категории (третья строка)
@@ -261,7 +261,7 @@ pub fn draw_ui_gpu(
                 break;
             }
             gpu.draw_button(current_x, build_y, btn_w, btn_h, label, *bk == selected, btn_scale);
-            current_x += btn_w + 6.0;
+            current_x += btn_w + 6.0 * scale;
         }
     } else {
         // Economy panel
