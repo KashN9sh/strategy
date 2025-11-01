@@ -89,7 +89,7 @@ pub fn handle_left_click(
     let build_w = ui::button_w_for(b"Build", s); let econ_w = ui::button_w_for(b"Economy", s);
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb, by0 + padb, build_w, btn_h) { *ui_tab = ui::UITab::Build; return true; }
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, padb + build_w + 6 * s, by0 + padb, econ_w, btn_h) { *ui_tab = ui::UITab::Economy; return true; }
-    
+
     // Кнопка депозитов
     let deposits_w = ui::button_w_for(b"Deposits", s).max(80);
     let deposits_x = padb + build_w + 6 * s + econ_w + 6 * s;

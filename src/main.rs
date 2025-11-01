@@ -572,8 +572,14 @@ fn run() -> Result<()> {
                     // Обновляем камеру GPU рендерера
                     gpu_renderer.update_camera(cam_px.x, cam_px.y, zoom);
 
+                    // Центр экрана нужен для рендеринга поленьев
+                    let screen_center = IVec2::new(width_i32 / 2, height_i32 / 2);
+                    
                     // Подготавливаем тайлы для GPU рендеринга (с подсветкой при наведении)
                     gpu_renderer.prepare_tiles(&mut world, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile, show_deposits);
+                    
+                    // Подготавливаем поленья как простые коричневые прямоугольники
+                    gpu_renderer.prepare_logs(&logs_on_ground, &atlas, cam_px, screen_center);
                     
                     // Подготавливаем структуры (здания и деревья) для GPU рендеринга с правильной сортировкой
                     if buildings_dirty {

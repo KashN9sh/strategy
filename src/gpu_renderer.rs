@@ -353,6 +353,61 @@ pub struct CitizenInstance {
     pub state: u32,   // 0=idle, 1=working, 2=sleeping, 3=hauling, 4=fetching
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct LogInstance {
+    pub model_matrix: [[f32; 4]; 4],
+    pub log_id: u32, // 0 = log sprite
+    pub tint_color: [f32; 4],
+    pub padding: [u32; 3], // выравнивание до 16 байт
+}
+
+impl LogInstance {
+    const ATTRIBS: [wgpu::VertexAttribute; 6] = [
+        // model_matrix
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 16,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 32,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 48,
+            shader_location: 5,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        // log_id
+        wgpu::VertexAttribute {
+            offset: 64,
+            shader_location: 6,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        // tint_color
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+            shader_location: 7,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+    ];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<LogInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
 impl CitizenInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 8] = [
         // model_matrix
@@ -460,6 +515,7 @@ pub struct GpuRenderer {
     building_render_pipeline: wgpu::RenderPipeline,
     road_render_pipeline: wgpu::RenderPipeline,
     citizen_render_pipeline: wgpu::RenderPipeline,
+    resource_render_pipeline: wgpu::RenderPipeline, // Для всех ресурсов (поленья, камни, железо и т.д.)
     ui_render_pipeline: wgpu::RenderPipeline,
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
@@ -507,6 +563,7 @@ pub struct GpuRenderer {
     road_instances: Vec<RoadInstance>,
     road_preview_instances: Vec<RoadInstance>,
     building_preview_instances: Vec<BuildingInstance>,
+    log_instances: Vec<LogInstance>,
     ui_rects: Vec<UIRect>,
     minimap_instances: Vec<UIRect>,
     max_instances: usize,
@@ -516,6 +573,7 @@ pub struct GpuRenderer {
     road_instance_buffer: wgpu::Buffer,
     road_preview_instance_buffer: wgpu::Buffer,
     building_preview_instance_buffer: wgpu::Buffer,
+    log_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
     minimap_buffer: wgpu::Buffer,
 }
@@ -1022,6 +1080,13 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
+        let log_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Log Instance Buffer"),
+            size: (std::mem::size_of::<LogInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
         let ui_rect_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("UI Rect Buffer"),
             size: (std::mem::size_of::<UIRect>() * max_instances) as wgpu::BufferAddress,
@@ -1212,6 +1277,53 @@ impl GpuRenderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
+        // Создаём render pipeline для ресурсов
+        let resource_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Resource Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/resource.wgsl").into()),
+        });
+        
+        let resource_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Resource Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let resource_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Resource Render Pipeline"),
+            layout: Some(&resource_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &resource_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), LogInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &resource_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -1544,6 +1656,7 @@ impl GpuRenderer {
             building_render_pipeline,
             road_render_pipeline,
             citizen_render_pipeline,
+            resource_render_pipeline,
             ui_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
@@ -1577,6 +1690,7 @@ impl GpuRenderer {
             road_instances: Vec::new(),
             road_preview_instances: Vec::new(),
             building_preview_instances: Vec::new(),
+            log_instances: Vec::new(),
             ui_rects: Vec::new(),
             minimap_instances: Vec::new(),
             max_instances,
@@ -1586,6 +1700,7 @@ impl GpuRenderer {
             road_instance_buffer,
             road_preview_instance_buffer,
             building_preview_instance_buffer,
+            log_instance_buffer,
             ui_rect_buffer,
             minimap_buffer,
         })
@@ -1831,6 +1946,7 @@ impl GpuRenderer {
                 break;
             }
         }
+        
         
         // Загружаем данные инстансов в буфер
         if !self.tile_instances.is_empty() {
@@ -2730,6 +2846,16 @@ impl GpuRenderer {
             );
         }
         
+        // Обновляем буфер поленьев ДО начала render pass
+        if !self.log_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.log_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.log_instances)
+            );
+        }
+        
+        
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -2762,8 +2888,23 @@ impl GpuRenderer {
                     render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     render_pass.draw_indexed(0..6, 0, 0..self.tile_instances.len() as u32);
                 }
-                
-                // Рендерим дороги (сразу после тайлов, но перед зданиями)
+            }
+            
+            // Рендерим поленья как простые коричневые прямоугольники (сразу после тайлов, как часть мира)
+            if let Some(ref texture_bind_group) = self.texture_bind_group {
+                if !self.log_instances.is_empty() {
+                    render_pass.set_pipeline(&self.resource_render_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, self.log_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.log_instances.len() as u32);
+                }
+            }
+            
+            // Рендерим дороги (после тайлов и поленьев, но перед зданиями)
+            if let Some(ref texture_bind_group) = self.texture_bind_group {
                 if !self.road_instances.is_empty() {
                     render_pass.set_pipeline(&self.road_render_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
@@ -2931,5 +3072,60 @@ impl GpuRenderer {
         }
         
         Ok(())
+    }
+    
+    pub fn prepare_logs(
+        &mut self,
+        logs: &Vec<crate::types::LogItem>,
+        atlas: &crate::atlas::TileAtlas,
+        cam_px: glam::Vec2,
+        screen_center: glam::IVec2,
+    ) {
+        self.log_instances.clear();
+        
+        // Специальный ID для простых цветных прямоугольников (без текстуры)
+        const SOLID_COLOR_ID: u32 = 0xFFFFFFFF;
+        
+        for log in logs {
+            if log.carried {
+                continue; // не рендерим поленья, которые несут
+            }
+            
+            // ИЗОМЕТРИЧЕСКАЯ проекция в пикселях (как для тайлов)
+            let half_w = atlas.half_w as f32;
+            let half_h = atlas.half_h as f32;
+            
+            let iso_x = (log.pos.x as f32 - log.pos.y as f32) * half_w;
+            let iso_y = (log.pos.x as f32 + log.pos.y as f32) * half_h;
+            
+            // Размер полена - небольшой горизонтальный прямоугольник (примерно 12x6 пикселей)
+            // В изометрии half_w/half_h = 2.0 (TILE_W=32, TILE_H=16)
+            // Это означает, что по оси X всё растягивается в 2 раза больше, чем по Y
+            // Чтобы визуально получить горизонтальный прямоугольник 12x6 (ширина x высота):
+            // - log_width должен быть большим (горизонтально)
+            // - log_height должен быть меньшим (вертикально)
+            let base_width = 12.0;   // горизонтальный размер (длина полена)
+            let base_height = 6.0;   // вертикальный размер (толщина полена)
+            
+            // Компенсируем растяжение по X: уменьшаем ширину в модели, чтобы визуально было 12
+            // Для горизонтального полена: ширина (X) должна быть больше высоты (Y)
+            let log_width = base_width / (half_w / half_h); // 12.0 / 2.0 = 6.0 (после растяжения по X будет 12)
+            let log_height = base_height; // 6.0 остается (толщина полена)
+            
+            // Создаем матрицу трансформации для горизонтального прямоугольника
+            // Поворачиваем на 90 градусов, чтобы полено лежало горизонтально (вдоль изометрической оси X)
+            let rotation = Mat4::from_rotation_z(std::f32::consts::PI / 2.0); // 90 градусов
+            // Порядок T * R * S: translation, rotation, scale
+            let model_matrix = Mat4::from_translation(Vec3::new(iso_x, -iso_y, 0.0)) * 
+                               rotation *
+                               Mat4::from_scale(Vec3::new(log_width, log_height, 1.0));
+            
+            self.log_instances.push(LogInstance {
+                model_matrix: model_matrix.to_cols_array_2d(),
+                log_id: SOLID_COLOR_ID, // Специальный ID для простых цветных прямоугольников
+                tint_color: [0.6, 0.4, 0.2, 1.0], // коричневый цвет полена
+                padding: [0; 3],
+            });
+        }
     }
 }
