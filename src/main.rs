@@ -1018,35 +1018,6 @@ fn run() -> Result<()> {
                             None
                         };
                         
-                // Ночное освещение (затемнение) - ПЕРЕД UI
-                let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                let angle = t * std::f32::consts::TAU;
-                let daylight = 0.5 - 0.5 * angle.cos();
-                let darkness = (1.0 - daylight).max(0.0);
-                let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
-                if night_strength > 0 {
-                    let alpha = night_strength as f32 / 255.0;
-                    gpu_renderer.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
-                }
-                
-                // Погодные эффекты (цветные оверлеи) - ПЕРЕД UI
-                match weather {
-                    WeatherKind::Clear => {}
-                    WeatherKind::Rain => {
-                        // синий прохладный фильтр
-                        gpu_renderer.apply_screen_tint([40.0/255.0, 60.0/255.0, 100.0/255.0, 40.0/255.0]);
-                    }
-                    WeatherKind::Fog => {
-                        // сероватая дымка
-                        gpu_renderer.apply_screen_tint([160.0/255.0, 160.0/255.0, 160.0/255.0, 50.0/255.0]);
-                        // TODO: добавить анимированный туман
-                    }
-                    WeatherKind::Snow => {
-                        // холодный свет
-                        gpu_renderer.apply_screen_tint([220.0/255.0, 230.0/255.0, 255.0/255.0, 40.0/255.0]);
-                    }
-                }
-
                  // Применяем погодные эффекты (частицы)
                  let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
                  render::gpu::apply_environment_effects(
@@ -1114,6 +1085,18 @@ fn run() -> Result<()> {
                 gpu_renderer.clear_ui();
             }
                     
+                // Ночное освещение (затемнение) - обновляем через weather uniform (рендерится ПЕРЕД UI)
+                let t = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+                let angle = t * std::f32::consts::TAU;
+                let daylight = 0.5 - 0.5 * angle.cos();
+                let darkness = (1.0 - daylight).max(0.0);
+                let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
+                let night_alpha = if night_strength > 0 {
+                    night_strength as f32 / 255.0
+                } else {
+                    0.0
+                };
+                gpu_renderer.update_night_overlay(night_alpha);
                     
                     // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {

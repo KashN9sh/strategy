@@ -17,7 +17,7 @@ pub struct WeatherUniform {
     pub weather_type: u32, // 0=Clear, 1=Rain, 2=Fog, 3=Snow
     pub time: f32,
     pub intensity: f32,
-    pub padding: f32,
+    pub night_alpha: f32, // Альфа для ночного оверлея (0.0 = день, >0.0 = ночь)
 }
 
 impl WeatherUniform {
@@ -26,7 +26,7 @@ impl WeatherUniform {
             weather_type: 0,
             time: 0.0,
             intensity: 0.0,
-            padding: 0.0,
+            night_alpha: 0.0,
         }
     }
 }
@@ -1770,6 +1770,17 @@ impl GpuRenderer {
         );
     }
     
+    // Обновление ночного оверлея
+    pub fn update_night_overlay(&mut self, night_alpha: f32) {
+        self.weather_uniform.night_alpha = night_alpha;
+        
+        self.queue.write_buffer(
+            &self.weather_buffer,
+            0,
+            bytemuck::cast_slice(&[self.weather_uniform])
+        );
+    }
+    
     // Обновление частиц зданий
     pub fn update_building_particles(&mut self, buildings: &[crate::types::Building], time: f32) {
         self.building_particles.clear();
@@ -2962,8 +2973,8 @@ impl GpuRenderer {
                 }
             }
             
-            // Рендерим погодные эффекты ПЕРЕД UI
-            if self.weather_uniform.weather_type != 0 {
+            // Рендерим погодные эффекты и ночной оверлей ПЕРЕД UI
+            if self.weather_uniform.weather_type != 0 || self.weather_uniform.night_alpha > 0.0 {
                 render_pass.set_pipeline(&self.weather_pipeline);
                 render_pass.set_bind_group(0, &self.weather_bind_group, &[]);
                 render_pass.draw(0..3, 0..1); // Полноэкранный треугольник

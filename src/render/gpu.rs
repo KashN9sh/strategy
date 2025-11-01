@@ -100,16 +100,7 @@ pub fn apply_environment_effects(
 ) {
     use crate::WeatherKind;
     
-    // Ночное освещение
-    let angle = day_progress * std::f32::consts::TAU;
-    let daylight = 0.5 - 0.5 * angle.cos();
-    let darkness = (1.0 - daylight).max(0.0);
-    let night_strength = (darkness.powf(1.4) * 180.0).min(200.0) as u8;
-    
-    if night_strength > 0 {
-        let alpha = night_strength as f32 / 255.0;
-        gpu.apply_screen_tint([18.0/255.0, 28.0/255.0, 60.0/255.0, alpha]);
-    }
+    // Ночное освещение (обновляется через update_night_overlay в main.rs)
     
     // Обновляем погодные эффекты в GPU
     let intensity = match weather {

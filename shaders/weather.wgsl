@@ -4,7 +4,7 @@ struct WeatherUniform {
     weather_type: u32, // 0=Clear, 1=Rain, 2=Fog, 3=Snow
     time: f32,
     intensity: f32,
-    padding: f32,
+    night_alpha: f32, // Альфа для ночного оверлея (0.0 = день, >0.0 = ночь)
 }
 
 struct ScreenUniform {
@@ -46,11 +46,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.screen_pos;
     let time = weather.time;
     
-    // Базовый цвет (прозрачный)
+    // Ночной оверлей (темно-синий фильтр)
     var color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    if (weather.night_alpha > 0.0) {
+        color = vec4<f32>(18.0/255.0, 28.0/255.0, 60.0/255.0, weather.night_alpha);
+    }
     
+    // Добавляем погодные эффекты поверх ночного оверлея
     if (weather.weather_type == 0u) {
-        // Clear - никаких эффектов
+        // Clear - только ночной оверлей, если есть
         return color;
     }
     
@@ -80,7 +84,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let rain_strength = is_rain * rain_intensity;
         
         if (rain_strength > 0.05) {
-            color = vec4<f32>(0.2, 0.4, 1.0, rain_strength * 0.9);
+            // Смешиваем дождь с ночным оверлеем (если есть)
+            let rain_color = vec4<f32>(0.2, 0.4, 1.0, rain_strength * 0.9);
+            color = mix(color, rain_color, rain_strength * 0.9);
         }
     }
     
@@ -99,7 +105,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let fog_strength = fog_noise * fog_intensity;
         
         if (fog_strength > 0.05) {
-            color = vec4<f32>(0.6, 0.6, 0.6, fog_strength * 0.6);
+            // Смешиваем туман с ночным оверлеем (если есть)
+            let fog_color = vec4<f32>(0.6, 0.6, 0.6, fog_strength * 0.6);
+            color = mix(color, fog_color, fog_strength * 0.6);
         }
     }
     
@@ -129,7 +137,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let snow_strength = is_snowflake * snow_intensity;
         
         if (snow_strength > 0.1) {
-            color = vec4<f32>(0.95, 0.95, 1.0, snow_strength);
+            // Смешиваем снег с ночным оверлеем (если есть)
+            let snow_color = vec4<f32>(0.95, 0.95, 1.0, snow_strength);
+            color = mix(color, snow_color, snow_strength);
         }
     }
     
