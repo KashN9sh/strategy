@@ -1891,8 +1891,16 @@ impl GpuRenderer {
                 let has_clay = world.has_clay_deposit(pos);
                 let has_stone = world.has_stone_deposit(pos);
                 let has_iron = world.has_iron_deposit(pos);
+                let is_road = world.is_road(pos);
                 
-                let (tile_id, tint) = if show_deposits && (has_clay || has_stone || has_iron) {
+                let (tile_id, tint) = if is_road {
+                    // Дорога - используем спрайт 1:10 из spritesheet.png
+                    // Если спрайтшит 16 колонок: строка 1 (индекс 0), колонка 10 (индекс 9)
+                    // tile_id = row * cols + col = 0 * 16 + 9 = 9
+                    // Но если спрайтшит 11 колонок: 0 * 11 + 9 = 9 (тот же результат)
+                    // Используем 9 как базовый индекс для первого спрайта в строке 1, колонка 10
+                    (9u32, [1.0, 1.0, 1.0, 1.0]) // белый цвет для дороги
+                } else if show_deposits && (has_clay || has_stone || has_iron) {
                     // Депозит ресурса - используем тайл (6, 5) из spritesheet.png
                     let deposit_tile_id = 61; // тайл (6, 1) - попробуем другой
                     
@@ -2914,19 +2922,10 @@ impl GpuRenderer {
                 }
             }
             
-            // Рендерим дороги (после тайлов и поленьев, но перед зданиями)
-            if let Some(ref texture_bind_group) = self.texture_bind_group {
-                if !self.road_instances.is_empty() {
-                    render_pass.set_pipeline(&self.road_render_pipeline);
-                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                    render_pass.set_bind_group(1, texture_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
-                    render_pass.set_vertex_buffer(1, self.road_instance_buffer.slice(..));
-                    render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.road_instances.len() as u32);
-                }
+            // Дороги теперь рендерятся как тайлы, отдельный рендеринг не нужен
                 
-                // Рендерим здания
+            // Рендерим здания
+            if let Some(ref texture_bind_group) = self.texture_bind_group {
                 if !self.building_instances.is_empty() {
                     render_pass.set_pipeline(&self.building_render_pipeline);
                     render_pass.set_bind_group(0, &self.camera_bind_group, &[]);

@@ -588,7 +588,7 @@ fn run() -> Result<()> {
                     }
                     gpu_renderer.prepare_structures(&mut world, &buildings, &building_atlas, &tree_atlas, &atlas, min_tx, min_ty, max_tx, max_ty, hovered_tile);
                     gpu_renderer.prepare_citizens(&citizens, &buildings, &atlas);
-                    gpu_renderer.prepare_roads(&mut world, &road_atlas, &atlas, min_tx, min_ty, max_tx, max_ty);
+                    // Дороги теперь рендерятся как тайлы в prepare_tiles, отдельный вызов не нужен
                     
                     // Предпросмотр дорог при перетаскивании
                     if left_mouse_down && road_mode && !preview_road_path.is_empty() {
