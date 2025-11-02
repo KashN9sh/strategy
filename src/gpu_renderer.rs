@@ -3143,21 +3143,21 @@ impl GpuRenderer {
                 }
             }
             
-            // Рендерим ночное освещение (окна домов, факелы, светлячки) - после зданий и граждан, но перед UI
-            if !self.light_instances.is_empty() {
-                render_pass.set_pipeline(&self.glow_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
-                render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
-                render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..6, 0, 0..self.light_instances.len() as u32);
-            }
-            
-            // Рендерим погодные эффекты и ночной оверлей ПЕРЕД UI
+            // Рендерим погодные эффекты и ночной оверлей ПЕРЕД UI (но после зданий и граждан)
             if self.weather_uniform.weather_type != 0 || self.weather_uniform.night_alpha > 0.0 {
                 render_pass.set_pipeline(&self.weather_pipeline);
                 render_pass.set_bind_group(0, &self.weather_bind_group, &[]);
                 render_pass.draw(0..3, 0..1); // Полноэкранный треугольник
+            }
+            
+            // Рендерим ночное освещение (светлячки) - ПОСЛЕ ночного оверлея, чтобы они не затемнялись
+            if !self.light_instances.is_empty() {
+                render_pass.set_pipeline(&self.glow_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..)); // Используем квадратную модель вместо прямоугольной
+                render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
+                render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..6, 0, 0..self.light_instances.len() as u32);
             }
             
             // Рендерим UI прямоугольники ПОСЛЕ погодных эффектов
