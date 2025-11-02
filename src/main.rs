@@ -590,6 +590,10 @@ fn run() -> Result<()> {
                     gpu_renderer.prepare_citizens(&citizens, &buildings, &atlas);
                     // Дороги теперь рендерятся как тайлы в prepare_tiles, отдельный вызов не нужен
                     
+                    // Подготавливаем ночное освещение (окна домов, факелы, светлячки)
+                    let fireflies_data: Vec<(glam::Vec2, f32)> = fireflies.iter().map(|f| (f.pos, f.phase)).collect();
+                    gpu_renderer.prepare_night_lights(&world, &buildings, &fireflies_data, &atlas, min_tx, min_ty, max_tx, max_ty, world_clock_ms, world_clock_ms / 1000.0, width_i32 as f32, height_i32 as f32, cam_px.x, cam_px.y, zoom);
+                    
                     // Предпросмотр дорог при перетаскивании
                     if left_mouse_down && road_mode && !preview_road_path.is_empty() {
                         let is_building = drag_road_state.unwrap_or(true);

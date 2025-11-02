@@ -362,6 +362,68 @@ pub struct LogInstance {
     pub padding: [u32; 3], // выравнивание до 16 байт
 }
 
+// Структура для точек ночного освещения (окна домов, факелы, светлячки)
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct LightInstance {
+    pub model_matrix: [[f32; 4]; 4],
+    pub radius: f32,
+    pub color: [f32; 4],
+    pub padding: [f32; 3], // выравнивание
+}
+
+impl LightInstance {
+    const ATTRIBS: [wgpu::VertexAttribute; 7] = [
+        // model_matrix
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 16,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 32,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: 48,
+            shader_location: 5,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        // radius
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4) as wgpu::BufferAddress,
+            shader_location: 6,
+            format: wgpu::VertexFormat::Float32,
+        },
+        // color
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+            shader_location: 7,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        // padding (выравнивание)
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<f32>() * 5) as wgpu::BufferAddress,
+            shader_location: 8,
+            format: wgpu::VertexFormat::Float32x3,
+        },
+    ];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<LightInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
 impl LogInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 6] = [
         // model_matrix
@@ -516,6 +578,7 @@ pub struct GpuRenderer {
     road_render_pipeline: wgpu::RenderPipeline,
     citizen_render_pipeline: wgpu::RenderPipeline,
     resource_render_pipeline: wgpu::RenderPipeline, // Для всех ресурсов (поленья, камни, железо и т.д.)
+    glow_render_pipeline: wgpu::RenderPipeline, // Для ночного освещения (мягкое свечение)
     ui_render_pipeline: wgpu::RenderPipeline,
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
@@ -564,6 +627,7 @@ pub struct GpuRenderer {
     road_preview_instances: Vec<RoadInstance>,
     building_preview_instances: Vec<BuildingInstance>,
     log_instances: Vec<LogInstance>,
+    light_instances: Vec<LightInstance>, // Точки ночного освещения (окна, факелы, светлячки)
     ui_rects: Vec<UIRect>,
     minimap_instances: Vec<UIRect>,
     max_instances: usize,
@@ -574,6 +638,7 @@ pub struct GpuRenderer {
     road_preview_instance_buffer: wgpu::Buffer,
     building_preview_instance_buffer: wgpu::Buffer,
     log_instance_buffer: wgpu::Buffer,
+    light_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
     minimap_buffer: wgpu::Buffer,
 }
@@ -1087,6 +1152,13 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
+        let light_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Light Instance Buffer"),
+            size: (std::mem::size_of::<LightInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
         let ui_rect_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("UI Rect Buffer"),
             size: (std::mem::size_of::<UIRect>() * max_instances) as wgpu::BufferAddress,
@@ -1333,6 +1405,53 @@ impl GpuRenderer {
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
+        // Создаём render pipeline для мягкого свечения (ночное освещение)
+        let glow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Glow Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/glow.wgsl").into()),
+        });
+        
+        let glow_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Glow Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let glow_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Glow Render Pipeline"),
+            layout: Some(&glow_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &glow_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), LightInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &glow_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None, // Не обрезаем обратную сторону для свечения
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -1657,6 +1776,7 @@ impl GpuRenderer {
             road_render_pipeline,
             citizen_render_pipeline,
             resource_render_pipeline,
+            glow_render_pipeline,
             ui_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
@@ -1691,6 +1811,7 @@ impl GpuRenderer {
             road_preview_instances: Vec::new(),
             building_preview_instances: Vec::new(),
             log_instances: Vec::new(),
+            light_instances: Vec::new(),
             ui_rects: Vec::new(),
             minimap_instances: Vec::new(),
             max_instances,
@@ -1701,6 +1822,7 @@ impl GpuRenderer {
             road_preview_instance_buffer,
             building_preview_instance_buffer,
             log_instance_buffer,
+            light_instance_buffer,
             ui_rect_buffer,
             minimap_buffer,
         })
@@ -2874,6 +2996,15 @@ impl GpuRenderer {
             );
         }
         
+        // Обновляем буфер ночного освещения ДО начала render pass
+        if !self.light_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.light_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.light_instances)
+            );
+        }
+        
         
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2970,6 +3101,16 @@ impl GpuRenderer {
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     render_pass.draw_indexed(0..6, 0, 0..self.building_preview_instances.len() as u32);
                 }
+            }
+            
+            // Рендерим ночное освещение (окна домов, факелы, светлячки) - после зданий и граждан, но перед UI
+            if !self.light_instances.is_empty() {
+                render_pass.set_pipeline(&self.glow_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
+                render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..6, 0, 0..self.light_instances.len() as u32);
             }
             
             // Рендерим погодные эффекты и ночной оверлей ПЕРЕД UI
@@ -3135,6 +3276,79 @@ impl GpuRenderer {
                 log_id: SOLID_COLOR_ID, // Специальный ID для простых цветных прямоугольников
                 tint_color: [0.6, 0.4, 0.2, 1.0], // коричневый цвет полена
                 padding: [0; 3],
+            });
+        }
+    }
+    
+    // Подготовка ночного освещения (окна домов, факелы, светлячки)
+    pub fn prepare_night_lights(
+        &mut self,
+        world: &World,
+        buildings: &[crate::types::Building],
+        fireflies: &[(glam::Vec2, f32)], // (pos, phase) для светлячков - pos в экранных координатах!
+        atlas: &crate::atlas::TileAtlas,
+        min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+        world_clock_ms: f32,
+        time: f32,
+        screen_width: f32,
+        screen_height: f32,
+        cam_x: f32,
+        cam_y: f32,
+        zoom: f32,
+    ) {
+        self.light_instances.clear();
+        
+        use crate::types::{BuildingKind, TileKind};
+        use glam::{Mat4, Vec2, Vec3};
+        
+        // Проверяем, ночь ли сейчас
+        const DAY_LENGTH_MS: f32 = 120_000.0;
+        let tt = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
+        let angle = tt * std::f32::consts::TAU;
+        let daylight = 0.5 - 0.5 * angle.cos();
+        let is_night = daylight <= 0.25;
+        
+        if !is_night {
+            return; // Не рендерим освещение днем
+        }
+        
+        let half_w = atlas.half_w as f32;
+        let half_h = atlas.half_h as f32;
+        let t = time;
+        
+        // Огни у домов и факелы убраны по запросу пользователя - оставляем только светлячков
+        
+        // Летающие светлячки (экраные координаты - преобразуем в мировые)
+        for (pos, phase) in fireflies {
+            // Преобразуем экранные координаты в мировые
+            // world_x = (screen_x - sw/2) / zoom + cam_x
+            // world_y = -(screen_y - sh/2) / zoom - cam_y
+            let wx = (pos.x - screen_width / 2.0) / zoom + cam_x;
+            let wy = -(pos.y - screen_height / 2.0) / zoom - cam_y;
+            
+            let flick = ((t * 5.0 + phase).sin() * 0.5 + 0.5) * 0.6 + 0.4;
+            let a = (210.0 * flick).min(230.0) / 255.0;
+            
+            // Уменьшаем размер светлячков (было 0.22 и 0.14)
+            let radius1 = half_w * 0.12; // Уменьшено с 0.22
+            let model_matrix1 = Mat4::from_translation(Vec3::new(wx, wy, 0.0)) * 
+                               Mat4::from_scale(Vec3::new(radius1 * 2.0, radius1 * 2.0, 1.0));
+            self.light_instances.push(LightInstance {
+                model_matrix: model_matrix1.to_cols_array_2d(),
+                radius: radius1,
+                color: [255.0/255.0, 200.0/255.0, 120.0/255.0, a * 0.65],
+                padding: [0.0; 3],
+            });
+            
+            // Второй слой светлячка (меньше и ярче)
+            let radius2 = half_w * 0.08; // Уменьшено с 0.14
+            let model_matrix2 = Mat4::from_translation(Vec3::new(wx, wy, 0.0)) * 
+                               Mat4::from_scale(Vec3::new(radius2 * 2.0, radius2 * 2.0, 1.0));
+            self.light_instances.push(LightInstance {
+                model_matrix: model_matrix2.to_cols_array_2d(),
+                radius: radius2,
+                color: [255.0/255.0, 240.0/255.0, 180.0/255.0, a],
+                padding: [0.0; 3],
             });
         }
     }
