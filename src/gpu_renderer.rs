@@ -2845,6 +2845,39 @@ impl GpuRenderer {
             }
         }
         
+        // Рендерим дороги на миникарте
+        for tx in min_tx..=max_tx {
+            for ty in min_ty..=max_ty {
+                if !world.is_road(glam::IVec2::new(tx, ty)) { continue; }
+                
+                // Преобразуем координаты дороги в координаты миникарты
+                let map_x = minimap_x + (tx - min_tx) * cell_size;
+                let map_y = minimap_y + (ty - min_ty) * cell_size;
+                
+                // Проверяем, что дорога в пределах миникарты
+                if map_x >= minimap_x && map_x < minimap_x + minimap_w &&
+                   map_y >= minimap_y && map_y < minimap_y + minimap_h {
+                    
+                    // Поворачиваем относительно центра миникарты
+                    let local_pos = glam::Vec3::new(map_x as f32, map_y as f32, 0.0) - center_vec;
+                    let rotated_pos = rotation_45 * local_pos;
+                    let final_pos = rotated_pos + center_vec;
+                    
+                    // Размер дорог теперь как здания (cell_size / 2 x cell_size / 2)
+                    let transform = glam::Mat4::from_scale_rotation_translation(
+                        glam::Vec3::new((cell_size / 2) as f32, (cell_size / 2) as f32, 1.0),
+                        rotation_45,
+                        final_pos,
+                    );
+                    
+                    self.minimap_instances.push(UIRect {
+                        model_matrix: transform.to_cols_array_2d(),
+                        color: [0.47, 0.43, 0.35, 1.0], // тот же цвет, что и в основном мире
+                    });
+                }
+            }
+        }
+
         // Рендерим здания на миникарте
         for building in buildings {
             // Проверяем, что здание в области миникарты
@@ -2881,8 +2914,9 @@ impl GpuRenderer {
                 let rotated_pos = rotation_45 * local_pos;
                 let final_pos = rotated_pos + center_vec;
                 
+                // Размер зданий теперь как дороги (cell_size x cell_size)
                 let transform = glam::Mat4::from_scale_rotation_translation(
-                    glam::Vec3::new((cell_size / 2) as f32, (cell_size / 2) as f32, 1.0),
+                    glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
                     rotation_45,
                     final_pos,
                 );
@@ -2891,38 +2925,6 @@ impl GpuRenderer {
                     model_matrix: transform.to_cols_array_2d(),
                     color: building_color,
                 });
-            }
-        }
-        
-        // Рендерим дороги на миникарте
-        for tx in min_tx..=max_tx {
-            for ty in min_ty..=max_ty {
-                if !world.is_road(glam::IVec2::new(tx, ty)) { continue; }
-                
-                // Преобразуем координаты дороги в координаты миникарты
-                let map_x = minimap_x + (tx - min_tx) * cell_size;
-                let map_y = minimap_y + (ty - min_ty) * cell_size;
-                
-                // Проверяем, что дорога в пределах миникарты
-                if map_x >= minimap_x && map_x < minimap_x + minimap_w &&
-                   map_y >= minimap_y && map_y < minimap_y + minimap_h {
-                    
-                    // Поворачиваем относительно центра миникарты
-                    let local_pos = glam::Vec3::new(map_x as f32, map_y as f32, 0.0) - center_vec;
-                    let rotated_pos = rotation_45 * local_pos;
-                    let final_pos = rotated_pos + center_vec;
-                    
-                    let transform = glam::Mat4::from_scale_rotation_translation(
-                        glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
-                        rotation_45,
-                        final_pos,
-                    );
-                    
-                    self.minimap_instances.push(UIRect {
-                        model_matrix: transform.to_cols_array_2d(),
-                        color: [0.47, 0.43, 0.35, 1.0], // тот же цвет, что и в основном мире
-                    });
-                }
             }
         }
         
