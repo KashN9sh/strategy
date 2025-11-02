@@ -2120,6 +2120,23 @@ impl GpuRenderer {
         self.ui_rects.push(ui_rect);
     }
     
+    // Добавляет UI прямоугольник с поворотом (для подложки миникарты)
+    pub fn add_ui_rect_rotated(&mut self, x: f32, y: f32, width: f32, height: f32, rotation: glam::Quat, color: [f32; 4]) {
+        // Создаем матрицу трансформации для прямоугольника с поворотом
+        let model_matrix = Mat4::from_scale_rotation_translation(
+            Vec3::new(width, height, 1.0),
+            rotation,
+            Vec3::new(x + width * 0.5, y + height * 0.5, 0.0), // центрируем
+        );
+        
+        let ui_rect = UIRect {
+            model_matrix: model_matrix.to_cols_array_2d(),
+            color,
+        };
+        
+        self.ui_rects.push(ui_rect);
+    }
+    
     pub fn draw_ui_panel(&mut self, x: f32, y: f32, width: f32, height: f32) {
         // Полупрозрачная темная панель
         self.add_ui_rect(x, y, width, height, [0.0, 0.0, 0.0, 0.8]);
@@ -2681,7 +2698,7 @@ impl GpuRenderer {
         self.building_preview_instances.clear();
     }
     
-    pub fn prepare_minimap(
+    pub fn prepare_minimap_with_atlas(
         &mut self,
         world: &mut crate::world::World,
         buildings: &[crate::types::Building],
@@ -2692,14 +2709,28 @@ impl GpuRenderer {
         minimap_w: i32,
         minimap_h: i32,
         cell_size: i32,
+        atlas_half_w: i32,
+        atlas_half_h: i32,
     ) {
         use crate::types::{TileKind, BiomeKind};
         
         self.minimap_instances.clear();
         
-        // Границы миникарты в тайлах (динамические вокруг камеры)
-        let cam_tile_x = (cam_x / 64.0) as i32; // преобразуем координаты камеры в тайлы
-        let cam_tile_y = (cam_y / 32.0) as i32;
+        // Центр миникарты для поворота на 45 градусов
+        let center_x = minimap_x + minimap_w / 2;
+        let center_y = minimap_y + minimap_h / 2;
+        let center_vec = glam::Vec3::new(center_x as f32, center_y as f32, 0.0);
+        
+        // Поворот на 45 градусов (π/4 радиан)
+        let rotation_45 = glam::Quat::from_rotation_z(std::f32::consts::PI / 4.0);
+        
+        // Правильное преобразование изометрических координат камеры в тайловые координаты
+        // iso_x = (mx - my) * half_w, iso_y = (mx + my) * half_h
+        // Обратное преобразование: mx = (iso_x / half_w + iso_y / half_h) / 2, my = (iso_y / half_h - iso_x / half_w) / 2
+        let half_w = atlas_half_w as f32;
+        let half_h = atlas_half_h as f32;
+        let cam_tile_x = ((cam_x / half_w + cam_y / half_h) / 2.0).floor() as i32;
+        let cam_tile_y = ((cam_y / half_h - cam_x / half_w) / 2.0).floor() as i32;
         
         // Размер области миникарты в тайлах (соответствует размеру виджета)
         let map_radius = 30; // радиус области вокруг камеры
@@ -2709,17 +2740,7 @@ impl GpuRenderer {
         let max_tx = cam_tile_x + map_radius;
         let max_ty = cam_tile_y + map_radius;
         
-        // Добавляем тестовый квадрат в левый верхний угол миникарты
-        let test_transform = glam::Mat4::from_scale_rotation_translation(
-            glam::Vec3::new(20.0, 20.0, 1.0),
-            glam::Quat::IDENTITY,
-            glam::Vec3::new(minimap_x as f32 + 10.0, minimap_y as f32 + 10.0, 0.0),
-        );
-        
-        self.minimap_instances.push(UIRect {
-            model_matrix: test_transform.to_cols_array_2d(),
-            color: [1.0, 0.0, 0.0, 1.0], // ярко-красный тестовый квадрат
-        });
+        // Тестовый квадрат убран, больше не нужен
         
         // Рендерим тайлы миникарты с тинтами биомов
         for tx in min_tx..=max_tx {
@@ -2758,10 +2779,15 @@ impl GpuRenderer {
                 if x >= minimap_x && x < minimap_x + minimap_w && 
                    y >= minimap_y && y < minimap_y + minimap_h {
                     
+                    // Поворачиваем относительно центра миникарты
+                    let local_pos = glam::Vec3::new(x as f32, y as f32, 0.0) - center_vec;
+                    let rotated_pos = rotation_45 * local_pos;
+                    let final_pos = rotated_pos + center_vec;
+                    
                     let transform = glam::Mat4::from_scale_rotation_translation(
                         glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
-                        glam::Quat::IDENTITY,
-                        glam::Vec3::new(x as f32, y as f32, 0.0),
+                        rotation_45,
+                        final_pos,
                     );
                     
                     self.minimap_instances.push(UIRect {
@@ -2799,10 +2825,15 @@ impl GpuRenderer {
                             [0.8, 0.6, 0.4, 0.8] // коричневый для глины
                         };
                         
+                        // Поворачиваем относительно центра миникарты
+                        let local_pos = glam::Vec3::new(x as f32, y as f32, 0.0) - center_vec;
+                        let rotated_pos = rotation_45 * local_pos;
+                        let final_pos = rotated_pos + center_vec;
+                        
                         let transform = glam::Mat4::from_scale_rotation_translation(
                             glam::Vec3::new(cell_size as f32 * 0.6, cell_size as f32 * 0.6, 1.0),
-                            glam::Quat::IDENTITY,
-                            glam::Vec3::new(x as f32, y as f32, 0.0),
+                            rotation_45,
+                            final_pos,
                         );
                         
                         self.minimap_instances.push(UIRect {
@@ -2845,10 +2876,15 @@ impl GpuRenderer {
                     crate::types::BuildingKind::Fishery => [0.2, 0.6, 0.8, 1.0], // голубой
                 };
                 
+                // Поворачиваем относительно центра миникарты
+                let local_pos = glam::Vec3::new(map_x as f32, map_y as f32, 0.0) - center_vec;
+                let rotated_pos = rotation_45 * local_pos;
+                let final_pos = rotated_pos + center_vec;
+                
                 let transform = glam::Mat4::from_scale_rotation_translation(
                     glam::Vec3::new((cell_size / 2) as f32, (cell_size / 2) as f32, 1.0),
-                    glam::Quat::IDENTITY,
-                    glam::Vec3::new(map_x as f32, map_y as f32, 0.0),
+                    rotation_45,
+                    final_pos,
                 );
                 
                 self.minimap_instances.push(UIRect {
@@ -2871,10 +2907,15 @@ impl GpuRenderer {
                 if map_x >= minimap_x && map_x < minimap_x + minimap_w &&
                    map_y >= minimap_y && map_y < minimap_y + minimap_h {
                     
+                    // Поворачиваем относительно центра миникарты
+                    let local_pos = glam::Vec3::new(map_x as f32, map_y as f32, 0.0) - center_vec;
+                    let rotated_pos = rotation_45 * local_pos;
+                    let final_pos = rotated_pos + center_vec;
+                    
                     let transform = glam::Mat4::from_scale_rotation_translation(
                         glam::Vec3::new(cell_size as f32, cell_size as f32, 1.0),
-                        glam::Quat::IDENTITY,
-                        glam::Vec3::new(map_x as f32, map_y as f32, 0.0),
+                        rotation_45,
+                        final_pos,
                     );
                     
                     self.minimap_instances.push(UIRect {
@@ -2885,15 +2926,12 @@ impl GpuRenderer {
             }
         }
         
-        // Показываем область видимости камеры (центр миникарты)
-        let center_x = minimap_x + minimap_w / 2;
-        let center_y = minimap_y + minimap_h / 2;
-        
-        // Показываем область видимости камеры в центре миникарты
+        // Показываем область видимости камеры в центре миникарты (уже вычислен выше)
+        // Поворачиваем относительно центра миникарты
         let transform = glam::Mat4::from_scale_rotation_translation(
             glam::Vec3::new((cell_size * 2) as f32, (cell_size * 2) as f32, 1.0),
-            glam::Quat::IDENTITY,
-            glam::Vec3::new(center_x as f32, center_y as f32, 0.0),
+            rotation_45,
+            center_vec,
         );
         
         self.minimap_instances.push(UIRect {

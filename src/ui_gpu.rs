@@ -315,27 +315,55 @@ pub fn draw_ui_gpu(
     }
     
     // === МИНИКАРТА ===
-    // Рендерим миникарту в правом нижнем углу
+    // Рендерим миникарту в правом нижнем углу, отступаем дальше от края
     let pad = (8 * s) as f32;
+    let minimap_pad = (30 * s) as f32; // дополнительный отступ для миникарты (уменьшено, чтобы было правее)
+    let minimap_vertical_offset = (50 * s) as f32; // дополнительный отступ вниз, чтобы опустить миникарту
     let base_cell = (2 * s) as f32;
-    let base_w_tiles = 80.0;  // уменьшаем ширину
-    let base_h_tiles = 60.0;  // уменьшаем высоту
-    let widget_w = base_w_tiles * base_cell;
-    let widget_h = base_h_tiles * base_cell;
-    let minimap_x = fw as f32 - pad - widget_w;
-    let minimap_y = fh as f32 - ui::bottom_panel_height(s) as f32 - pad - widget_h;
+    // Делаем миникарту квадратной - используем одинаковый размер для ширины и высоты
+    let base_size = 60.0;  // размер квадрата
+    let widget_w = base_size * base_cell;
+    let widget_h = base_size * base_cell;
+    // Центр миникарты для поворота
+    let minimap_x = fw as f32 - pad - minimap_pad - widget_w;
+    let minimap_y = fh as f32 - ui::bottom_panel_height(s) as f32 - pad - widget_h + minimap_vertical_offset;
+    let minimap_center_x = minimap_x + widget_w * 0.5;
+    let minimap_center_y = minimap_y + widget_h * 0.5;
     
-    // Рамка миникарты
-    gpu.add_ui_rect(minimap_x - 2.0, minimap_y - 2.0, widget_w + 4.0, widget_h + 4.0, [0.2, 0.2, 0.2, 1.0]);
-    gpu.add_ui_rect(minimap_x, minimap_y, widget_w, widget_h, [0.1, 0.1, 0.1, 0.8]);
+    // Поворот на 45 градусов для подложки
+    let rotation_45 = glam::Quat::from_rotation_z(std::f32::consts::PI / 4.0);
     
-    // Подготавливаем миникарту
-    gpu.prepare_minimap(
+    // Рамка миникарты (повернутая на 45 градусов)
+    // Внешняя рамка (чуть больше для обводки)
+    let frame_size = widget_w.max(widget_h) * 1.1; // увеличенный размер для обводки
+    gpu.add_ui_rect_rotated(
+        minimap_center_x - frame_size * 0.5,
+        minimap_center_y - frame_size * 0.5,
+        frame_size,
+        frame_size,
+        rotation_45,
+        [0.2, 0.2, 0.2, 1.0]
+    );
+    
+    // Внутренняя подложка (повернутая на 45 градусов)
+    gpu.add_ui_rect_rotated(
+        minimap_center_x - widget_w * 0.5,
+        minimap_center_y - widget_h * 0.5,
+        widget_w,
+        widget_h,
+        rotation_45,
+        [0.1, 0.1, 0.1, 0.8]
+    );
+    
+    // Подготавливаем миникарту (используем atlas_half_w и atlas_half_h из параметров функции)
+    gpu.prepare_minimap_with_atlas(
         world, buildings,
         cam_x, cam_y,
         minimap_x as i32, minimap_y as i32, 
         widget_w as i32, widget_h as i32,
         cell_size,
+        atlas_half_w,
+        atlas_half_h,
     );
     
     // === ТУЛТИПЫ ===
