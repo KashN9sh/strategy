@@ -2711,6 +2711,10 @@ impl GpuRenderer {
         cell_size: i32,
         atlas_half_w: i32,
         atlas_half_h: i32,
+        visible_min_tx: i32,
+        visible_min_ty: i32,
+        visible_max_tx: i32,
+        visible_max_ty: i32,
     ) {
         use crate::types::{TileKind, BiomeKind};
         
@@ -2724,21 +2728,17 @@ impl GpuRenderer {
         // Поворот на 45 градусов (π/4 радиан)
         let rotation_45 = glam::Quat::from_rotation_z(std::f32::consts::PI / 4.0);
         
-        // Правильное преобразование изометрических координат камеры в тайловые координаты
-        // iso_x = (mx - my) * half_w, iso_y = (mx + my) * half_h
-        // Обратное преобразование: mx = (iso_x / half_w + iso_y / half_h) / 2, my = (iso_y / half_h - iso_x / half_w) / 2
-        let half_w = atlas_half_w as f32;
-        let half_h = atlas_half_h as f32;
-        let cam_tile_x = ((cam_x / half_w + cam_y / half_h) / 2.0).floor() as i32;
-        let cam_tile_y = ((cam_y / half_h - cam_x / half_w) / 2.0).floor() as i32;
+        // Используем центр видимой области для центрирования миникарты
+        let center_tile_x = (visible_min_tx + visible_max_tx + 30) / 2;
+        let center_tile_y = (visible_min_ty + visible_max_ty + 30) / 2;
         
         // Размер области миникарты в тайлах (соответствует размеру виджета)
-        let map_radius = 30; // радиус области вокруг камеры
+        let map_radius = 30; // радиус области вокруг центра видимой области
         
-        let min_tx = cam_tile_x - map_radius;
-        let min_ty = cam_tile_y - map_radius;
-        let max_tx = cam_tile_x + map_radius;
-        let max_ty = cam_tile_y + map_radius;
+        let min_tx = center_tile_x - map_radius;
+        let min_ty = center_tile_y - map_radius;
+        let max_tx = center_tile_x + map_radius;
+        let max_ty = center_tile_y + map_radius;
         
         // Тестовый квадрат убран, больше не нужен
         
@@ -2928,18 +2928,89 @@ impl GpuRenderer {
             }
         }
         
-        // Показываем область видимости камеры в центре миникарты (уже вычислен выше)
-        // Поворачиваем относительно центра миникарты
-        let transform = glam::Mat4::from_scale_rotation_translation(
-            glam::Vec3::new((cell_size * 2) as f32, (cell_size * 2) as f32, 1.0),
-            rotation_45,
-            center_vec,
-        );
+        // Показываем рамку видимой области на миникарте
+        // Вычисляем границы видимой области в координатах миникарты
+        let visible_min_map_x = minimap_x + (visible_min_tx - min_tx) * cell_size;
+        let visible_min_map_y = minimap_y + (visible_min_ty - min_ty) * cell_size;
+        let visible_max_map_x = minimap_x + (visible_max_tx - min_tx) * cell_size;
+        let visible_max_map_y = minimap_y + (visible_max_ty - min_ty) * cell_size;
         
-        self.minimap_instances.push(UIRect {
-            model_matrix: transform.to_cols_array_2d(),
-            color: [1.0, 1.0, 0.0, 0.5], // полупрозрачный желтый
-        });
+        let frame_thickness = 2.0; // толщина рамки в пикселях
+        
+        // Проверяем, что хотя бы часть видимой области в пределах миникарты
+        if visible_max_map_x > minimap_x && visible_min_map_x < minimap_x + minimap_w &&
+           visible_max_map_y > minimap_y && visible_min_map_y < minimap_y + minimap_h {
+            
+            // Ограничиваем границы рамки пределами миникарты
+            let frame_min_x = visible_min_map_x.max(minimap_x) as f32;
+            let frame_min_y = visible_min_map_y.max(minimap_y) as f32;
+            let frame_max_x = visible_max_map_x.min(minimap_x + minimap_w) as f32;
+            let frame_max_y = visible_max_map_y.min(minimap_y + minimap_h) as f32;
+            
+            let frame_w = frame_max_x - frame_min_x;
+            let frame_h = frame_max_y - frame_min_y;
+            
+            // Рисуем 4 стороны рамки (верх, низ, лево, право)
+            // Верх
+            let top_center = glam::Vec3::new(frame_min_x + frame_w * 0.5, frame_min_y, 0.0);
+            let top_local = top_center - center_vec;
+            let top_rotated = rotation_45 * top_local;
+            let top_final = top_rotated + center_vec;
+            let top_transform = glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(frame_w, frame_thickness, 1.0),
+                rotation_45,
+                top_final,
+            );
+            self.minimap_instances.push(UIRect {
+                model_matrix: top_transform.to_cols_array_2d(),
+                color: [1.0, 1.0, 0.0, 0.8], // ярко-желтый
+            });
+            
+            // Низ
+            let bottom_center = glam::Vec3::new(frame_min_x + frame_w * 0.5, frame_max_y, 0.0);
+            let bottom_local = bottom_center - center_vec;
+            let bottom_rotated = rotation_45 * bottom_local;
+            let bottom_final = bottom_rotated + center_vec;
+            let bottom_transform = glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(frame_w, frame_thickness, 1.0),
+                rotation_45,
+                bottom_final,
+            );
+            self.minimap_instances.push(UIRect {
+                model_matrix: bottom_transform.to_cols_array_2d(),
+                color: [1.0, 1.0, 0.0, 0.8],
+            });
+            
+            // Лево
+            let left_center = glam::Vec3::new(frame_min_x, frame_min_y + frame_h * 0.5, 0.0);
+            let left_local = left_center - center_vec;
+            let left_rotated = rotation_45 * left_local;
+            let left_final = left_rotated + center_vec;
+            let left_transform = glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(frame_thickness, frame_h, 1.0),
+                rotation_45,
+                left_final,
+            );
+            self.minimap_instances.push(UIRect {
+                model_matrix: left_transform.to_cols_array_2d(),
+                color: [1.0, 1.0, 0.0, 0.8],
+            });
+            
+            // Право
+            let right_center = glam::Vec3::new(frame_max_x, frame_min_y + frame_h * 0.5, 0.0);
+            let right_local = right_center - center_vec;
+            let right_rotated = rotation_45 * right_local;
+            let right_final = right_rotated + center_vec;
+            let right_transform = glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(frame_thickness, frame_h, 1.0),
+                rotation_45,
+                right_final,
+            );
+            self.minimap_instances.push(UIRect {
+                model_matrix: right_transform.to_cols_array_2d(),
+                color: [1.0, 1.0, 0.0, 0.8],
+            });
+        }
         
         // Буфер миникарты будет обновлен в render()
     }

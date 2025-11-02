@@ -1083,6 +1083,10 @@ fn run() -> Result<()> {
                     zoom,
                     atlas.half_w,
                     atlas.half_h,
+                    min_tx,
+                    min_ty,
+                    max_tx,
+                    max_ty,
                 );
             } else {
                 // Если UI выключен, все равно очищаем

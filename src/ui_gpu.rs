@@ -54,6 +54,11 @@ pub fn draw_ui_gpu(
     zoom: f32,
     atlas_half_w: i32,
     atlas_half_h: i32,
+    // Видимые границы тайлов для миникарты
+    visible_min_tx: i32,
+    visible_min_ty: i32,
+    visible_max_tx: i32,
+    visible_max_ty: i32,
 ) {
     gpu.clear_ui();
     
@@ -364,6 +369,10 @@ pub fn draw_ui_gpu(
         cell_size,
         atlas_half_w,
         atlas_half_h,
+        visible_min_tx,
+        visible_min_ty,
+        visible_max_tx,
+        visible_max_ty,
     );
     
     // === ТУЛТИПЫ ===
