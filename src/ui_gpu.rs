@@ -124,7 +124,7 @@ pub fn draw_ui_gpu(
     
     // FPS (самый правый)
     let fps_rounded = fps.round() as u32;
-    let fps_num_w = (fps_rounded.to_string().len() as f32 * 4.0 * 2.0 * scale);
+    let fps_num_w = fps_rounded.to_string().len() as f32 * 4.0 * 2.0 * scale;
     right_x -= fps_num_w;
     gpu.draw_number(right_x, row1_y, fps_rounded, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
     right_x -= 80.0;
@@ -133,7 +133,7 @@ pub fn draw_ui_gpu(
     
     // Speed (слева от FPS)
     let speed_val = (speed * 10.0).round() as u32;
-    let speed_num_w = (speed_val.to_string().len() as f32 * 4.0 * 2.0 * scale);
+    let speed_num_w = speed_val.to_string().len() as f32 * 4.0 * 2.0 * scale;
     right_x -= speed_num_w;
     gpu.draw_number(right_x, row1_y, speed_val, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
     right_x -= 30.0;
@@ -292,9 +292,9 @@ pub fn draw_ui_gpu(
         gpu.draw_button(current_x, control_y, minus_btn_w, btn_h, b"-", false, btn_scale);
         current_x += minus_btn_w + 6.0 * scale;
         gpu.draw_button(current_x, control_y, plus_btn_w, btn_h, b"+", false, btn_scale);
-        current_x += plus_btn_w + 6.0 * scale;
         
         // === ТРЕТЬЯ СТРОКА: Политика еды ===
+        let _ = current_x; // значение присваивается, но сразу переопределяется ниже
         current_x = pad;
         let policy_y = control_y + btn_h + 6.0;
         
@@ -494,7 +494,7 @@ pub fn draw_building_tooltip(
     workers_target: i32,
     scale: f32,
     screen_width: f32,
-    screen_height: f32,
+    _screen_height: f32,
 ) {
     let s = scale as i32;
     let pad = (4 * s) as f32;
@@ -518,10 +518,10 @@ pub fn draw_building_tooltip(
     };
     
     // Вычисляем размер тултипа
-    let name_w = (name.len() as f32 * 4.0 * 2.0 * scale);
-    let prod_w = (prod.len() as f32 * 4.0 * 2.0 * scale);
-    let cons_w = cons.map(|c| (c.len() as f32 * 4.0 * 2.0 * scale)).unwrap_or(0.0);
-    let workers_w = (format!("Workers: {}/{}", workers_current, workers_target).len() as f32 * 4.0 * 2.0 * scale);
+    let name_w = name.len() as f32 * 4.0 * 2.0 * scale;
+    let prod_w = prod.len() as f32 * 4.0 * 2.0 * scale;
+    let cons_w = cons.map(|c| c.len() as f32 * 4.0 * 2.0 * scale).unwrap_or(0.0);
+    let workers_w = format!("Workers: {}/{}", workers_current, workers_target).len() as f32 * 4.0 * 2.0 * scale;
     
     let tooltip_w = [name_w, prod_w, cons_w, workers_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
     let tooltip_h = line_height * 4.0 + pad * 2.0;
@@ -564,7 +564,7 @@ pub fn draw_button_tooltip(
     button_text: &str,
     scale: f32,
     screen_width: f32,
-    screen_height: f32,
+    _screen_height: f32,
 ) {
     let s = scale as i32;
     let pad = (4 * s) as f32;
@@ -662,7 +662,7 @@ pub fn draw_resource_tooltip(
     citizens_fetching: i32,
     scale: f32,
     screen_width: f32,
-    screen_height: f32,
+    _screen_height: f32,
 ) {
     let s = scale as i32;
     let pad = (4 * s) as f32;
@@ -695,7 +695,7 @@ pub fn draw_resource_tooltip(
     // Вычисляем размер тултипа
     let name_w = name.len() as f32 * 4.0 * 2.0 * scale;
     let desc_w = description.len() as f32 * 4.0 * 2.0 * scale;
-    let value_w = (format!("Current: {}", current_value).len() as f32 * 4.0 * 2.0 * scale);
+    let value_w = format!("Current: {}", current_value).len() as f32 * 4.0 * 2.0 * scale;
     
     let tooltip_w = [name_w, desc_w, value_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
     let tooltip_h = line_height * 3.0 + pad * 2.0;
@@ -794,7 +794,7 @@ pub fn draw_biome_debug_tooltip(
     tile_y: i32,
     scale: f32,
     screen_width: f32,
-    screen_height: f32,
+    _screen_height: f32,
 ) {
     let pad = 8.0 * scale;
     let line_height = 16.0 * scale;

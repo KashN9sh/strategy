@@ -1,4 +1,4 @@
-use crate::types::{BuildingKind, ResourceKind};
+use crate::types::BuildingKind;
 
 // Единая цветовая палитра
 
@@ -21,21 +21,5 @@ pub fn building_color(kind: BuildingKind) -> [u8; 4] {
     }
 }
 
-pub fn resource_color(kind: ResourceKind) -> [u8; 4] {
-    use ResourceKind::*;
-    match kind {
-        Wood => [110, 70, 30, 255],
-        Stone => [120, 120, 120, 255],
-        Clay => [150, 90, 70, 255],
-        Bricks => [180, 120, 90, 255],
-        Wheat => [200, 180, 80, 255],
-        Flour => [210, 210, 180, 255],
-        Bread => [200, 160, 120, 255],
-        Fish => [100, 140, 200, 255],
-        Gold => [220, 180, 60, 255],
-        IronOre => [90, 90, 110, 255],
-        IronIngot => [190, 190, 210, 255],
-    }
-}
 
 

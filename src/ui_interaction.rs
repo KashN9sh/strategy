@@ -2,7 +2,7 @@ use glam::IVec2;
 
 use crate::atlas::TileAtlas;
 use crate::input::Config;
-use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, CitizenState, building_cost, spend_wood};
+use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, CitizenState, building_cost};
 use crate::ui;
 use crate::types::FoodPolicy;
 use crate::world::World;
@@ -60,7 +60,7 @@ pub fn handle_left_click(
     let _bar_h = ui::top_panel_height(ui_s);
     // нижняя панель UI
     let bottom_bar_h = ui::bottom_panel_height(ui_s);
-    let by0 = height_i32 - bottom_bar_h; let padb = 8 * ui_s; let btn_h = 18 * ui_s;
+    let _by0 = height_i32 - bottom_bar_h; let _padb = 8 * ui_s; let _btn_h = 18 * ui_s;
     // Миникарта +/- в правом нижнем углу (совпадает с координатами в ui::draw_minimap_widget)
     {
         let s = ui_s; let pad = ui::ui_pad(s); let base_cell = 2 * s; let base_w_tiles = 96; let base_h_tiles = 64;
@@ -314,9 +314,9 @@ pub fn get_hovered_button(
     ui_category: ui::UICategory,
     ui_tab: ui::UITab,
     paused: bool,
-    speed_mult: f32,
+    _speed_mult: f32,
     tax_rate: f32,
-    food_policy: FoodPolicy,
+    _food_policy: FoodPolicy,
 ) -> Option<&'static str> {
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let bottom_bar_h = ui::bottom_panel_height(ui_s);
@@ -410,7 +410,7 @@ pub fn get_hovered_button(
             (FoodPolicy::FishFirst, b"Fish", "Fish First Policy"),
         ];
         
-        for (policy, label, tooltip) in food_policies.iter() {
+        for (_policy, label, tooltip) in food_policies.iter() {
             let btn_w = ((label.len() as i32 * 4 * 2 * ui_s) + 12).max(50);
             if current_x + btn_w > width_i32 - padb {
                 break;
@@ -433,7 +433,7 @@ pub fn get_hovered_button(
     ];
     let row_y = [by0 + padb + btn_h + 6 * ui_s, by0 + padb + (btn_h + 6 * ui_s) * 2];
     let mut row: usize = 0; let mut cx = padb;
-    for (cat, label) in cats.iter() {
+    for (_cat, label) in cats.iter() {
         let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(60); // та же формула, что в ui_gpu.rs
         if cx + bw > width_i32 - padb { row = (row + 1).min(row_y.len()-1); cx = padb; }
         let y = row_y[row];
@@ -484,7 +484,7 @@ pub fn get_hovered_button(
 /// Определяет, на какой ресурс наведен курсор (для тултипов)
 pub fn get_hovered_resource(
     cursor_xy: IVec2,
-    width_i32: i32,
+    _width_i32: i32,
     height_i32: i32,
     config: &Config,
     resources: &Resources,

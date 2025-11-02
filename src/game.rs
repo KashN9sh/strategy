@@ -1,13 +1,13 @@
 use glam::IVec2;
 
-use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, ResourceKind, FoodPolicy};
+use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, FoodPolicy};
 use crate::world::World;
 
 pub fn simulate(
     buildings: &mut Vec<Building>,
     world: &mut World,
-    resources: &mut Resources,
-    warehouses: &mut Vec<WarehouseStore>,
+    _resources: &mut Resources,
+    _warehouses: &mut Vec<WarehouseStore>,
     dt_ms: i32,
 ) {
     for b in buildings.iter_mut() {
@@ -42,10 +42,6 @@ pub fn simulate(
     }
 }
 
-pub fn production_weather_penalty(kind: crate::WeatherKind) -> f32 {
-    match kind { crate::WeatherKind::Rain => 0.9, crate::WeatherKind::Fog => 0.95, crate::WeatherKind::Snow => 0.85, _ => 1.0 }
-}
-
 // Дифференцированный множитель длительности производственного цикла
 // (>1.0 — медленнее, <1.0 — быстрее)
 pub fn production_weather_wmul(weather: crate::WeatherKind, building: BuildingKind) -> f32 {
@@ -78,13 +74,13 @@ pub fn new_day_feed_and_income(citizens: &mut [Citizen], resources: &mut Resourc
     for c in citizens.iter_mut() { c.fed_today = false; }
     for c in citizens.iter_mut() {
         let mut consumed = 0u8; // бит0=bread, бит1=fish
-        let mut take_bread = |wss: &mut [WarehouseStore], res: &mut Resources, consumed: &mut u8| {
-            for w in wss.iter_mut() { if w.bread > 0 { w.bread -= 1; *consumed = 1; return; } }
-            if *consumed == 0 && res.bread > 0 { res.bread -= 1; *consumed = 1; }
+        let take_bread = |wss: &mut [WarehouseStore], res: &mut Resources, consumed_ref: &mut u8| {
+            for w in wss.iter_mut() { if w.bread > 0 { w.bread -= 1; *consumed_ref = 1; return; } }
+            if *consumed_ref == 0 && res.bread > 0 { res.bread -= 1; *consumed_ref = 1; }
         };
-        let mut take_fish = |wss: &mut [WarehouseStore], res: &mut Resources, consumed: &mut u8| {
-            for w in wss.iter_mut() { if w.fish > 0 { w.fish -= 1; *consumed = 2; return; } }
-            if *consumed == 0 && res.fish > 0 { res.fish -= 1; *consumed = 2; }
+        let take_fish = |wss: &mut [WarehouseStore], res: &mut Resources, consumed_ref: &mut u8| {
+            for w in wss.iter_mut() { if w.fish > 0 { w.fish -= 1; *consumed_ref = 2; return; } }
+            if *consumed_ref == 0 && res.fish > 0 { res.fish -= 1; *consumed_ref = 2; }
         };
         match policy {
             FoodPolicy::Balanced => {
@@ -219,5 +215,4 @@ pub fn plan_path(world: &World, c: &mut Citizen, goal: IVec2) {
         c.progress = 0.0;
     }
 }
-
 

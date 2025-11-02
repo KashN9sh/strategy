@@ -3,7 +3,6 @@ use glam::{IVec2, Vec2};
 mod types; use types::{TileKind, BuildingKind, Building, Resources, Citizen, Job, JobKind, LogItem, WarehouseStore, CitizenState, ResourceKind};
 mod world; use world::World;
 mod atlas; use atlas::{TileAtlas, BuildingAtlas};
-mod render; // GPU rendering module
 mod ui;
 mod ui_gpu; // GPU версия UI
 mod input;
@@ -141,11 +140,6 @@ fn run() -> Result<()> {
     let mut warehouses: Vec<WarehouseStore> = Vec::new();
     let mut population: i32 = 0;
     let mut atlas = TileAtlas::new();
-    let mut road_atlas = atlas::RoadAtlas::new();
-    let mut citizen_sprite: Option<(Vec<Vec<u8>>, i32, i32)> = None;
-    // лица: ожидаем faces.png с 3 колонками (sad,neutral,happy), опционально 2 ряда (light/dark)
-    // порядок: [sad_l, neutral_l, happy_l, sad_d, neutral_d, happy_d]
-    let mut face_sprites: Option<(Vec<Vec<u8>>, i32, i32)> = None; // (sprites, cell_w, cell_h)
     let mut road_mode = false;
     let mut path_debug_mode = false;
     let mut biome_overlay_debug = false;
@@ -259,7 +253,7 @@ fn run() -> Result<()> {
             sprites.push(out);
         }
         println!("Загружено {} спрайтов зданий из buildings.png", sprites.len());
-        building_atlas = Some(BuildingAtlas { sprites, w: base_w as i32, h: ih as i32 });
+        building_atlas = Some(BuildingAtlas { w: base_w as i32, h: ih as i32 });
     }
     // trees.png: N спрайтов по горизонтали (стадии роста 0..N-1), ширина = base_w (или 64), высота любая
     if let Ok(img) = image::open("assets/trees.png") {
@@ -277,40 +271,7 @@ fn run() -> Result<()> {
             }
             sprites.push(out);
         }
-        tree_atlas = Some(atlas::TreeAtlas { sprites, w: base_w as i32, h: ih as i32 });
-    }
-    // faces.png: 3 колонки по эмоциям, 1-2 ряда (light/dark)
-    if let Ok(img) = image::open("assets/faces.png") {
-        let img = img.to_rgba8();
-        let (iw, ih) = img.dimensions();
-        let cols = 3u32;
-        if iw >= cols && iw % cols == 0 {
-            let cell_w = iw / cols;
-            if cell_w > 0 {
-                let rows = (ih / cell_w).max(1);
-                let cell_h = if rows > 0 { cell_w } else { ih };
-                let mut sprites = Vec::new();
-                let slice_cell = |cx: u32, cy: u32| -> Vec<u8> {
-                    let x0 = cx * cell_w; let y0 = cy * cell_h;
-                    let mut out = vec![0u8; (cell_w * cell_h * 4) as usize];
-                    for y in 0..cell_h as usize {
-                        let src = ((y0 as usize + y) * iw as usize + x0 as usize) * 4;
-                        let dst = y * cell_w as usize * 4;
-                        out[dst..dst + cell_w as usize * 4].copy_from_slice(&img.as_raw()[src..src + cell_w as usize * 4]);
-                    }
-                    out
-                };
-                let rows_clamped = rows.min(2); // используем максимум 2 ряда
-                for ry in 0..rows_clamped { for cx in 0..cols { sprites.push(slice_cell(cx, ry)); } }
-                face_sprites = Some((sprites, cell_w as i32, cell_h as i32));
-            }
-        }
-    }
-    // citizen.png: одиночный спрайт (квадратный предпочтительно), масштабируется под радиус маркера
-    if let Ok(img) = image::open("assets/citizen.png") {
-        let img = img.to_rgba8();
-        let (iw, ih) = img.dimensions();
-        citizen_sprite = Some((vec![img.to_vec()], iw as i32, ih as i32));
+        tree_atlas = Some(atlas::TreeAtlas { w: base_w as i32, h: ih as i32 });
     }
     let mut water_anim_time: f32 = 0.0;
     // Ночные светлячки на экране
@@ -320,8 +281,6 @@ fn run() -> Result<()> {
     let mut weather_timer_ms: f32 = 0.0;
     let mut weather_next_change_ms: f32 = choose_weather_duration_ms(weather, &mut rng);
     // Экономика: вчерашние итоги
-    let mut last_tax_income: i32 = 0;
-    let mut last_upkeep_cost: i32 = 0;
     let mut show_grid = false;
     let mut show_forest_overlay = false;
     let mut show_tree_stage_overlay = false;
@@ -329,14 +288,12 @@ fn run() -> Result<()> {
     let mut cursor_xy = IVec2::new(0, 0);
     // Drag-to-build roads state
     let mut left_mouse_down: bool = false;
-    let mut drag_prev_tile: Option<IVec2> = None;
     let mut drag_road_state: Option<bool> = None; // Some(true)=build, Some(false)=erase
     let mut drag_anchor_tile: Option<IVec2> = None; // начало протяжки
     let mut preview_road_path: Vec<IVec2> = Vec::new();
     let mut fps_ema: f32 = 60.0;
     // удалён дубликат переменной show_ui
     // выбранный житель для ручного назначения на работу (отключено)
-    let _selected_citizen: Option<usize> = None; // больше не используется для назначения
     // активная панель здания (по клику)
     let mut active_building_panel: Option<IVec2> = None;
 
@@ -495,7 +452,6 @@ fn run() -> Result<()> {
                         if road_mode {
                             if let Some(tp) = hovered_tile {
                                 let on = !world.is_road(tp);
-                                drag_prev_tile = Some(tp);
                                 drag_road_state = Some(on);
                                 drag_anchor_tile = Some(tp);
                                 preview_road_path.clear();
@@ -533,7 +489,6 @@ fn run() -> Result<()> {
                                 gpu_renderer.clear_road_preview();
                             }
                         }
-                        drag_prev_tile = None;
                         drag_road_state = None;
                         drag_anchor_tile = None;
                         preview_road_path.clear();
@@ -562,8 +517,6 @@ fn run() -> Result<()> {
 
                     // Границы видимых тайлов через инверсию проекции
                     let (min_tx, min_ty, max_tx, max_ty) = visible_tile_bounds_px(width_i32, height_i32, cam_px, atlas.half_w, atlas.half_h, zoom);
-                    // Подготовим процедурный атлас дорог под текущий масштаб
-                    road_atlas.ensure_zoom(atlas.half_w, atlas.half_h);
                     // Закажем генерацию колец чанков
                     world.schedule_ring(min_tx, min_ty, max_tx, max_ty);
                     // Интегрируем готовые чанки (non-blocking)
@@ -665,10 +618,6 @@ fn run() -> Result<()> {
                         let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
                         // среднее счастье
                         let avg_hap: f32 = if citizens.is_empty() { 50.0 } else { citizens.iter().map(|c| c.happiness as i32).sum::<i32>() as f32 / citizens.len() as f32 };
-                        // Жилищная вместимость/занятость
-                        let mut housing_cap = 0; let mut housing_used = 0;
-                        for b in &buildings { if b.kind == BuildingKind::House { housing_cap += b.capacity; } }
-                        for c in &citizens { if buildings.iter().any(|b| b.kind == BuildingKind::House && b.pos == c.home) { housing_used += 1; } }
                         let pop_show = citizens.len() as i32;
                         // Параметры погоды для UI: короткий лейбл
                         let (wlabel, wcol): (&[u8], [u8;4]) = match weather {
@@ -735,13 +684,13 @@ fn run() -> Result<()> {
                         };
                         
                  // Применяем погодные эффекты (частицы)
-                 let day_progress = (world_clock_ms / DAY_LENGTH_MS).clamp(0.0, 1.0);
-                 render::gpu::apply_environment_effects(
-                     &mut gpu_renderer,
-                     weather,
-                     day_progress,
-                     world_clock_ms / 1000.0,
-                 );
+                 let intensity = match weather {
+                     WeatherKind::Clear => 0.0,
+                     WeatherKind::Rain => 0.8,
+                     WeatherKind::Fog => 0.6,
+                     WeatherKind::Snow => 0.7,
+                 };
+                 gpu_renderer.update_weather(crate::types::WeatherKind::from(weather), world_clock_ms / 1000.0, intensity);
                  
                  // Обновляем частицы зданий
                  gpu_renderer.update_building_particles(&buildings, world_clock_ms / 1000.0);
@@ -839,7 +788,6 @@ fn run() -> Result<()> {
 
                 let base_step_ms = config.base_step_ms;
                 let step_ms = (base_step_ms / speed_mult.max(0.0001)).max(1.0);
-                let mut did_step = false;
                 if !paused {
                     while accumulator_ms >= step_ms {
                         // Подтянем готовые чанки перед генерацией задач, чтобы деревья из новых чанков
@@ -856,9 +804,7 @@ fn run() -> Result<()> {
                         let is_day = daylight > 0.25; // простой порог
                         // На рассвете (переход ночь→день) — кормление и доход
                         if !prev_is_day_flag && is_day {
-                            let (income_y, upkeep_y) = game::economy_new_day(&mut citizens, &mut resources, &mut warehouses, &buildings, tax_rate, &config, food_policy);
-                            last_tax_income = income_y;
-                            last_upkeep_cost = upkeep_y;
+                            let _ = game::economy_new_day(&mut citizens, &mut resources, &mut warehouses, &buildings, tax_rate, &config, food_policy);
                         }
                         prev_is_day_flag = is_day;
 
@@ -977,11 +923,6 @@ fn run() -> Result<()> {
                                     }}
                                         best.map(|(_,p)| p)
                                     };
-                                    // посчитаем количество stage2 в базовом радиусе для дебага
-                                    let mut _stage2_cnt = 0;
-                                    for dy in -24..=24 { for dx in -24..=24 {
-                                        if matches!(world.tree_stage(IVec2::new(b.pos.x+dx, b.pos.y+dy)), Some(2)) { _stage2_cnt += 1; }
-                                    }}
                                     if let Some(np) = search(24).or_else(|| search(32)).or_else(|| search(48)).or_else(|| search(64)) {
                                         let already = jobs.iter().any(|j| match j.kind { JobKind::ChopWood { pos } => pos==np, JobKind::HaulWood { from, .. } => from==np });
                                         if !already {
@@ -1094,18 +1035,17 @@ fn run() -> Result<()> {
                                         }
                                     }
                                     // скорость шага зависит от целевой клетки: дорога быстрее, трава медленнее, лес ещё медленнее
-                                    let mut _step_time_ms: f32 = 300.0; // базовая скорость (нравится на дорогах)
-                                    if world.is_road(c.target) {
-                                        _step_time_ms = 300.0;
+                                    let step_time_ms: f32 = if world.is_road(c.target) {
+                                        300.0
                                     } else {
                                         use crate::types::TileKind::*;
                                         match world.get_tile(c.target.x, c.target.y) {
-                                            Grass => _step_time_ms = 450.0,
-                                            Forest => _step_time_ms = 600.0,
-                                            Water => _step_time_ms = 300.0,
+                                            Grass => 450.0,
+                                            Forest => 600.0,
+                                            Water => 300.0,
                                         }
-                                    }
-                                    c.progress += (step_ms / _step_time_ms) as f32;
+                                    };
+                                    c.progress += (step_ms / step_time_ms) as f32;
                                     if c.progress >= 1.0 { c.pos = c.target; c.progress = 0.0; }
                                 }
                             }
@@ -1321,7 +1261,6 @@ fn run() -> Result<()> {
                             }
                         }
                         accumulator_ms -= step_ms;
-                        did_step = true;
                         if accumulator_ms > 10.0 * step_ms { accumulator_ms = 0.0; break; }
                     }
                 }
@@ -1345,13 +1284,13 @@ fn run() -> Result<()> {
                     if fireflies.len() < target {
                         let need = target - fireflies.len();
                         for _ in 0..need {
-                            let x = rng.gen_range(0.0..width_i32 as f32);
-                            let y = rng.gen_range(0.0..height_i32 as f32);
-                            let speed = rng.gen_range(8.0..20.0);
-                            let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+                            let x = rng.random_range(0.0..width_i32 as f32);
+                            let y = rng.random_range(0.0..height_i32 as f32);
+                            let speed = rng.random_range(8.0..20.0);
+                            let angle = rng.random_range(0.0..std::f32::consts::TAU);
                             let vel = Vec2::new(angle.cos(), angle.sin()) * speed;
-                            let phase = rng.gen_range(0.0..std::f32::consts::TAU);
-                            let life_s = rng.gen_range(6.0..14.0);
+                            let phase = rng.random_range(0.0..std::f32::consts::TAU);
+                            let life_s = rng.random_range(6.0..14.0);
                             fireflies.push(Firefly { pos: Vec2::new(x, y), vel, phase, life_s });
                         }
                     } else if fireflies.len() > target {
@@ -1382,11 +1321,6 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn clear(frame: &mut [u8], rgba: [u8; 4]) {
-    for px in frame.chunks_exact_mut(4) {
-        px.copy_from_slice(&rgba);
-    }
-}
 
 
 // удалено: sat_mul_add (не используется)
@@ -1432,7 +1366,7 @@ fn choose_weather_duration_ms(current: WeatherKind, rng: &mut StdRng) -> f32 {
         WeatherKind::Fog => (30.0, 70.0),
         WeatherKind::Snow => (50.0, 100.0),
     };
-    let sec: f32 = rng.gen_range(base_min..base_max);
+    let sec: f32 = rng.random_range(base_min..base_max);
     sec * 1000.0
 }
 
@@ -1446,7 +1380,7 @@ fn pick_next_weather(current: WeatherKind, rng: &mut StdRng) -> WeatherKind {
         WeatherKind::Snow  => (&[WeatherKind::Clear, WeatherKind::Rain, WeatherKind::Fog, WeatherKind::Snow], &[0.30, 0.20, 0.10, 0.40]),
     };
     let total: f32 = weights.iter().copied().sum();
-    let mut r = rng.gen_range(0.0..total);
+    let mut r = rng.random_range(0.0..total);
     for (w, &p) in opts.iter().zip(weights.iter()) {
         if r < p { return *w; }
         r -= p;

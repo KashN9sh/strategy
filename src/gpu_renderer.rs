@@ -5,7 +5,6 @@ use glam::{Mat4, Vec2, Vec3};
 use bytemuck::{Pod, Zeroable};
 use anyhow::Result;
 
-use crate::atlas::TileAtlas;
 use crate::world::World;
 use crate::types::{TileKind, WeatherKind, BuildingKind, BiomeKind};
 
@@ -529,41 +528,6 @@ impl CitizenInstance {
 }
 
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct UIVertex {
-    position: [f32; 2],
-    tex_coords: [f32; 2],
-    color: [f32; 4],
-}
-
-impl UIVertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 3] = [
-        wgpu::VertexAttribute {
-            offset: 0,
-            shader_location: 0,
-            format: wgpu::VertexFormat::Float32x2,
-        },
-        wgpu::VertexAttribute {
-            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-            shader_location: 1,
-            format: wgpu::VertexFormat::Float32x2,
-        },
-        wgpu::VertexAttribute {
-            offset: (std::mem::size_of::<[f32; 2]>() * 2) as wgpu::BufferAddress,
-            shader_location: 2,
-            format: wgpu::VertexFormat::Float32x4,
-        },
-    ];
-    
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<UIVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
 
 pub struct GpuRenderer {
     pub surface: wgpu::Surface<'static>,
@@ -579,7 +543,6 @@ pub struct GpuRenderer {
     citizen_render_pipeline: wgpu::RenderPipeline,
     resource_render_pipeline: wgpu::RenderPipeline, // Для всех ресурсов (поленья, камни, железо и т.д.)
     glow_render_pipeline: wgpu::RenderPipeline, // Для ночного освещения (мягкое свечение)
-    ui_render_pipeline: wgpu::RenderPipeline,
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
     // Буферы
@@ -603,9 +566,7 @@ pub struct GpuRenderer {
     building_particles: Vec<BuildingParticle>,
     building_particle_buffer: wgpu::Buffer,
     building_particle_storage_buffer: wgpu::Buffer,
-    building_particle_bind_group: wgpu::BindGroup,
     building_particle_uniform: BuildingParticleUniform,
-    building_particle_pipeline: wgpu::RenderPipeline,
     
     // UI экранные униформы (отдельно от мировой камеры)
     screen_buffer: wgpu::Buffer,
@@ -614,8 +575,6 @@ pub struct GpuRenderer {
     
     // Текстуры
     texture_bind_group: Option<wgpu::BindGroup>,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
-    road_texture_bind_group: Option<wgpu::BindGroup>,
     faces_texture_bind_group: Option<wgpu::BindGroup>,
     faces_bind_group_layout: wgpu::BindGroupLayout,
     
@@ -623,18 +582,15 @@ pub struct GpuRenderer {
     tile_instances: Vec<TileInstance>,
     building_instances: Vec<BuildingInstance>,
     citizen_instances: Vec<CitizenInstance>,
-    road_instances: Vec<RoadInstance>,
     road_preview_instances: Vec<RoadInstance>,
     building_preview_instances: Vec<BuildingInstance>,
     log_instances: Vec<LogInstance>,
     light_instances: Vec<LightInstance>, // Точки ночного освещения (окна, факелы, светлячки)
     ui_rects: Vec<UIRect>,
     minimap_instances: Vec<UIRect>,
-    max_instances: usize,
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
     citizen_instance_buffer: wgpu::Buffer,
-    road_instance_buffer: wgpu::Buffer,
     road_preview_instance_buffer: wgpu::Buffer,
     building_preview_instance_buffer: wgpu::Buffer,
     log_instance_buffer: wgpu::Buffer,
@@ -704,7 +660,7 @@ impl GpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/tile.wgsl").into()),
         });
         
-        let ui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let _ui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("UI Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/ui.wgsl").into()),
         });
@@ -1124,13 +1080,6 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
-        let road_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Road Instance Buffer"),
-            size: (std::mem::size_of::<RoadInstance>() * max_instances) as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        
         let road_preview_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Road Preview Instance Buffer"),
             size: (std::mem::size_of::<RoadInstance>() * max_instances) as wgpu::BufferAddress,
@@ -1466,7 +1415,7 @@ impl GpuRenderer {
         });
         
         // Создаём render pipeline для UI (пока заглушка)
-        let ui_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let _ui_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("UI Render Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
@@ -1514,41 +1463,7 @@ impl GpuRenderer {
             multiview: None,
         });
         
-        // ui_render_pipeline - заглушка, используем только ui_rect_render_pipeline  
-        let ui_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("UI Render Pipeline Stub"),
-            layout: Some(&ui_rect_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &ui_rect_shader,
-                entry_point: "vs_main",
-                buffers: &[Vertex::desc(), UIRect::desc()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &ui_rect_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        // ui_render_pipeline удален - используем только ui_rect_render_pipeline
         
         // Создаем погодные эффекты
         let weather_uniform = WeatherUniform::new();
@@ -1663,107 +1578,7 @@ impl GpuRenderer {
             mapped_at_creation: false,
         });
         
-        let building_particle_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-            label: Some("building_particle_bind_group_layout"),
-        });
-        
-        let building_particle_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &building_particle_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: building_particle_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: building_particle_storage_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("building_particle_bind_group"),
-        });
-        
-        // Загружаем шейдер частиц зданий
-        let building_particle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Building Particle Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/building_particles.wgsl").into()),
-        });
-        
-        let building_particle_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Building Particle Pipeline Layout"),
-            bind_group_layouts: &[&building_particle_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-        
-        let building_particle_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Building Particle Pipeline"),
-            layout: Some(&building_particle_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &building_particle_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &building_particle_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        // building_particle_bind_group_layout, building_particle_bind_group и building_particle_pipeline удалены
         
         Ok(Self {
             surface,
@@ -1777,7 +1592,6 @@ impl GpuRenderer {
             citizen_render_pipeline,
             resource_render_pipeline,
             glow_render_pipeline,
-            ui_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
             tile_index_buffer,
@@ -1793,32 +1607,26 @@ impl GpuRenderer {
             building_particles: Vec::new(),
             building_particle_buffer,
             building_particle_storage_buffer,
-            building_particle_bind_group,
             building_particle_uniform,
-            building_particle_pipeline,
             screen_buffer,
             screen_bind_group,
             screen_uniform,
             texture_bind_group: Some(texture_bind_group),
-            texture_bind_group_layout,
-            road_texture_bind_group: None,
             faces_texture_bind_group: None,
             faces_bind_group_layout,
+            // texture_bind_group_layout удален - используется только при инициализации
             tile_instances: Vec::new(),
             building_instances: Vec::new(),
             citizen_instances: Vec::new(),
-            road_instances: Vec::new(),
             road_preview_instances: Vec::new(),
             building_preview_instances: Vec::new(),
             log_instances: Vec::new(),
             light_instances: Vec::new(),
             ui_rects: Vec::new(),
             minimap_instances: Vec::new(),
-            max_instances,
             tile_instance_buffer,
             building_instance_buffer,
             citizen_instance_buffer,
-            road_instance_buffer,
             road_preview_instance_buffer,
             building_preview_instance_buffer,
             log_instance_buffer,
@@ -1843,7 +1651,7 @@ impl GpuRenderer {
     
     // Обновление камеры с масштабированием как в CPU версии
     pub fn update_camera(&mut self, cam_x: f32, cam_y: f32, zoom: f32) {
-        let aspect = self.size.width as f32 / self.size.height as f32;
+        let _aspect = self.size.width as f32 / self.size.height as f32;
         
         // Базируемся на размере экрана в пикселях, как в CPU версии
         let screen_width = self.size.width as f32;
@@ -2145,13 +1953,6 @@ impl GpuRenderer {
     pub fn draw_ui_resource_icon(&mut self, x: f32, y: f32, size: f32, color: [f32; 4]) {
         // Цветная иконка ресурса
         self.add_ui_rect(x, y, size, size, color);
-    }
-    
-    // Применяет полноэкранный tint (для погоды и ночного освещения)
-    pub fn apply_screen_tint(&mut self, color: [f32; 4]) {
-        let w = self.size.width as f32;
-        let h = self.size.height as f32;
-        self.add_ui_rect(0.0, 0.0, w, h, color);
     }
     
     // Bitmap шрифт 3x5 для цифр и букв
@@ -2541,64 +2342,6 @@ impl GpuRenderer {
         }
     }
     
-    pub fn prepare_roads(
-        &mut self,
-        world: &mut crate::world::World,
-        road_atlas: &crate::atlas::RoadAtlas,
-        tile_atlas: &crate::atlas::TileAtlas,
-        min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
-    ) {
-        use glam::{Mat4, Vec3};
-        
-        self.road_instances.clear();
-        
-        let half_w = tile_atlas.half_w as f32;
-        let half_h = tile_atlas.half_h as f32;
-        
-        // Проходим по всем видимым тайлам и ищем дороги
-        for mx in min_tx..=max_tx {
-            for my in min_ty..=max_ty {
-                if !world.is_road(glam::IVec2::new(mx, my)) { continue; }
-                
-                // Вычисляем маску соединений дороги (как в CPU версии)
-                let mut mask = 0u8;
-                if world.is_road(glam::IVec2::new(mx, my - 1)) { mask |= 0b0001; } // север
-                if world.is_road(glam::IVec2::new(mx + 1, my)) { mask |= 0b0010; } // восток  
-                if world.is_road(glam::IVec2::new(mx, my + 1)) { mask |= 0b0100; } // юг
-                if world.is_road(glam::IVec2::new(mx - 1, my)) { mask |= 0b1000; } // запад
-                
-                // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ (как у зданий)
-                let iso_x = (mx - my) as f32 * half_w;
-                let iso_y = ((mx + my) as f32 * half_h) - half_h * 0.5;
-                
-                // Матрица трансформации дороги (размер как у тайла)
-                let transform = Mat4::from_scale_rotation_translation(
-                    Vec3::new(half_w * 2.0, half_h * 2.0, 1.0),
-                    glam::Quat::IDENTITY,
-                    Vec3::new(iso_x, -iso_y, 0.0), // минус как у зданий
-                );
-                
-                let instance = RoadInstance {
-                    model_matrix: transform.to_cols_array_2d(),
-                    road_mask: mask as u32,
-                    tint_color: [1.0, 1.0, 1.0, 1.0], // белый цвет по умолчанию
-                    padding: [0; 3],
-                };
-                
-                self.road_instances.push(instance);
-            }
-        }
-        
-        // Обновляем буфер инстансов дорог
-        if !self.road_instances.is_empty() {
-            self.queue.write_buffer(
-                &self.road_instance_buffer,
-                0,
-                bytemuck::cast_slice(&self.road_instances)
-            );
-        }
-    }
-    
     pub fn clear_road_preview(&mut self) {
         self.road_preview_instances.clear();
     }
@@ -2702,15 +2445,15 @@ impl GpuRenderer {
         &mut self,
         world: &mut crate::world::World,
         buildings: &[crate::types::Building],
-        cam_x: f32,
-        cam_y: f32,
+        _cam_x: f32,
+        _cam_y: f32,
         minimap_x: i32,
         minimap_y: i32,
         minimap_w: i32,
         minimap_h: i32,
         cell_size: i32,
-        atlas_half_w: i32,
-        atlas_half_h: i32,
+        _atlas_half_w: i32,
+        _atlas_half_h: i32,
         visible_min_tx: i32,
         visible_min_ty: i32,
         visible_max_tx: i32,
@@ -3258,13 +3001,6 @@ impl GpuRenderer {
         Ok(())
     }
     
-    // Загрузка текстуры (пока заглушка)
-    pub fn load_texture_atlas(&mut self, atlas: &TileAtlas) -> Result<()> {
-        // TODO: реализовать загрузку текстурного атласа
-        // Пока создадим простую заглушку
-        Ok(())
-    }
-    
     pub fn load_faces_texture(&mut self) -> Result<()> {
         // Загружаем текстуру лиц из faces.png
         if let Ok(img) = image::open("assets/faces.png") {
@@ -3340,8 +3076,8 @@ impl GpuRenderer {
         &mut self,
         logs: &Vec<crate::types::LogItem>,
         atlas: &crate::atlas::TileAtlas,
-        cam_px: glam::Vec2,
-        screen_center: glam::IVec2,
+        _cam_px: glam::Vec2,
+        _screen_center: glam::IVec2,
     ) {
         self.log_instances.clear();
         
@@ -3394,11 +3130,11 @@ impl GpuRenderer {
     // Подготовка ночного освещения (окна домов, факелы, светлячки)
     pub fn prepare_night_lights(
         &mut self,
-        world: &World,
-        buildings: &[crate::types::Building],
+        _world: &World,
+        _buildings: &[crate::types::Building],
         fireflies: &[(glam::Vec2, f32)], // (pos, phase) для светлячков - pos в экранных координатах!
         atlas: &crate::atlas::TileAtlas,
-        min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32,
+        _min_tx: i32, _min_ty: i32, _max_tx: i32, _max_ty: i32,
         world_clock_ms: f32,
         time: f32,
         screen_width: f32,
@@ -3409,8 +3145,7 @@ impl GpuRenderer {
     ) {
         self.light_instances.clear();
         
-        use crate::types::{BuildingKind, TileKind};
-        use glam::{Mat4, Vec2, Vec3};
+        use glam::{Mat4, Vec3};
         
         // Проверяем, ночь ли сейчас
         const DAY_LENGTH_MS: f32 = 120_000.0;
@@ -3424,7 +3159,7 @@ impl GpuRenderer {
         }
         
         let half_w = atlas.half_w as f32;
-        let half_h = atlas.half_h as f32;
+        let _half_h = atlas.half_h as f32;
         let t = time;
         
         // Огни у домов и факелы убраны по запросу пользователя - оставляем только светлячков

@@ -207,22 +207,6 @@ pub fn warehouses_total_wood(warehouses: &Vec<WarehouseStore>) -> i32 {
     warehouses.iter().map(|w| w.wood).sum()
 }
 
-// Потратить дерево с учётом складов; если складов нет — тратим из общих ресурсов
-pub fn spend_wood(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, mut amount: i32) -> bool {
-    if amount <= 0 { return true; }
-    if warehouses.is_empty() {
-        if resources.wood >= amount { resources.wood -= amount; return true; } else { return false; }
-    }
-    let total: i32 = warehouses_total_wood(warehouses);
-    if total < amount { return false; }
-    for w in warehouses.iter_mut() {
-        if amount == 0 { break; }
-        let take = amount.min(w.wood);
-        w.wood -= take;
-        amount -= take;
-    }
-    true
-}
 
 // Суммарное золото на складах
 pub fn warehouses_total_gold(warehouses: &Vec<WarehouseStore>) -> i32 {
