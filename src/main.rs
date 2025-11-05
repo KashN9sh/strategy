@@ -22,6 +22,10 @@ mod game_state;
 mod event_handler;
 mod game_loop;
 mod render_prep;
+mod building_production;
+mod citizen_state;
+mod resource_visitor;
+mod commands;
 use gpu_renderer::GpuRenderer;
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
@@ -82,6 +86,7 @@ fn run() -> Result<()> {
                         &mut camera,
                         &input,
                         &config,
+                        &mut gpu_renderer,
                     ) {
                         return;
                     }

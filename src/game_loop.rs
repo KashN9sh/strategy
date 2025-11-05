@@ -2,13 +2,15 @@ use glam::{IVec2, Vec2};
 use rand::Rng;
 use crate::types::{
     Building, BuildingKind, Citizen, CitizenState, Job, JobKind, LogItem,
-    ResourceKind, WarehouseStore,
+    WarehouseStore,
 };
 use crate::world::World;
 use crate::game;
 use crate::jobs;
 use crate::weather::WeatherSystem;
 use crate::game_state::{GameState, Firefly};
+use crate::building_production;
+use crate::citizen_state;
 
 pub const DAY_LENGTH_MS: f32 = 120_000.0;
 
@@ -169,11 +171,24 @@ pub fn update_game_simulation(
     *prev_is_day_flag = is_day;
 
     // Ночная рутина: идём домой и спим, сбрасываем работу
+    // Используем State Pattern для управления состояниями
     if !is_day {
-        handle_night_routine(citizens, world, jobs);
+        citizen_state::handle_night_routine_with_states(
+            citizens,
+            world,
+            buildings,
+            jobs,
+            is_day,
+        );
     } else {
         // Утро: разбудить спящих и отменить возвращение домой
-        handle_dawn_routine(citizens, world);
+        citizen_state::handle_dawn_routine_with_states(
+            citizens,
+            world,
+            buildings,
+            jobs,
+            is_day,
+        );
     }
 
     // Дневная рутина рабочих по зданиям
@@ -224,53 +239,6 @@ fn is_daytime(world_clock_ms: f32) -> bool {
     daylight > 0.25
 }
 
-/// Обработать ночную рутину граждан
-fn handle_night_routine(citizens: &mut Vec<Citizen>, world: &mut World, _jobs: &mut Vec<Job>) {
-    for c in citizens.iter_mut() {
-        // отменяем активную задачу/перенос
-        c.assigned_job = None;
-        c.carrying_log = false;
-        if c.state != CitizenState::Sleeping {
-            if c.pos != c.home && !c.moving {
-                game::plan_path(world, c, c.home);
-                c.state = CitizenState::GoingHome;
-            }
-            if !c.moving && c.pos == c.home {
-                c.state = CitizenState::Sleeping;
-                if !c.manual_workplace {
-                    c.workplace = None;
-                }
-                c.work_timer_ms = 0;
-                c.carrying = None;
-            }
-        }
-    }
-}
-
-/// Обработать утреннюю рутину граждан
-fn handle_dawn_routine(citizens: &mut Vec<Citizen>, world: &World) {
-    // Разбудить спящих и отменить возвращение домой
-    for c in citizens.iter_mut() {
-        match c.state {
-            CitizenState::Sleeping | CitizenState::GoingHome => {
-                c.state = CitizenState::Idle;
-                c.moving = false; // отменим путь домой, пусть берёт работу
-            }
-            _ => {}
-        }
-    }
-    // Направить вручную закреплённых к месту работы
-    for c in citizens.iter_mut() {
-        if c.manual_workplace {
-            if let Some(wp) = c.workplace {
-                if !c.moving {
-                    game::plan_path(world, c, wp);
-                    c.state = CitizenState::GoingToWork;
-                }
-            }
-        }
-    }
-}
 
 /// Назначить рабочих на здания
 fn assign_workers_to_buildings(
@@ -600,6 +568,7 @@ fn update_production(
 }
 
 /// Обработать производство конкретного здания
+/// Теперь использует Strategy Pattern для разделения логики разных типов зданий
 fn handle_building_production(
     c: &mut Citizen,
     b: &Building,
@@ -607,210 +576,9 @@ fn handle_building_production(
     world: &mut World,
     config: &crate::input::Config,
     wmul: f32,
-    _step_ms: f32,
+    step_ms: f32,
 ) {
-    match b.kind {
-        BuildingKind::StoneQuarry => {
-            if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
-                c.work_timer_ms = 0;
-                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                    c.carrying = Some((ResourceKind::Stone, 1));
-                    game::plan_path(world, c, dst);
-                    c.state = CitizenState::GoingToDeposit;
-                }
-            }
-        }
-        BuildingKind::ClayPit => {
-            if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
-                c.work_timer_ms = 0;
-                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                    c.carrying = Some((ResourceKind::Clay, 1));
-                    game::plan_path(world, c, dst);
-                    c.state = CitizenState::GoingToDeposit;
-                }
-            }
-        }
-        BuildingKind::IronMine => {
-            if c.carrying.is_none() && c.work_timer_ms >= (5000.0 * wmul) as i32 {
-                c.work_timer_ms = 0;
-                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                    c.carrying = Some((ResourceKind::IronOre, 1));
-                    game::plan_path(world, c, dst);
-                    c.state = CitizenState::GoingToDeposit;
-                }
-            }
-        }
-        BuildingKind::WheatField => {
-            let bmul = {
-                use crate::types::BiomeKind::*;
-                match world.biome(b.pos) {
-                    Meadow => config.biome_meadow_wheat_wmul,
-                    Swamp => config.biome_swamp_wheat_wmul,
-                    _ => 1.0,
-                }
-            };
-            if c.carrying.is_none() && c.work_timer_ms >= (6000.0 * wmul * bmul) as i32 {
-                c.work_timer_ms = 0;
-                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                    c.carrying = Some((ResourceKind::Wheat, 1));
-                    game::plan_path(world, c, dst);
-                    c.state = CitizenState::GoingToDeposit;
-                }
-            }
-        }
-        BuildingKind::Mill => {
-            if !matches!(c.carrying, Some((ResourceKind::Wheat, _))) {
-                let have_any = warehouses.iter().any(|w| w.wheat > 0);
-                if have_any {
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.pending_input = Some(ResourceKind::Wheat);
-                        c.target = dst;
-                        c.moving = true;
-                        c.progress = 0.0;
-                        c.state = CitizenState::GoingToFetch;
-                    }
-                }
-            } else {
-                if c.work_timer_ms >= (5000.0 * wmul) as i32 {
-                    c.work_timer_ms = 0;
-                    c.carrying = None;
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.carrying = Some((ResourceKind::Flour, 1));
-                        game::plan_path(world, c, dst);
-                        c.state = CitizenState::GoingToDeposit;
-                    }
-                }
-            }
-        }
-        BuildingKind::Kiln => {
-            let has_clay = matches!(c.carrying, Some((ResourceKind::Clay, _)));
-            if !has_clay {
-                let have_any = warehouses.iter().any(|w| w.clay > 0);
-                if have_any {
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.pending_input = Some(ResourceKind::Clay);
-                        c.target = dst;
-                        c.moving = true;
-                        c.progress = 0.0;
-                        c.state = CitizenState::GoingToFetch;
-                    }
-                }
-            } else {
-                if c.work_timer_ms >= (5000.0 * wmul) as i32 {
-                    c.work_timer_ms = 0;
-                    // попытка списать 1 wood со складов
-                    let mut ok = false;
-                    for w in warehouses.iter_mut() {
-                        if w.wood > 0 {
-                            w.wood -= 1;
-                            ok = true;
-                            break;
-                        }
-                    }
-                    if ok {
-                        c.carrying = None; // глину потратили
-                        if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                            c.carrying = Some((ResourceKind::Bricks, 1));
-                            game::plan_path(world, c, dst);
-                            c.state = CitizenState::GoingToDeposit;
-                        }
-                    }
-                }
-            }
-        }
-        BuildingKind::Bakery => {
-            let has_flour = matches!(c.carrying, Some((ResourceKind::Flour, _)));
-            if !has_flour {
-                let have_any = warehouses.iter().any(|w| w.flour > 0);
-                if have_any {
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.pending_input = Some(ResourceKind::Flour);
-                        c.target = dst;
-                        c.moving = true;
-                        c.progress = 0.0;
-                        c.state = CitizenState::GoingToFetch;
-                    }
-                }
-            } else {
-                if c.work_timer_ms >= (5000.0 * wmul) as i32 {
-                    c.work_timer_ms = 0;
-                    c.carrying = None;
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.carrying = Some((ResourceKind::Bread, 1));
-                        game::plan_path(world, c, dst);
-                        c.state = CitizenState::GoingToDeposit;
-                    }
-                }
-            }
-        }
-        BuildingKind::Fishery => {
-            if c.carrying.is_none() && c.work_timer_ms >= (5000.0 * wmul) as i32 {
-                const NB: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-                if NB.iter().any(|(dx, dy)| {
-                    world.get_tile(b.pos.x + dx, b.pos.y + dy) == crate::types::TileKind::Water
-                }) {
-                    c.work_timer_ms = 0;
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.carrying = Some((ResourceKind::Fish, 1));
-                        game::plan_path(world, c, dst);
-                        c.state = CitizenState::GoingToDeposit;
-                    }
-                }
-            }
-        }
-        BuildingKind::Forester => {
-            if c.work_timer_ms >= (4000.0 * wmul) as i32 {
-                c.work_timer_ms = 0;
-                const R: i32 = 6;
-                let mut best: Option<(i32, IVec2)> = None;
-                for dy in -R..=R {
-                    for dx in -R..=R {
-                        let p = IVec2::new(b.pos.x + dx, b.pos.y + dy);
-                        let tk = world.get_tile(p.x, p.y);
-                        if tk != crate::types::TileKind::Water
-                            && !world.has_tree(p)
-                            && !world.is_occupied(p)
-                            && !world.is_road(p)
-                            && !world.is_road(IVec2::new(p.x - 1, p.y - 1))
-                        {
-                            let d = dx.abs() + dy.abs();
-                            if best.map(|(bd, _)| d < bd).unwrap_or(true) {
-                                best = Some((d, p));
-                            }
-                        }
-                    }
-                }
-                if let Some((_, p)) = best {
-                    world.plant_tree(p);
-                }
-            }
-        }
-        BuildingKind::Smelter => {
-            let has_iron_ore = matches!(c.carrying, Some((ResourceKind::IronOre, _)));
-            if !has_iron_ore {
-                let have_any = warehouses.iter().any(|w| w.iron_ore > 0);
-                if have_any {
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.pending_input = Some(ResourceKind::IronOre);
-                        c.target = dst;
-                        c.moving = true;
-                        c.progress = 0.0;
-                        c.state = CitizenState::GoingToFetch;
-                    }
-                }
-            } else {
-                if c.work_timer_ms >= (6000.0 * wmul) as i32 {
-                    c.work_timer_ms = 0;
-                    c.carrying = None;
-                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
-                        c.carrying = Some((ResourceKind::IronIngot, 1));
-                        game::plan_path(world, c, dst);
-                        c.state = CitizenState::GoingToDeposit;
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
+    let strategy = building_production::create_production_strategy(b.kind);
+    strategy.process_production(c, b, warehouses, world, config, wmul, step_ms);
 }
 

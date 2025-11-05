@@ -193,20 +193,9 @@ pub enum CitizenState {
 
 
 // Подсчёт суммарного ресурса из всех складов
+// Теперь использует Visitor Pattern для унификации операций
 pub fn warehouses_total_resource(warehouses: &[WarehouseStore], resource: ResourceKind) -> i32 {
-    warehouses.iter().map(|w| match resource {
-        ResourceKind::Wood => w.wood,
-        ResourceKind::Gold => w.gold,
-        ResourceKind::Stone => w.stone,
-        ResourceKind::Clay => w.clay,
-        ResourceKind::Bricks => w.bricks,
-        ResourceKind::Wheat => w.wheat,
-        ResourceKind::Flour => w.flour,
-        ResourceKind::Bread => w.bread,
-        ResourceKind::Fish => w.fish,
-        ResourceKind::IronOre => w.iron_ore,
-        ResourceKind::IronIngot => w.iron_ingots,
-    }).sum()
+    crate::resource_visitor::sum_warehouses_resource(warehouses, resource)
 }
 
 // Подсчёт суммарного дерева на складах (удобная функция для обратной совместимости)
@@ -220,19 +209,22 @@ pub fn warehouses_total_gold(warehouses: &[WarehouseStore]) -> i32 {
 }
 
 // Объединить ресурсы из складов и общих ресурсов в одну структуру
+// Теперь использует Visitor Pattern для суммирования
 pub fn total_resources(warehouses: &[WarehouseStore], resources: &Resources) -> Resources {
+    use crate::types::ResourceKind::*;
+    
     Resources {
-        wood: resources.wood + warehouses.iter().map(|w| w.wood).sum::<i32>(),
-        gold: resources.gold + warehouses.iter().map(|w| w.gold).sum::<i32>(),
-        stone: resources.stone + warehouses.iter().map(|w| w.stone).sum::<i32>(),
-        clay: resources.clay + warehouses.iter().map(|w| w.clay).sum::<i32>(),
-        bricks: resources.bricks + warehouses.iter().map(|w| w.bricks).sum::<i32>(),
-        wheat: resources.wheat + warehouses.iter().map(|w| w.wheat).sum::<i32>(),
-        flour: resources.flour + warehouses.iter().map(|w| w.flour).sum::<i32>(),
-        bread: resources.bread + warehouses.iter().map(|w| w.bread).sum::<i32>(),
-        fish: resources.fish + warehouses.iter().map(|w| w.fish).sum::<i32>(),
-        iron_ore: resources.iron_ore + warehouses.iter().map(|w| w.iron_ore).sum::<i32>(),
-        iron_ingots: resources.iron_ingots + warehouses.iter().map(|w| w.iron_ingots).sum::<i32>(),
+        wood: resources.wood + crate::resource_visitor::sum_warehouses_resource(warehouses, Wood),
+        gold: resources.gold + crate::resource_visitor::sum_warehouses_resource(warehouses, Gold),
+        stone: resources.stone + crate::resource_visitor::sum_warehouses_resource(warehouses, Stone),
+        clay: resources.clay + crate::resource_visitor::sum_warehouses_resource(warehouses, Clay),
+        bricks: resources.bricks + crate::resource_visitor::sum_warehouses_resource(warehouses, Bricks),
+        wheat: resources.wheat + crate::resource_visitor::sum_warehouses_resource(warehouses, Wheat),
+        flour: resources.flour + crate::resource_visitor::sum_warehouses_resource(warehouses, Flour),
+        bread: resources.bread + crate::resource_visitor::sum_warehouses_resource(warehouses, Bread),
+        fish: resources.fish + crate::resource_visitor::sum_warehouses_resource(warehouses, Fish),
+        iron_ore: resources.iron_ore + crate::resource_visitor::sum_warehouses_resource(warehouses, IronOre),
+        iron_ingots: resources.iron_ingots + crate::resource_visitor::sum_warehouses_resource(warehouses, IronIngot),
     }
 }
 
@@ -278,25 +270,42 @@ pub fn can_afford_building(warehouses: &[WarehouseStore], resources: &Resources,
 }
 
 // Списать ресурсы на постройку, забирая сначала со складов, затем из общих ресурсов
+// Теперь использует Visitor Pattern для унификации операций списания
 pub fn spend_building_cost(warehouses: &mut [WarehouseStore], resources: &mut Resources, cost: &Resources) -> bool {
     if !can_afford_building(warehouses, resources, cost) { return false; }
+    
+    use crate::resource_visitor::{ResourceVisitable, SpendVisitor};
+    use crate::types::ResourceKind::*;
+    
     // Дерево
-    let mut need_wood = cost.wood;
-    for w in warehouses.iter_mut() {
-        if need_wood == 0 { break; }
-        let take = need_wood.min(w.wood);
-        w.wood -= take;
-        need_wood -= take;
+    if cost.wood > 0 {
+        let mut need_wood = cost.wood;
+        for w in warehouses.iter_mut() {
+            if need_wood == 0 { break; }
+            let mut visitor = SpendVisitor::new(need_wood);
+            w.accept_mut(&mut visitor, Wood);
+            need_wood = visitor.amount;
+        }
+        if need_wood > 0 {
+            let mut visitor = SpendVisitor::new(need_wood);
+            resources.accept_mut(&mut visitor, Wood);
+        }
     }
-    if need_wood > 0 { resources.wood -= need_wood; }
+    
     // Золото
-    let mut need_gold = cost.gold;
-    for w in warehouses.iter_mut() {
-        if need_gold == 0 { break; }
-        let take = need_gold.min(w.gold);
-        w.gold -= take;
-        need_gold -= take;
+    if cost.gold > 0 {
+        let mut need_gold = cost.gold;
+        for w in warehouses.iter_mut() {
+            if need_gold == 0 { break; }
+            let mut visitor = SpendVisitor::new(need_gold);
+            w.accept_mut(&mut visitor, Gold);
+            need_gold = visitor.amount;
+        }
+        if need_gold > 0 {
+            let mut visitor = SpendVisitor::new(need_gold);
+            resources.accept_mut(&mut visitor, Gold);
+        }
     }
-    if need_gold > 0 { resources.gold -= need_gold; }
+    
     true
 }

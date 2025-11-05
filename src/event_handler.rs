@@ -6,10 +6,10 @@ use glam::IVec2;
 use crate::camera::Camera;
 use crate::game_state::GameState;
 use crate::input::ResolvedInput;
-use crate::save;
 use crate::gpu_renderer::GpuRenderer;
 use crate::ui_interaction;
 use crate::controls;
+use crate::commands::{Command, CommandManager, ExitCommand};
 
 /// Обработать событие клавиатуры
 pub fn handle_keyboard_input(
@@ -20,6 +20,7 @@ pub fn handle_keyboard_input(
     camera: &mut Camera,
     input: &ResolvedInput,
     config: &crate::input::Config,
+    gpu_renderer: &mut GpuRenderer,
 ) -> bool {
     // true = событие обработано, не нужно дальше обрабатывать
     
@@ -51,94 +52,21 @@ pub fn handle_keyboard_input(
         return true;
     }
     
-    if key == PhysicalKey::Code(KeyCode::Escape) {
-        elwt.exit();
-        return true;
-    }
-
-    // Движение камеры
-    if key == PhysicalKey::Code(input.move_up) {
-        camera.move_by(0.0, -80.0);
-        return false;
-    }
-    if key == PhysicalKey::Code(input.move_down) {
-        camera.move_by(0.0, 80.0);
-        return false;
-    }
-    if key == PhysicalKey::Code(input.move_left) {
-        camera.move_by(-80.0, 0.0);
-        return false;
-    }
-    if key == PhysicalKey::Code(input.move_right) {
-        camera.move_by(80.0, 0.0);
-        return false;
-    }
-    
-    // Зум
-    if key == PhysicalKey::Code(input.zoom_out) {
-        camera.zoom_by_factor(0.9, 0.5, 8.0);
-        return false;
-    }
-    if key == PhysicalKey::Code(input.zoom_in) {
-        camera.zoom_by_factor(1.1, 0.5, 8.0);
-        return false;
-    }
-    
-    // Пауза
-    if key == PhysicalKey::Code(input.toggle_pause) {
-        game_state.paused = !game_state.paused;
-        return false;
-    }
-    
-    // Налоги
-    if key == PhysicalKey::Code(input.tax_up) {
-        game_state.tax_rate = (game_state.tax_rate + config.tax_step).min(config.tax_max);
-        return false;
-    }
-    if key == PhysicalKey::Code(input.tax_down) {
-        game_state.tax_rate = (game_state.tax_rate - config.tax_step).max(config.tax_min);
-        return false;
-    }
-    
-    // Сохранение/загрузка
-    if key == PhysicalKey::Code(input.save_game) {
-        let _ = save::save_game(&save::SaveData::from_runtime(
-            game_state.seed,
-            &game_state.resources,
-            &game_state.buildings,
-            camera.pos,
-            camera.zoom,
-            &game_state.world,
-        ));
-        return false;
-    }
-    if key == PhysicalKey::Code(input.load_game) {
-        if let Ok(save) = save::load_game() {
-            game_state.seed = save.seed;
-            game_state.world.reset_noise(game_state.seed);
-            game_state.buildings = save.to_buildings();
-            game_state.buildings_dirty = true;
-            game_state.citizens.clear();
-            game_state.population = 0; // пока не сохраняем жителей
-            game_state.resources = save.resources;
-            camera.pos = glam::Vec2::new(save.cam_x, save.cam_y);
-            camera.zoom = save.zoom;
-            // восстановим отметку occupied
-            game_state.world.occupied.clear();
-            for b in &game_state.buildings {
-                game_state.world.occupy(b.pos);
-            }
-            // восстановим деревья
-            game_state.world.trees.clear();
-            game_state.world.removed_trees.clear();
-            for t in &save.trees {
-                game_state.world.trees.insert((t.x, t.y), crate::world::Tree {
-                    stage: t.stage,
-                    age_ms: t.age_ms,
-                });
-            }
+    // Используем Command Pattern для обработки основных команд
+    if let PhysicalKey::Code(key_code) = key {
+        // Выход из игры
+        if key_code == KeyCode::Escape {
+            let exit_cmd = ExitCommand;
+            return exit_cmd.execute(game_state, camera, elwt, input, config, gpu_renderer);
         }
-        return false;
+        
+        // Создаем менеджер команд с предустановленными командами
+        let command_manager = CommandManager::create_default(input);
+        
+        // Выполняем команду, если она зарегистрирована
+        if let Some(handled) = command_manager.execute(key_code, game_state, camera, elwt, input, config, gpu_renderer) {
+            return handled;
+        }
     }
     
     // Остальные клавиши через controls
