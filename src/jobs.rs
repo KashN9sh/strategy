@@ -75,12 +75,8 @@ pub fn process_jobs(
                             else { jobs[jid].done = true; c.assigned_job = None; continue; }
                         } else { jobs[jid].done = true; c.assigned_job = None; continue; }
                         // Цель доставки — ближайший склад; если складов нет — завершаем без Haul
-                        let target_pos = if let Some((_, wh)) = warehouses
-                            .iter()
-                            .enumerate()
-                            .min_by_key(|(_, w)| (w.pos.x - pos.x).abs() + (w.pos.y - pos.y).abs())
-                        {
-                            wh.pos
+                        let target_pos = if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, pos) {
+                            dst
                         } else {
                             jobs[jid].done = true; c.assigned_job = None; continue;
                         };

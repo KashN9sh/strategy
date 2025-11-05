@@ -192,26 +192,93 @@ pub enum CitizenState {
  
 
 
-// Подсчёт суммарного дерева на складах
-pub fn warehouses_total_wood(warehouses: &Vec<WarehouseStore>) -> i32 {
-    warehouses.iter().map(|w| w.wood).sum()
+// Подсчёт суммарного ресурса из всех складов
+pub fn warehouses_total_resource(warehouses: &[WarehouseStore], resource: ResourceKind) -> i32 {
+    warehouses.iter().map(|w| match resource {
+        ResourceKind::Wood => w.wood,
+        ResourceKind::Gold => w.gold,
+        ResourceKind::Stone => w.stone,
+        ResourceKind::Clay => w.clay,
+        ResourceKind::Bricks => w.bricks,
+        ResourceKind::Wheat => w.wheat,
+        ResourceKind::Flour => w.flour,
+        ResourceKind::Bread => w.bread,
+        ResourceKind::Fish => w.fish,
+        ResourceKind::IronOre => w.iron_ore,
+        ResourceKind::IronIngot => w.iron_ingots,
+    }).sum()
 }
 
+// Подсчёт суммарного дерева на складах (удобная функция для обратной совместимости)
+pub fn warehouses_total_wood(warehouses: &[WarehouseStore]) -> i32 {
+    warehouses_total_resource(warehouses, ResourceKind::Wood)
+}
 
-// Суммарное золото на складах
-pub fn warehouses_total_gold(warehouses: &Vec<WarehouseStore>) -> i32 {
-    warehouses.iter().map(|w| w.gold).sum()
+// Суммарное золото на складах (удобная функция для обратной совместимости)
+pub fn warehouses_total_gold(warehouses: &[WarehouseStore]) -> i32 {
+    warehouses_total_resource(warehouses, ResourceKind::Gold)
+}
+
+// Объединить ресурсы из складов и общих ресурсов в одну структуру
+pub fn total_resources(warehouses: &[WarehouseStore], resources: &Resources) -> Resources {
+    Resources {
+        wood: resources.wood + warehouses.iter().map(|w| w.wood).sum::<i32>(),
+        gold: resources.gold + warehouses.iter().map(|w| w.gold).sum::<i32>(),
+        stone: resources.stone + warehouses.iter().map(|w| w.stone).sum::<i32>(),
+        clay: resources.clay + warehouses.iter().map(|w| w.clay).sum::<i32>(),
+        bricks: resources.bricks + warehouses.iter().map(|w| w.bricks).sum::<i32>(),
+        wheat: resources.wheat + warehouses.iter().map(|w| w.wheat).sum::<i32>(),
+        flour: resources.flour + warehouses.iter().map(|w| w.flour).sum::<i32>(),
+        bread: resources.bread + warehouses.iter().map(|w| w.bread).sum::<i32>(),
+        fish: resources.fish + warehouses.iter().map(|w| w.fish).sum::<i32>(),
+        iron_ore: resources.iron_ore + warehouses.iter().map(|w| w.iron_ore).sum::<i32>(),
+        iron_ingots: resources.iron_ingots + warehouses.iter().map(|w| w.iron_ingots).sum::<i32>(),
+    }
+}
+
+// Найти ближайший склад к указанной позиции
+pub fn find_nearest_warehouse(warehouses: &[WarehouseStore], pos: IVec2) -> Option<IVec2> {
+    warehouses
+        .iter()
+        .min_by_key(|w| (w.pos.x - pos.x).abs() + (w.pos.y - pos.y).abs())
+        .map(|w| w.pos)
+}
+
+// Статистика состояний граждан
+#[derive(Default, Clone, Copy, Debug)]
+pub struct CitizenStateStats {
+    pub idle: i32,
+    pub working: i32,
+    pub sleeping: i32,
+    pub hauling: i32,
+    pub fetching: i32,
+}
+
+// Подсчитать статистику состояний граждан
+pub fn count_citizen_states(citizens: &[Citizen]) -> CitizenStateStats {
+    let mut stats = CitizenStateStats::default();
+    for c in citizens {
+        match c.state {
+            CitizenState::Idle => stats.idle += 1,
+            CitizenState::Working => stats.working += 1,
+            CitizenState::Sleeping => stats.sleeping += 1,
+            CitizenState::GoingToDeposit => stats.hauling += 1,
+            CitizenState::GoingToFetch => stats.fetching += 1,
+            CitizenState::GoingToWork | CitizenState::GoingHome => stats.idle += 1,
+        }
+    }
+    stats
 }
 
 // Проверка возможности постройки: учитываем ресурсы и склады вместе (wood + gold)
-pub fn can_afford_building(warehouses: &Vec<WarehouseStore>, resources: &Resources, cost: &Resources) -> bool {
+pub fn can_afford_building(warehouses: &[WarehouseStore], resources: &Resources, cost: &Resources) -> bool {
     let total_wood = warehouses_total_wood(warehouses) + resources.wood;
     let total_gold = warehouses_total_gold(warehouses) + resources.gold;
     total_wood >= cost.wood && total_gold >= cost.gold
 }
 
 // Списать ресурсы на постройку, забирая сначала со складов, затем из общих ресурсов
-pub fn spend_building_cost(warehouses: &mut Vec<WarehouseStore>, resources: &mut Resources, cost: &Resources) -> bool {
+pub fn spend_building_cost(warehouses: &mut [WarehouseStore], resources: &mut Resources, cost: &Resources) -> bool {
     if !can_afford_building(warehouses, resources, cost) { return false; }
     // Дерево
     let mut need_wood = cost.wood;

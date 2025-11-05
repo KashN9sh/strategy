@@ -170,4 +170,159 @@ pub struct BuildingAtlas { pub w: i32, pub h: i32 }
 // Отдельный атлас деревьев (кадры по горизонтали: стадии роста)
 pub struct TreeAtlas { pub w: i32, pub h: i32 }
 
+/// Загрузить все текстуры и настроить атласы
+pub fn load_textures(
+    atlas: &mut TileAtlas,
+    building_atlas: &mut Option<BuildingAtlas>,
+    tree_atlas: &mut Option<TreeAtlas>,
+) {
+    // Загрузка тайлов из spritesheet.png или tiles.png
+    if let Ok(img) = image::open("assets/spritesheet.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let cell_w = 32u32;
+        let cell_h = 32u32;
+        let cols = (iw / cell_w).max(1);
+        let rows = (ih / cell_h).max(1);
+        let cell_rgba = |cx: u32, cy: u32| -> Vec<u8> {
+            let x0 = cx * cell_w;
+            let y0 = cy * cell_h;
+            let mut out = vec![0u8; (cell_w * cell_h * 4) as usize];
+            for y in 0..cell_h as usize {
+                let src = ((y0 as usize + y) * iw as usize + x0 as usize) * 4;
+                let dst = y * cell_w as usize * 4;
+                out[dst..dst + cell_w as usize * 4]
+                    .copy_from_slice(&img.as_raw()[src..src + cell_w as usize * 4]);
+            }
+            out
+        };
+        // row 2 — вариации травы, последний ряд — вода (первая ячейка чистая, остальные — кромки)
+        let grass_row = 2u32.min(rows - 1);
+        let mut grass_variants_raw: Vec<Vec<u8>> = Vec::new();
+        let grass_cols = cols.min(3);
+        for cx in 0..grass_cols {
+            grass_variants_raw.push(cell_rgba(cx, grass_row));
+        }
+        let water_row = rows - 1;
+        let water_full = cell_rgba(0, water_row);
+        let mut water_edges_raw: Vec<Vec<u8>> = Vec::new();
+        for cx in 1..=7 {
+            if cx < cols {
+                water_edges_raw.push(cell_rgba(cx, water_row));
+            }
+        }
+        let clay_row = 1u32.min(rows - 1);
+        let clay_cols = cols.min(3);
+        let mut clay_variants_raw: Vec<Vec<u8>> = Vec::new();
+        for cx in 0..clay_cols {
+            clay_variants_raw.push(cell_rgba(cx, clay_row));
+        }
+        let def0 = grass_variants_raw.first().cloned().unwrap_or_else(|| cell_rgba(0, 0));
+        let def1 = grass_variants_raw.get(1).cloned().unwrap_or_else(|| def0.clone());
+        let def2 = water_full.clone();
+        atlas.base_loaded = true;
+        atlas.base_w = cell_w as i32;
+        atlas.base_h = cell_h as i32;
+        atlas.base_grass = def0;
+        let forest_tile = if rows > 3 && cols > 7 {
+            cell_rgba(7, 3)
+        } else {
+            def1.clone()
+        };
+        atlas.base_forest = forest_tile;
+        atlas.base_water = def2;
+        let dep_row = 5u32.min(rows - 1);
+        let dep_cx = 6u32.min(cols - 1);
+        let dep_tile = cell_rgba(dep_cx, dep_row);
+        atlas.base_clay = dep_tile.clone();
+        atlas.base_stone = dep_tile.clone();
+        atlas.base_iron = dep_tile.clone();
+        atlas.grass_variants = grass_variants_raw;
+        atlas.clay_variants = clay_variants_raw;
+        atlas.water_edges = water_edges_raw;
+    } else if let Ok(img) = image::open("assets/tiles.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let tile_w = (iw / 6) as i32;
+        let tile_h = ih as i32;
+        let slice_rgba = |index: u32| -> Vec<u8> {
+            let x0 = (index * tile_w as u32) as usize;
+            let mut out = vec![0u8; (tile_w * tile_h * 4) as usize];
+            for y in 0..tile_h as usize {
+                let src = ((y as u32) * iw as u32 + x0 as u32) as usize * 4;
+                let dst = y * tile_w as usize * 4;
+                out[dst..dst + tile_w as usize * 4]
+                    .copy_from_slice(&img.as_raw()[src..src + tile_w as usize * 4]);
+            }
+            out
+        };
+        atlas.base_loaded = true;
+        atlas.base_w = tile_w;
+        atlas.base_h = tile_h;
+        atlas.base_grass = slice_rgba(0);
+        atlas.base_forest = slice_rgba(1);
+        atlas.base_water = slice_rgba(2);
+        atlas.base_clay = slice_rgba(3);
+        atlas.base_stone = slice_rgba(4);
+        atlas.base_iron = slice_rgba(5);
+    }
+
+    // Загрузка зданий
+    if let Ok(img) = image::open("assets/buildings.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let base_w = if atlas.base_loaded {
+            atlas.base_w
+        } else {
+            64
+        } as u32;
+        let cols = (iw / base_w).max(1);
+        let mut _sprites = Vec::new();
+        for i in 0..cols {
+            let x0 = (i * base_w) as usize;
+            let mut out = vec![0u8; base_w as usize * ih as usize * 4];
+            for y in 0..ih as usize {
+                let src = (y * iw as usize + x0) * 4;
+                let dst = y * base_w as usize * 4;
+                out[dst..dst + base_w as usize * 4]
+                    .copy_from_slice(&img.as_raw()[src..src + base_w as usize * 4]);
+            }
+            _sprites.push(out);
+        }
+        println!("Загружено {} спрайтов зданий из buildings.png", _sprites.len());
+        *building_atlas = Some(BuildingAtlas {
+            w: base_w as i32,
+            h: ih as i32,
+        });
+    }
+
+    // Загрузка деревьев
+    if let Ok(img) = image::open("assets/trees.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        let base_w = if atlas.base_loaded {
+            atlas.base_w
+        } else {
+            64
+        } as u32;
+        let cols = (iw / base_w).max(1);
+        let mut _sprites = Vec::new();
+        for i in 0..cols {
+            let x0 = (i * base_w) as usize;
+            let mut out = vec![0u8; base_w as usize * ih as usize * 4];
+            for y in 0..ih as usize {
+                let src = (y * iw as usize + x0) * 4;
+                let dst = y * base_w as usize * 4;
+                out[dst..dst + base_w as usize * 4]
+                    .copy_from_slice(&img.as_raw()[src..src + base_w as usize * 4]);
+            }
+            _sprites.push(out);
+        }
+        *tree_atlas = Some(TreeAtlas {
+            w: base_w as i32,
+            h: ih as i32,
+        });
+    }
+}
+
 

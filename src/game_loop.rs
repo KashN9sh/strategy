@@ -444,11 +444,7 @@ fn generate_haul_jobs(
             }
         });
         if !already {
-            if let Some(dst) = warehouses
-                .iter()
-                .min_by_key(|w| (w.pos.x - li.pos.x).abs() + (w.pos.y - li.pos.y).abs())
-                .map(|w| w.pos)
-            {
+            if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, li.pos) {
                 let id = *next_job_id;
                 *next_job_id += 1;
                 jobs.push(Job {
@@ -617,11 +613,7 @@ fn handle_building_production(
         BuildingKind::StoneQuarry => {
             if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
                 c.work_timer_ms = 0;
-                if let Some(dst) = warehouses
-                    .iter()
-                    .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                    .map(|w| w.pos)
-                {
+                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                     c.carrying = Some((ResourceKind::Stone, 1));
                     game::plan_path(world, c, dst);
                     c.state = CitizenState::GoingToDeposit;
@@ -631,11 +623,7 @@ fn handle_building_production(
         BuildingKind::ClayPit => {
             if c.carrying.is_none() && c.work_timer_ms >= (4000.0 * wmul) as i32 {
                 c.work_timer_ms = 0;
-                if let Some(dst) = warehouses
-                    .iter()
-                    .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                    .map(|w| w.pos)
-                {
+                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                     c.carrying = Some((ResourceKind::Clay, 1));
                     game::plan_path(world, c, dst);
                     c.state = CitizenState::GoingToDeposit;
@@ -645,11 +633,7 @@ fn handle_building_production(
         BuildingKind::IronMine => {
             if c.carrying.is_none() && c.work_timer_ms >= (5000.0 * wmul) as i32 {
                 c.work_timer_ms = 0;
-                if let Some(dst) = warehouses
-                    .iter()
-                    .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                    .map(|w| w.pos)
-                {
+                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                     c.carrying = Some((ResourceKind::IronOre, 1));
                     game::plan_path(world, c, dst);
                     c.state = CitizenState::GoingToDeposit;
@@ -667,11 +651,7 @@ fn handle_building_production(
             };
             if c.carrying.is_none() && c.work_timer_ms >= (6000.0 * wmul * bmul) as i32 {
                 c.work_timer_ms = 0;
-                if let Some(dst) = warehouses
-                    .iter()
-                    .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                    .map(|w| w.pos)
-                {
+                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                     c.carrying = Some((ResourceKind::Wheat, 1));
                     game::plan_path(world, c, dst);
                     c.state = CitizenState::GoingToDeposit;
@@ -682,11 +662,7 @@ fn handle_building_production(
             if !matches!(c.carrying, Some((ResourceKind::Wheat, _))) {
                 let have_any = warehouses.iter().any(|w| w.wheat > 0);
                 if have_any {
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.pending_input = Some(ResourceKind::Wheat);
                         c.target = dst;
                         c.moving = true;
@@ -698,11 +674,7 @@ fn handle_building_production(
                 if c.work_timer_ms >= (5000.0 * wmul) as i32 {
                     c.work_timer_ms = 0;
                     c.carrying = None;
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.carrying = Some((ResourceKind::Flour, 1));
                         game::plan_path(world, c, dst);
                         c.state = CitizenState::GoingToDeposit;
@@ -715,11 +687,7 @@ fn handle_building_production(
             if !has_clay {
                 let have_any = warehouses.iter().any(|w| w.clay > 0);
                 if have_any {
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.pending_input = Some(ResourceKind::Clay);
                         c.target = dst;
                         c.moving = true;
@@ -741,11 +709,7 @@ fn handle_building_production(
                     }
                     if ok {
                         c.carrying = None; // глину потратили
-                        if let Some(dst) = warehouses
-                            .iter()
-                            .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                            .map(|w| w.pos)
-                        {
+                        if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                             c.carrying = Some((ResourceKind::Bricks, 1));
                             game::plan_path(world, c, dst);
                             c.state = CitizenState::GoingToDeposit;
@@ -759,11 +723,7 @@ fn handle_building_production(
             if !has_flour {
                 let have_any = warehouses.iter().any(|w| w.flour > 0);
                 if have_any {
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.pending_input = Some(ResourceKind::Flour);
                         c.target = dst;
                         c.moving = true;
@@ -775,11 +735,7 @@ fn handle_building_production(
                 if c.work_timer_ms >= (5000.0 * wmul) as i32 {
                     c.work_timer_ms = 0;
                     c.carrying = None;
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.carrying = Some((ResourceKind::Bread, 1));
                         game::plan_path(world, c, dst);
                         c.state = CitizenState::GoingToDeposit;
@@ -794,11 +750,7 @@ fn handle_building_production(
                     world.get_tile(b.pos.x + dx, b.pos.y + dy) == crate::types::TileKind::Water
                 }) {
                     c.work_timer_ms = 0;
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.carrying = Some((ResourceKind::Fish, 1));
                         game::plan_path(world, c, dst);
                         c.state = CitizenState::GoingToDeposit;
@@ -838,11 +790,7 @@ fn handle_building_production(
             if !has_iron_ore {
                 let have_any = warehouses.iter().any(|w| w.iron_ore > 0);
                 if have_any {
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.pending_input = Some(ResourceKind::IronOre);
                         c.target = dst;
                         c.moving = true;
@@ -854,11 +802,7 @@ fn handle_building_production(
                 if c.work_timer_ms >= (6000.0 * wmul) as i32 {
                     c.work_timer_ms = 0;
                     c.carrying = None;
-                    if let Some(dst) = warehouses
-                        .iter()
-                        .min_by_key(|w| (w.pos.x - b.pos.x).abs() + (w.pos.y - b.pos.y).abs())
-                        .map(|w| w.pos)
-                    {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, b.pos) {
                         c.carrying = Some((ResourceKind::IronIngot, 1));
                         game::plan_path(world, c, dst);
                         c.state = CitizenState::GoingToDeposit;
