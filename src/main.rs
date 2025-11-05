@@ -4,7 +4,7 @@ mod types; use types::Resources;
 mod world;
 mod atlas; use atlas::BuildingAtlas;
 mod ui;
-mod ui_gpu; // GPU версия UI
+mod ui_gpu;
 mod input;
 mod config;
 mod save;
@@ -26,45 +26,14 @@ use gpu_renderer::GpuRenderer;
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
 use std::sync::atomic::{AtomicI32, Ordering};
- 
-// use std::fs; // перенесено в config
-// use std::path::Path; // перенесено в config
-// use image::GenericImageView; // не нужен
 use winit::dpi::LogicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
-// duplicate import removed
 
-// Глобальный масштаб клетки миникарты (px на клетку)
 static MINIMAP_CELL_PX: AtomicI32 = AtomicI32::new(0);
 
-// размеры базового тайла перенесены в atlas::TILE_W/H
-// Размер тайла в пикселях задаётся через атлас (half_w/half_h)
-// Размер чанка в тайлах
-// use world::{World, CHUNK_W, CHUNK_H};
-
-// Перенесено в crate::types
-
-
-// методы World вынесены в модуль world
-
-// генерация чанков вынесена в модуль world
-
-// --------------- Config / Save ---------------
-
-// типы конфига используются через модуль input/config
-
-// code_from_str перенесён в модуль input
-
-// переносено: загрузка/создание конфига в модуль config
-
 type ResolvedInput = input::ResolvedInput;
-
-// ResolvedInput::from реализован в модуле input
-
-// SaveData, SaveBuilding, SaveTree перенесены в save.rs
-// Firefly перенесена в game_state.rs
 
 fn main() -> Result<()> {
     run()
@@ -78,27 +47,18 @@ fn run() -> Result<()> {
         .with_inner_size(LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?);
 
-    // Инициализируем логгер для wgpu
     env_logger::init();
 
     let size = window.inner_size();
     let mut gpu_renderer = pollster::block_on(GpuRenderer::new(window.clone()))?;
-    
-    // Загружаем текстуру лиц
     gpu_renderer.load_faces_texture()?;
-
-    // Конфиг
     let (config, input) = config::load_or_create("config.toml")?;
     let input = ResolvedInput::from(&input);
 
-    // Камера в пикселях мира (изометрических)
-    let mut camera = camera::Camera::new(Vec2::new(0.0, 0.0), 2.0); // влияет на размеры тайла (через атлас)
-    // Процедурная генерация: бесконечный мир чанков
+    let mut camera = camera::Camera::new(Vec2::new(0.0, 0.0), 2.0);
     let mut rng_init = StdRng::seed_from_u64(42);
     let mut game_state = game_state::GameState::new(&mut rng_init, &config);
     
-    // Загружаем атласы в game_state (переносим из старой логики)
-    // Попытаемся загрузить спрайтшит 32x32: assets/spritesheet.png
     if let Ok(img) = image::open("assets/spritesheet.png") {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
@@ -114,25 +74,19 @@ fn run() -> Result<()> {
             }
             out
         };
-        // Жёсткая раскладка по описанию:
-        // row 2 (индекс 2) — вариации травы (grass)
-        // последний ряд (rows-1): вода — первая ячейка чистая вода, остальные — кромки
+        // row 2 — вариации травы, последний ряд — вода (первая ячейка чистая, остальные — кромки)
         let grass_row = 2u32.min(rows-1);
-        // соберём все варианты травы из строки
         let mut grass_variants_raw: Vec<Vec<u8>> = Vec::new();
-        let grass_cols = cols.min(3); // используем только первые три варианта травы
+        let grass_cols = cols.min(3);
         for cx in 0..grass_cols { grass_variants_raw.push(cell_rgba(cx, grass_row)); }
         let water_row = rows-1;
         let water_full = cell_rgba(0, water_row);
         let mut water_edges_raw: Vec<Vec<u8>> = Vec::new();
-        // тайлы 2..8 (1-based) → cx=1..=7
         for cx in 1..=7 { if cx < cols { water_edges_raw.push(cell_rgba(cx, water_row)); } }
-        // Варианты глины: 2-я строка, первые 3 спрайта
         let clay_row = 1u32.min(rows-1);
         let clay_cols = cols.min(3);
         let mut clay_variants_raw: Vec<Vec<u8>> = Vec::new();
         for cx in 0..clay_cols { clay_variants_raw.push(cell_rgba(cx, clay_row)); }
-        // База для ромбической маски (на случай фоллбека и оверлеев deposits)
         let def0 = grass_variants_raw.get(0).cloned().unwrap_or_else(|| cell_rgba(0,0));
         let def1 = grass_variants_raw.get(1).cloned().unwrap_or_else(|| def0.clone());
         let def2 = water_full.clone();
@@ -140,27 +94,21 @@ fn run() -> Result<()> {
         game_state.atlas.base_w = cell_w as i32;
         game_state.atlas.base_h = cell_h as i32;
         game_state.atlas.base_grass = def0;
-        // Лесная трава: 4-я линия, 8-й спрайт (1-based) → cy=3, cx=7 (0-based)
         let forest_tile = if rows > 3 && cols > 7 { cell_rgba(7, 3) } else { def1.clone() };
         game_state.atlas.base_forest = forest_tile;
         game_state.atlas.base_water = def2;
-        // депозит-маркер: 6-я строка, 7-й спрайт (1-based) → cy=5, cx=6 (0-based); с защитой границ
         let dep_row = 5u32.min(rows-1);
         let dep_cx = 6u32.min(cols-1);
         let dep_tile = cell_rgba(dep_cx, dep_row);
         game_state.atlas.base_clay = dep_tile.clone();
         game_state.atlas.base_stone = dep_tile.clone();
         game_state.atlas.base_iron = dep_tile.clone();
-        // сохраним вариации травы — будем использовать при рендере PNG-тайлов
         game_state.atlas.grass_variants = grass_variants_raw;
         game_state.atlas.clay_variants = clay_variants_raw;
         game_state.atlas.water_edges = water_edges_raw;
-        // заглушки для deposits из старого tiles.png отсутствуют — оставим пустыми, оверлеи не обязательны
     } else if let Ok(img) = image::open("assets/tiles.png") {
-        // Старый путь: 6 тайлов в строку: grass, forest, water, clay, stone, iron
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
-        // делим по 6 спрайтов по ширине
         let tile_w = (iw / 6) as i32;
         let tile_h = ih as i32;
         let slice_rgba = |index: u32| -> Vec<u8> {
@@ -183,7 +131,6 @@ fn run() -> Result<()> {
         game_state.atlas.base_stone = slice_rgba(4);
         game_state.atlas.base_iron = slice_rgba(5);
     }
-    // buildings.png: N спрайтов по горизонтали, ширина = base_w (или 64), высота любая
     if let Ok(img) = image::open("assets/buildings.png") {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
@@ -203,7 +150,6 @@ fn run() -> Result<()> {
         println!("Загружено {} спрайтов зданий из buildings.png", sprites.len());
         game_state.building_atlas = Some(BuildingAtlas { w: base_w as i32, h: ih as i32 });
     }
-    // trees.png: N спрайтов по горизонтали (стадии роста 0..N-1), ширина = base_w (или 64), высота любая
     if let Ok(img) = image::open("assets/trees.png") {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
@@ -221,7 +167,6 @@ fn run() -> Result<()> {
         }
         game_state.tree_atlas = Some(atlas::TreeAtlas { w: base_w as i32, h: ih as i32 });
     }
-    // Устанавливаем размеры окна в game_state
     game_state.width_i32 = size.width as i32;
     game_state.height_i32 = size.height as i32;
 
@@ -240,7 +185,7 @@ fn run() -> Result<()> {
                         &input,
                         &config,
                     ) {
-                        return; // событие обработано, не нужно дальше обрабатывать
+                        return;
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {
@@ -248,7 +193,7 @@ fn run() -> Result<()> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     if event_handler::handle_mouse_input(button, state, &mut game_state, &config, &mut gpu_renderer) {
-                        return; // событие обработано
+                        return;
                     }
                 }
                 WindowEvent::Resized(new_size) => {
@@ -263,20 +208,12 @@ fn run() -> Result<()> {
                         MINIMAP_CELL_PX.store(3 * s0, Ordering::Relaxed);
                     }
 
-                    // Подготовка данных для рендеринга
                     let (min_tx, min_ty, max_tx, max_ty) = render_prep::prepare_rendering_data(&mut game_state, &camera, &mut gpu_renderer);
-
-                    // Весь старый CPU рендеринг удален - теперь используем только GPU
                     
                     // TODO: Реализовать GPU версию draw_debug_path для отладочного пути
-                    
-                    // GPU рендеринг заменяет весь CPU рендеринг
-                    
-                    // UI наложение - портируем полный UI из CPU версии на GPU
                     if game_state.show_ui {
                         let depot_total_wood: i32 = game_state.warehouses.iter().map(|w| w.wood).sum();
                         let total_visible_wood = game_state.resources.wood + depot_total_wood;
-                        // Показ ресурсов как сумма "на руках" + в складах
                         let visible = Resources {
                             wood: total_visible_wood,
                             stone: game_state.resources.stone + game_state.warehouses.iter().map(|w| w.stone).sum::<i32>(),
@@ -290,7 +227,6 @@ fn run() -> Result<()> {
                             iron_ore: game_state.resources.iron_ore + game_state.warehouses.iter().map(|w| w.iron_ore).sum::<i32>(),
                             iron_ingots: game_state.resources.iron_ingots + game_state.warehouses.iter().map(|w| w.iron_ingots).sum::<i32>(),
                         };
-                        // Статусы жителей для UI
                         let mut idle=0; let mut working=0; let mut sleeping=0; let mut hauling=0; let mut fetching=0;
                         for c in &game_state.citizens {
                             use types::CitizenState::*;
@@ -304,20 +240,15 @@ fn run() -> Result<()> {
                             }
                         }
                         let day_progress = (game_state.world_clock_ms / game_loop::DAY_LENGTH_MS).clamp(0.0, 1.0);
-                        // среднее счастье
                         let avg_hap: f32 = if game_state.citizens.is_empty() { 50.0 } else { game_state.citizens.iter().map(|c| c.happiness as i32).sum::<i32>() as f32 / game_state.citizens.len() as f32 };
                         let pop_show = game_state.citizens.len() as i32;
-                        // Параметры погоды для UI: короткий лейбл
                         let (wlabel, wcol) = game_state.weather_system.ui_label_and_color();
-
-                        // Определяем наведенное здание для тултипа
                         let hovered_building = if let Some(tp) = game_state.hovered_tile {
                             game_state.buildings.iter().find(|b| b.pos == tp).cloned()
                         } else {
                             None
                         };
                         
-                        // Обновляем подсветку зданий
                         for building in &mut game_state.buildings {
                             building.is_highlighted = if let Some(ref hovered) = hovered_building {
                                 building.pos == hovered.pos
@@ -326,7 +257,6 @@ fn run() -> Result<()> {
                             };
                         }
                         
-                        // Определяем наведенную кнопку для тултипа
                         let hovered_button = if hovered_building.is_none() {
                             ui_interaction::get_hovered_button(
                                 game_state.cursor_xy,
@@ -344,7 +274,6 @@ fn run() -> Result<()> {
                             None
                         };
                         
-                        // Определяем наведенный ресурс для тултипа
                         let hovered_resource = if hovered_building.is_none() && hovered_button.is_none() {
                             ui_interaction::get_hovered_resource(
                                 game_state.cursor_xy,
@@ -366,15 +295,10 @@ fn run() -> Result<()> {
                             None
                         };
                         
-                 // Применяем погодные эффекты (частицы)
                         let intensity = game_state.weather_system.intensity();
                         gpu_renderer.update_weather(game_state.weather_system.current(), game_state.world_clock_ms / 1000.0, intensity);
-                 
-                 // Обновляем частицы зданий
-                 gpu_renderer.update_building_particles(&game_state.buildings, game_state.world_clock_ms / 1000.0);
-                
-                // GPU UI рендеринг через фабрику ui_gpu - ПОСЛЕ эффектов
-                let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
+                        gpu_renderer.update_building_particles(&game_state.buildings, game_state.world_clock_ms / 1000.0);
+                        let wcol_f32 = [wcol[0] as f32 / 255.0, wcol[1] as f32 / 255.0, wcol[2] as f32 / 255.0, wcol[3] as f32 / 255.0];
                 ui_gpu::draw_ui_gpu(
                     &mut gpu_renderer,
                     game_state.width_i32,
@@ -400,23 +324,19 @@ fn run() -> Result<()> {
                     game_state.food_policy,
                     wlabel,
                     wcol_f32,
-                    // Данные для миникарты
                     &mut game_state.world,
                     &game_state.buildings,
                     camera.pos.x,
                     camera.pos.y,
                     MINIMAP_CELL_PX.load(Ordering::Relaxed).max(1),
-                    // Данные для тултипов
                     game_state.cursor_xy.x as f32,
                     game_state.cursor_xy.y as f32,
                     hovered_building,
                     hovered_button,
                     hovered_resource,
-                    // Данные для консоли
                     game_state.console.open,
                     &game_state.console.input,
                     &game_state.console.log,
-                    // Данные для отладки биома
                     game_state.biome_debug_mode,
                     game_state.show_deposits,
                     camera.zoom,
@@ -428,11 +348,8 @@ fn run() -> Result<()> {
                     max_ty,
                 );
             } else {
-                // Если UI выключен, все равно очищаем
                 gpu_renderer.clear_ui();
             }
-                    
-                // Ночное освещение (затемнение) - обновляем через weather uniform (рендерится ПЕРЕД UI)
                 let t = (game_state.world_clock_ms / game_loop::DAY_LENGTH_MS).clamp(0.0, 1.0);
                 let angle = t * std::f32::consts::TAU;
                 let daylight = 0.5 - 0.5 * angle.cos();
@@ -445,7 +362,6 @@ fn run() -> Result<()> {
                 };
                 gpu_renderer.update_night_overlay(night_alpha);
                     
-                    // GPU рендеринг
                     if let Err(err) = gpu_renderer.render() {
                         eprintln!("gpu_renderer.render() failed: {err}");
                         elwt.exit();
@@ -454,14 +370,11 @@ fn run() -> Result<()> {
                 _ => {}
             },
             Event::AboutToWait => {
-                // фиксированный тик с ускорением
                 let now = Instant::now();
                 let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;
                 game_state.last_frame = now;
-                // ограничим, чтобы не накапливалось слишком много
                 let frame_ms = frame_ms.min(250.0);
                 
-                // Обновляем игровое состояние через game_loop
                 game_loop::update_game_state(&mut game_state, frame_ms, &config);
 
                 window.request_redraw();
@@ -472,44 +385,3 @@ fn run() -> Result<()> {
 
     Ok(())
 }
-
-// удалено: sat_mul_add (не используется)
-
-// удалено: draw_iso_tile (перенесено в модуль render)
-
-// удалено: draw_iso_tile_tinted (перенесено в модуль render)
-
-// удалено: draw_iso_outline (перенесено в модуль render)
-
-// удалено: draw_line (перенесено в модуль render)
-
-// см. atlas::building_sprite_index
-
-// удалено: blit_sprite_alpha (перенесено в модуль render)
-
-// удалено: blit_sprite_alpha_scaled (перенесено в модуль render)
-
-// UI helpers переехали в модуль ui
-
-// draw_ui перенесён в модуль ui
-
-// fill_rect перенесён в модуль ui
-
-// draw_button перенесён в модуль ui
-
-// draw_text_mini перенесён в модуль ui
-
-// draw_glyph_3x5 перенесён в модуль ui
-
-// draw_number перенесён в модуль ui
-
-// point_in_rect перенесён в модуль ui
-
-// handle_console_command перенесена в console.rs
-// screen_to_tile_px и visible_tile_bounds_px перенесены в camera.rs
-
-// удалено: локальный `building_cost` — используем `types::building_cost`
-
-// удалено: локальные warehouses_total_wood/spend_wood — используем функции из types
-
-// удалено: локальные simulate/plan_path — вынесены в модуль game
