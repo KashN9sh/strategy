@@ -23,16 +23,6 @@ pub enum WeatherKind {
     Snow,
 }
 
-impl From<crate::WeatherKind> for WeatherKind {
-    fn from(weather: crate::WeatherKind) -> Self {
-        match weather {
-            crate::WeatherKind::Clear => WeatherKind::Clear,
-            crate::WeatherKind::Rain => WeatherKind::Rain,
-            crate::WeatherKind::Fog => WeatherKind::Fog,
-            crate::WeatherKind::Snow => WeatherKind::Snow,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuildingKind {

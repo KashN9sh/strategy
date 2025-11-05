@@ -44,8 +44,8 @@ pub fn simulate(
 
 // Дифференцированный множитель длительности производственного цикла
 // (>1.0 — медленнее, <1.0 — быстрее)
-pub fn production_weather_wmul(weather: crate::WeatherKind, building: BuildingKind) -> f32 {
-    use crate::WeatherKind::*;
+pub fn production_weather_wmul(weather: crate::types::WeatherKind, building: BuildingKind) -> f32 {
+    use crate::types::WeatherKind::*;
     use BuildingKind::*;
     match weather {
         Clear => 1.0,
