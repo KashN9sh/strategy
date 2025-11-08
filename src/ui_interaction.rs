@@ -16,7 +16,7 @@ pub fn building_allowed_at(world: &mut World, kind: BuildingKind, tp: IVec2) -> 
             BuildingKind::Fishery => {
                 // Требуем: клетка суши и не занята, и хотя бы один из 8 соседей — вода
                 const NB8: [(i32,i32);8] = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)];
-                let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x + 1 + dx, tp.y + 1 + dy) == crate::types::TileKind::Water);
+                let near_water = NB8.iter().any(|(dx,dy)| world.get_tile(tp.x + dx, tp.y + dy) == crate::types::TileKind::Water);
                 allowed = !world.is_occupied(tp) && near_water;
             }
             BuildingKind::WheatField => { allowed = tile_kind == crate::types::TileKind::Grass; }
