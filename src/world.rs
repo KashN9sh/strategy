@@ -297,11 +297,6 @@ impl World {
         self.explored_tiles.contains(&(p.x, p.y))
     }
 
-    /// Разблокировать тайл
-    pub fn explore_tile(&mut self, p: IVec2) {
-        self.explored_tiles.insert((p.x, p.y));
-    }
-
     /// Разблокировать область вокруг точки (круг с радиусом)
     pub fn explore_area(&mut self, center: IVec2, radius: i32) {
         for dy in -radius..=radius {
