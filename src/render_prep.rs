@@ -43,6 +43,8 @@ pub fn prepare_rendering_data(
         game_state.show_deposits,
     );
     
+    
+    
     // Подготавливаем поленья как простые коричневые прямоугольники
     gpu_renderer.prepare_logs(
         &game_state.logs_on_ground,
@@ -128,6 +130,16 @@ pub fn prepare_rendering_data(
     } else {
         gpu_renderer.clear_building_preview();
     }
+    
+    // Подготавливаем туман войны для неисследованных тайлов
+    gpu_renderer.prepare_fog(
+        &mut game_state.world,
+        &game_state.atlas,
+        min_tx,
+        min_ty,
+        max_tx,
+        max_ty,
+    );
     
     (min_tx, min_ty, max_tx, max_ty)
 }

@@ -132,6 +132,15 @@ pub struct TileInstance {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct FogInstance {
+    model_matrix: [[f32; 4]; 4],
+    fog_id: u32, // всегда 0 для тумана войны
+    tint_color: [f32; 4],
+    padding: [u32; 3], // выравнивание до 16 байт
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct BuildingInstance {
     model_matrix: [[f32; 4]; 4],
     building_id: u32,
@@ -203,6 +212,51 @@ impl TileInstance {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TileInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+impl FogInstance {
+    const ATTRIBS: [wgpu::VertexAttribute; 6] = [
+        // model_matrix
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+            shader_location: 3,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+            shader_location: 4,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+            shader_location: 5,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4) as wgpu::BufferAddress,
+            shader_location: 6,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        // tint_color
+        wgpu::VertexAttribute {
+            offset: (std::mem::size_of::<[f32; 4]>() * 4 + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+            shader_location: 7,
+            format: wgpu::VertexFormat::Float32x4,
+        },
+    ];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<FogInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &Self::ATTRIBS,
         }
@@ -543,6 +597,7 @@ pub struct GpuRenderer {
     citizen_render_pipeline: wgpu::RenderPipeline,
     resource_render_pipeline: wgpu::RenderPipeline, // Для всех ресурсов (поленья, камни, железо и т.д.)
     glow_render_pipeline: wgpu::RenderPipeline, // Для ночного освещения (мягкое свечение)
+    fog_render_pipeline: wgpu::RenderPipeline, // Для тумана войны
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     
     // Буферы
@@ -586,6 +641,7 @@ pub struct GpuRenderer {
     building_preview_instances: Vec<BuildingInstance>,
     log_instances: Vec<LogInstance>,
     light_instances: Vec<LightInstance>, // Точки ночного освещения (окна, факелы, светлячки)
+    fog_instances: Vec<FogInstance>, // Туманы войны
     ui_rects: Vec<UIRect>,
     minimap_instances: Vec<UIRect>,
     tile_instance_buffer: wgpu::Buffer,
@@ -595,6 +651,7 @@ pub struct GpuRenderer {
     building_preview_instance_buffer: wgpu::Buffer,
     log_instance_buffer: wgpu::Buffer,
     light_instance_buffer: wgpu::Buffer,
+    fog_instance_buffer: wgpu::Buffer,
     ui_rect_buffer: wgpu::Buffer,
     minimap_buffer: wgpu::Buffer,
 }
@@ -839,6 +896,59 @@ impl GpuRenderer {
             ..Default::default()
         });
         
+        // Загружаем текстуру тумана войны
+        let clouds_bytes = include_bytes!("../assets/clouds.png");
+        let clouds_image = image::load_from_memory(clouds_bytes)?;
+        let clouds_rgba = clouds_image.to_rgba8();
+        
+        let (clouds_width, clouds_height) = clouds_rgba.dimensions();
+        
+        let clouds_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Clouds Texture"),
+            size: wgpu::Extent3d {
+                width: clouds_width,
+                height: clouds_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &clouds_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &clouds_rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * clouds_width),
+                rows_per_image: Some(clouds_height),
+            },
+            wgpu::Extent3d {
+                width: clouds_width,
+                height: clouds_height,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        let clouds_view = clouds_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let clouds_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -968,6 +1078,23 @@ impl GpuRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // Текстура тумана войны
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
             label: Some("texture_bind_group_layout"),
         });
@@ -1007,6 +1134,14 @@ impl GpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: wgpu::BindingResource::Sampler(&spritesheet_sampler), // временно используем spritesheet sampler
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&clouds_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Sampler(&clouds_sampler),
                 },
             ],
             label: Some("texture_bind_group"),
@@ -1104,6 +1239,13 @@ impl GpuRenderer {
         let light_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Light Instance Buffer"),
             size: (std::mem::size_of::<LightInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let fog_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Fog Instance Buffer"),
+            size: (std::mem::size_of::<FogInstance>() * max_instances) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1465,6 +1607,53 @@ impl GpuRenderer {
         
         // ui_render_pipeline удален - используем только ui_rect_render_pipeline
         
+        // Создаём render pipeline для тумана войны
+        let fog_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Fog Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/fog.wgsl").into()),
+        });
+        
+        let fog_render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Fog Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout, &texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        let fog_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Fog Render Pipeline"),
+            layout: Some(&fog_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &fog_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc(), FogInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fog_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+        
         // Создаем погодные эффекты
         let weather_uniform = WeatherUniform::new();
         
@@ -1592,6 +1781,7 @@ impl GpuRenderer {
             citizen_render_pipeline,
             resource_render_pipeline,
             glow_render_pipeline,
+            fog_render_pipeline,
             ui_rect_render_pipeline,
             tile_vertex_buffer,
             tile_index_buffer,
@@ -1622,6 +1812,7 @@ impl GpuRenderer {
             building_preview_instances: Vec::new(),
             log_instances: Vec::new(),
             light_instances: Vec::new(),
+            fog_instances: Vec::new(),
             ui_rects: Vec::new(),
             minimap_instances: Vec::new(),
             tile_instance_buffer,
@@ -1631,6 +1822,7 @@ impl GpuRenderer {
             building_preview_instance_buffer,
             log_instance_buffer,
             light_instance_buffer,
+            fog_instance_buffer,
             ui_rect_buffer,
             minimap_buffer,
         })
@@ -1864,9 +2056,6 @@ impl GpuRenderer {
                         _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
                     };
                     
-                    // Проверяем, разблокирован ли тайл для строительства
-                    let is_explored = world.is_explored(glam::IVec2::new(mx, my));
-                    
                     // Подсветка при наведении - желтый тинт поверх биомного
                     let base_tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
                         [
@@ -1879,18 +2068,8 @@ impl GpuRenderer {
                         biome_tint
                     };
                     
-                    // Затемнение для недоступных областей (fog of war)
-                    let tint = if !is_explored {
-                        // Темный тинт для недоступных тайлов
-                        [
-                            base_tint[0] * 0.2,
-                            base_tint[1] * 0.2,
-                            base_tint[2] * 0.2,
-                            base_tint[3]
-                        ]
-                    } else {
-                        base_tint
-                    };
+                    // Больше не затемняем тайлы - туман будет рендериться отдельно
+                    let tint = base_tint;
                     
                     (tile_id, tint)
                 };
@@ -1919,6 +2098,60 @@ impl GpuRenderer {
                 &self.tile_instance_buffer,
                 0,
                 bytemuck::cast_slice(&self.tile_instances)
+            );
+        }
+    }
+    
+    // Подготовка тумана войны для рендеринга
+    pub fn prepare_fog(&mut self, world: &mut World, atlas: &crate::atlas::TileAtlas, min_tx: i32, min_ty: i32, max_tx: i32, max_ty: i32) {
+        self.fog_instances.clear();
+        
+        // Пиксельные размеры как в CPU версии
+        let half_w = atlas.half_w as f32;
+        let half_h = atlas.half_h as f32;
+        let tile_w_px = atlas.half_w * 2 + 1;
+        
+        for my in min_ty..=max_ty {
+            for mx in min_tx..=max_tx {
+                // Проверяем, разблокирован ли тайл
+                let is_explored = world.is_explored(glam::IVec2::new(mx, my));
+                
+                // Добавляем туман только для неисследованных тайлов
+                if !is_explored {
+                    // ИЗОМЕТРИЧЕСКАЯ проекция В ПИКСЕЛЯХ
+                    let iso_x = (mx - my) as f32 * half_w;
+                    let iso_y = (mx + my) as f32 * half_h;
+                    
+                    // Размер тайла в пикселях
+                    let tile_size = tile_w_px as f32;
+                    
+                    let model_matrix = Mat4::from_translation(Vec3::new(iso_x, -iso_y, 0.0)) * 
+                                       Mat4::from_scale(Vec3::new(tile_size, tile_size, 1.0));
+                    
+                    self.fog_instances.push(FogInstance {
+                        model_matrix: model_matrix.to_cols_array_2d(),
+                        fog_id: 0, // всегда 0 для тумана
+                        tint_color: [1.0, 1.0, 1.0, 0.4], // белый цвет с небольшой прозрачностью
+                        padding: [0; 3],
+                    });
+                    
+                    // Лимит инстансов для производительности
+                    if self.fog_instances.len() >= 10000 {
+                        break;
+                    }
+                }
+            }
+            if self.fog_instances.len() >= 10000 {
+                break;
+            }
+        }
+        
+        // Загружаем данные инстансов в буфер
+        if !self.fog_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.fog_instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.fog_instances)
             );
         }
     }
@@ -3005,6 +3238,19 @@ impl GpuRenderer {
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..self.light_instances.len() as u32);
             }
+
+            // Рендерим туман войны в самом конце, поверх всего остального
+            if let Some(ref texture_bind_group) = self.texture_bind_group {
+                if !self.fog_instances.is_empty() {
+                    render_pass.set_pipeline(&self.fog_render_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_bind_group(1, texture_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, self.fog_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..self.fog_instances.len() as u32);
+                }
+            }
             
             // Рендерим UI прямоугольники ПОСЛЕ погодных эффектов
             if !self.ui_rects.is_empty() {
@@ -3025,6 +3271,7 @@ impl GpuRenderer {
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
             }
+            
         }
         
         self.queue.submit(std::iter::once(encoder.finish()));
