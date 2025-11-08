@@ -107,6 +107,12 @@ impl GameState {
         let mut world = World::new(seed);
         world.apply_biome_config(config);
         
+        // Инициализируем начальную область строительства (небольшой радиус вокруг центра)
+        // Это позволяет игроку начать строить с самого начала
+        let initial_center = IVec2::new(0, 0);
+        let initial_radius = 10;
+        world.explore_area(initial_center, initial_radius);
+        
         const DAY_LENGTH_MS: f32 = 120_000.0;
         const START_HOUR: f32 = 8.0;
         let world_clock_ms = DAY_LENGTH_MS * (START_HOUR / 24.0);

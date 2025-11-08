@@ -38,6 +38,8 @@ pub struct World {
     pub biome_rocky_thr: f32,
     pub biome_swamp_tree_growth_wmul: f32,
     pub biome_rocky_tree_growth_wmul: f32,
+    // область строительства (разблокированные тайлы)
+    pub explored_tiles: HashSet<(i32, i32)>,
 }
 
 impl World {
@@ -45,7 +47,7 @@ impl World {
         let mut fbm = Fbm::<noise::OpenSimplex>::new(0);
         fbm = fbm.set_seed(seed as u32).set_octaves(5).set_frequency(0.03).set_lacunarity(2.0).set_persistence(0.5);
         let (tx, rx) = spawn_chunk_worker(seed);
-        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new(), rivers: HashSet::new(), biomes: HashMap::new(), biome_swamp_thr: 0.10, biome_rocky_thr: 0.10, biome_swamp_tree_growth_wmul: 0.85, biome_rocky_tree_growth_wmul: 1.20 }
+        Self { seed, fbm, chunks: HashMap::new(), occupied: HashSet::new(), roads: HashSet::new(), trees: HashMap::new(), tx, rx, pending: HashSet::new(), max_chunks: 512, removed_trees: HashSet::new(), clay_deposits: HashSet::new(), stone_deposits: HashSet::new(), iron_deposits: HashSet::new(), rivers: HashSet::new(), biomes: HashMap::new(), biome_swamp_thr: 0.10, biome_rocky_thr: 0.10, biome_swamp_tree_growth_wmul: 0.85, biome_rocky_tree_growth_wmul: 1.20, explored_tiles: HashSet::new() }
     }
 
     pub fn reset_noise(&mut self, seed: u64) {
@@ -63,6 +65,7 @@ impl World {
         self.iron_deposits.clear();
         self.rivers.clear();
         self.biomes.clear();
+        self.explored_tiles.clear();
         let (tx, rx) = spawn_chunk_worker(seed);
         self.tx = tx; self.rx = rx; self.pending.clear();
     }
@@ -285,6 +288,45 @@ impl World {
             tr.age_ms += ((dt_ms as f32) / wmul) as i32;
             if tr.stage == 0 && tr.age_ms >= 20000 { tr.stage = 1; tr.age_ms = 0; }
             else if tr.stage == 1 && tr.age_ms >= 40000 { tr.stage = 2; tr.age_ms = 0; }
+        }
+    }
+
+    // --- Область строительства (fog of war) ---
+    /// Проверить, разблокирован ли тайл для строительства
+    pub fn is_explored(&self, p: IVec2) -> bool {
+        self.explored_tiles.contains(&(p.x, p.y))
+    }
+
+    /// Разблокировать тайл
+    pub fn explore_tile(&mut self, p: IVec2) {
+        self.explored_tiles.insert((p.x, p.y));
+    }
+
+    /// Разблокировать область вокруг точки (круг с радиусом)
+    pub fn explore_area(&mut self, center: IVec2, radius: i32) {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq <= radius * radius {
+                    self.explored_tiles.insert((center.x + dx, center.y + dy));
+                }
+            }
+        }
+    }
+
+    /// Обновить область строительства на основе населения
+    /// Радиус увеличивается с ростом населения
+    pub fn update_exploration_by_population(&mut self, buildings: &[crate::types::Building], population: i32) {
+        // Начальный радиус: 8 тайлов
+        // Каждые 5 жителей добавляют +1 к радиусу
+        let base_radius = 8;
+        let radius = base_radius + (population / 5).min(20); // максимум радиус 28
+        
+        // Разблокируем область вокруг каждого дома
+        for building in buildings.iter() {
+            if matches!(building.kind, crate::types::BuildingKind::House) {
+                self.explore_area(building.pos, radius);
+            }
         }
     }
 }

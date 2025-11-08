@@ -9,6 +9,10 @@ use crate::world::World;
 
 /// Проверка возможности размещения здания указанного типа в клетке `tp`.
 pub fn building_allowed_at(world: &mut World, kind: BuildingKind, tp: IVec2) -> bool {
+    // Проверяем, разблокирован ли тайл для строительства
+    if !world.is_explored(tp) {
+        return false;
+    }
     let tile_kind = world.get_tile(tp.x, tp.y);
     let mut allowed = !world.is_occupied(tp) && tile_kind != crate::types::TileKind::Water;
     if allowed {
@@ -297,6 +301,10 @@ pub fn handle_left_click(
                             happiness: 50, last_food_mask: 0,
                         });
                         *population += 1;
+                        // Разблокируем область вокруг нового дома
+                        let base_radius = 8;
+                        let radius = base_radius + (*population / 5).min(20);
+                        world.explore_area(tp, radius);
                     }
                     // Отменяем выбор здания после постройки
                     *selected_building = None;

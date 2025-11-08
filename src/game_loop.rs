@@ -152,6 +152,9 @@ pub fn update_game_simulation(
     game::simulate(buildings, world, resources, warehouses, step_ms as i32);
     world.grow_trees(step_ms as i32);
     *world_clock_ms = (*world_clock_ms + step_ms) % DAY_LENGTH_MS;
+    
+    // Обновляем область строительства на основе населения
+    world.update_exploration_by_population(buildings, *_population);
 
     // День/ночь
     let is_day = is_daytime(*world_clock_ms);

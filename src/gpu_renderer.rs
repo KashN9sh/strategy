@@ -1864,8 +1864,11 @@ impl GpuRenderer {
                         _ => [1.0, 1.0, 1.0, 1.0], // без тинтинга для лугов и воды
                     };
                     
+                    // Проверяем, разблокирован ли тайл для строительства
+                    let is_explored = world.is_explored(glam::IVec2::new(mx, my));
+                    
                     // Подсветка при наведении - желтый тинт поверх биомного
-                    let tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
+                    let base_tint = if hovered_tile == Some(glam::IVec2::new(mx, my)) {
                         [
                             biome_tint[0] * 1.3,
                             biome_tint[1] * 1.3, 
@@ -1874,6 +1877,19 @@ impl GpuRenderer {
                         ]
                     } else {
                         biome_tint
+                    };
+                    
+                    // Затемнение для недоступных областей (fog of war)
+                    let tint = if !is_explored {
+                        // Темный тинт для недоступных тайлов
+                        [
+                            base_tint[0] * 0.2,
+                            base_tint[1] * 0.2,
+                            base_tint[2] * 0.2,
+                            base_tint[3]
+                        ]
+                    } else {
+                        base_tint
                     };
                     
                     (tile_id, tint)
