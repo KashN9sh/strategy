@@ -276,14 +276,6 @@ impl ProductionStrategy for FisheryStrategy {
             return false;
         }
         
-        // Проверка наличия воды рядом
-        const NB: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-        if !NB.iter().any(|(dx, dy)| {
-            world.get_tile(building.pos.x + dx, building.pos.y + dy) == crate::types::TileKind::Water
-        }) {
-            return false;
-        }
-        
         let production_time = (5000.0 * weather_multiplier) as i32;
         if citizen.work_timer_ms >= production_time {
             citizen.work_timer_ms = 0;
