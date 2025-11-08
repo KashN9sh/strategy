@@ -490,7 +490,6 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec
         }
         CitizenState::GoingToDeposit => {
             // Обработка доставки ресурсов на склад
-            println!("c.carrying: {:?}", c.carrying);
             if let Some((resource, amount)) = c.carrying {
                 // Ищем склад на текущей позиции или рядом (в пределах 1 клетки)
                 let warehouse = warehouses.iter_mut().find(|w| {
@@ -513,7 +512,6 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec
                         crate::types::ResourceKind::IronIngot => warehouse.iron_ingots += amount,
                     }
                     c.carrying = None;
-                    println!("Deposited {:?} x{} to warehouse at {:?}", resource, amount, warehouse.pos);
                     
                     // Возвращаемся на рабочее место
                     if let Some(workplace) = c.workplace {
