@@ -2524,12 +2524,28 @@ impl GpuRenderer {
                 };
                 
                 // Применяем тинт к базовому цвету
-                let color = [
+                let base_final_color = [
                     base_color[0] * biome_tint[0],
                     base_color[1] * biome_tint[1], 
                     base_color[2] * biome_tint[2],
                     base_color[3] * biome_tint[3]
                 ];
+                
+                // Проверяем, разблокирован ли тайл для строительства
+                let is_explored = world.is_explored(glam::IVec2::new(tx, ty));
+                
+                // Затемнение для недоступных областей (fog of war)
+                let color = if !is_explored {
+                    // Темный тинт для недоступных тайлов
+                    [
+                        base_final_color[0] * 0.2,
+                        base_final_color[1] * 0.2,
+                        base_final_color[2] * 0.2,
+                        base_final_color[3]
+                    ]
+                } else {
+                    base_final_color
+                };
                 
                 let x = minimap_x + (tx - min_tx) * cell_size;
                 let y = minimap_y + (ty - min_ty) * cell_size;
