@@ -451,14 +451,34 @@ fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mu
 }
 
 /// Обработать состояние граждан при прибытии
-fn handle_arrival_state(c: &mut Citizen, _world: &World) {
+fn handle_arrival_state(c: &mut Citizen, world: &mut World) {
     match c.state {
+        CitizenState::Idle => {
+            // Если у гражданина есть рабочее место
+            if let Some(workplace) = c.workplace {
+                if c.pos == workplace {
+                    // Если уже на рабочем месте и накормлен, начинаем работать
+                    if c.fed_today {
+                        c.state = CitizenState::Working;
+                    }
+                } else if !c.moving {
+                    // Если не на рабочем месте, идем туда
+                    crate::game::plan_path(world, c, workplace);
+                    c.state = CitizenState::GoingToWork;
+                }
+            }
+        }
         CitizenState::GoingToWork => {
-            // Не пускаем работать, если не накормлен
-            if c.fed_today {
-                c.state = CitizenState::Working;
-            } else {
-                c.state = CitizenState::Idle;
+            // Проверяем, достигли ли рабочего места
+            if let Some(workplace) = c.workplace {
+                if c.pos == workplace {
+                    // Не пускаем работать, если не накормлен
+                    if c.fed_today {
+                        c.state = CitizenState::Working;
+                    } else {
+                        c.state = CitizenState::Idle;
+                    }
+                }
             }
         }
         CitizenState::GoingHome => {
@@ -475,7 +495,17 @@ fn handle_arrival_state(c: &mut Citizen, _world: &World) {
             // Здесь просто проверяем, что позиция достигнута
         }
         CitizenState::Sleeping => {}
-        _ => {}
+        CitizenState::Working => {
+            // Если гражданин в Working, но не на рабочем месте, возвращаемся в Idle
+            if let Some(workplace) = c.workplace {
+                if c.pos != workplace && !c.moving {
+                    c.state = CitizenState::Idle;
+                }
+            } else {
+                // Если рабочее место потеряно, возвращаемся в Idle
+                c.state = CitizenState::Idle;
+            }
+        }
     }
 }
 
