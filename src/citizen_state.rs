@@ -58,16 +58,15 @@ pub trait CitizenStateBehavior {
     /// Обработать утреннюю рутину (пробуждение)
     fn handle_dawn(&mut self, citizen: &mut Citizen, context: &mut StateContext) -> Option<Box<dyn CitizenStateBehavior>> {
         if context.is_daytime {
-            // Если у гражданина есть рабочее место, закрепленное вручную, идем туда
-            if citizen.manual_workplace {
-                if let Some(workplace) = citizen.workplace {
-                    if !citizen.moving {
-                        crate::game::plan_path(context.world, citizen, workplace);
-                        return Some(Box::new(GoingToWorkState));
-                    }
+            if let Some(workplace) = citizen.workplace {
+                if !citizen.moving {
+                    crate::game::plan_path(context.world, citizen, workplace);
+                    return Some(Box::new(GoingToWorkState));
                 }
             }
-            return Some(Box::new(IdleState));
+            else {
+                return Some(Box::new(IdleState));
+            }
         }
         None
     }

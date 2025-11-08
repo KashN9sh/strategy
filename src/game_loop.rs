@@ -170,6 +170,14 @@ pub fn update_game_simulation(
             config,
             food_policy,
         );
+
+        citizen_state::handle_dawn_routine_with_states(
+            citizens,
+            world,
+            buildings,
+            jobs,
+            is_day,
+        );
     }
     *prev_is_day_flag = is_day;
 
@@ -177,15 +185,6 @@ pub fn update_game_simulation(
     // Используем State Pattern для управления состояниями
     if !is_day {
         citizen_state::handle_night_routine_with_states(
-            citizens,
-            world,
-            buildings,
-            jobs,
-            is_day,
-        );
-    } else {
-        // Утро: разбудить спящих и отменить возвращение домой
-        citizen_state::handle_dawn_routine_with_states(
             citizens,
             world,
             buildings,
@@ -217,10 +216,8 @@ pub fn update_game_simulation(
         );
     }
 
-    // Перемещение жителей по пути
-    update_citizen_movement(step_ms, citizens, world);
+    update_citizen_movement(step_ms, citizens, world, warehouses);
 
-    // Производство при работе у здания
     if is_day {
         update_production(
             step_ms,
@@ -430,7 +427,7 @@ fn generate_haul_jobs(
 }
 
 /// Обновить движение граждан
-fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mut World) {
+fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mut World, warehouses: &mut Vec<WarehouseStore>) {
     for c in citizens.iter_mut() {
         if !c.moving {
             c.idle_timer_ms += step_ms as i32;
@@ -442,7 +439,7 @@ fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mu
                 c.idle_timer_ms = 0;
             }
             // смена состояний при прибытии
-            handle_arrival_state(c, world);
+            handle_arrival_state(c, world, warehouses);
         } else {
             c.idle_timer_ms = 0;
             update_movement(step_ms, c, world);
@@ -451,7 +448,7 @@ fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mu
 }
 
 /// Обработать состояние граждан при прибытии
-fn handle_arrival_state(c: &mut Citizen, world: &mut World) {
+fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec<WarehouseStore>) {
     match c.state {
         CitizenState::Idle => {
             // Если у гражданина есть рабочее место
@@ -465,6 +462,11 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World) {
                     // Если не на рабочем месте, идем туда
                     crate::game::plan_path(world, c, workplace);
                     c.state = CitizenState::GoingToWork;
+                } else if c.carrying.is_some() {
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
+                        crate::game::plan_path(world, c, dst);
+                        c.state = CitizenState::GoingToDeposit;
+                    }
                 }
             }
         }
@@ -487,8 +489,57 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World) {
             }
         }
         CitizenState::GoingToDeposit => {
-            // Обрабатывается через jobs::process_jobs при достижении цели
-            // Здесь просто проверяем, что позиция достигнута
+            // Обработка доставки ресурсов на склад
+            println!("c.carrying: {:?}", c.carrying);
+            if let Some((resource, amount)) = c.carrying {
+                // Ищем склад на текущей позиции или рядом (в пределах 1 клетки)
+                let warehouse = warehouses.iter_mut().find(|w| {
+                    let dist = (w.pos.x - c.pos.x).abs() + (w.pos.y - c.pos.y).abs();
+                    dist <= 1
+                });
+                if let Some(warehouse) = warehouse {
+                    // Добавляем ресурс напрямую
+                    match resource {
+                        crate::types::ResourceKind::Wood => warehouse.wood += amount,
+                        crate::types::ResourceKind::Stone => warehouse.stone += amount,
+                        crate::types::ResourceKind::Clay => warehouse.clay += amount,
+                        crate::types::ResourceKind::Bricks => warehouse.bricks += amount,
+                        crate::types::ResourceKind::Wheat => warehouse.wheat += amount,
+                        crate::types::ResourceKind::Flour => warehouse.flour += amount,
+                        crate::types::ResourceKind::Bread => warehouse.bread += amount,
+                        crate::types::ResourceKind::Fish => warehouse.fish += amount,
+                        crate::types::ResourceKind::Gold => warehouse.gold += amount,
+                        crate::types::ResourceKind::IronOre => warehouse.iron_ore += amount,
+                        crate::types::ResourceKind::IronIngot => warehouse.iron_ingots += amount,
+                    }
+                    c.carrying = None;
+                    println!("Deposited {:?} x{} to warehouse at {:?}", resource, amount, warehouse.pos);
+                    
+                    // Возвращаемся на рабочее место
+                    if let Some(workplace) = c.workplace {
+                        crate::game::plan_path(world, c, workplace);
+                        c.state = CitizenState::GoingToWork;
+                    } else {
+                        c.state = CitizenState::Idle;
+                    }
+                } else {
+                    // Если не нашли склад, но гражданин не двигается, попробуем найти склад снова
+                    if !c.moving {
+                        if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
+                            crate::game::plan_path(world, c, dst);
+                        } else {
+                        }
+                    }
+                }
+            } else {
+                // Если ресурса нет, возвращаемся на рабочее место
+                if let Some(workplace) = c.workplace {
+                    crate::game::plan_path(world, c, workplace);
+                    c.state = CitizenState::GoingToWork;
+                } else {
+                    c.state = CitizenState::Idle;
+                }
+            }
         }
         CitizenState::GoingToFetch => {
             // Обрабатывается через jobs::process_jobs при достижении цели
@@ -496,11 +547,24 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World) {
         }
         CitizenState::Sleeping => {}
         CitizenState::Working => {
-            // Если гражданин в Working, но не на рабочем месте, возвращаемся в Idle
+            // Если гражданин несет ресурс, он должен доставить его на склад
+            if c.carrying.is_some() {
+                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
+                    crate::game::plan_path(world, c, dst);
+                    c.state = CitizenState::GoingToDeposit;
+                    return;
+                }
+            }
+            
+            // Если гражданин в Working, но не на рабочем месте и не двигается, возвращаемся в Idle
+            // НО только если он действительно ушел с рабочего места
             if let Some(workplace) = c.workplace {
+                // Если гражданин не на рабочем месте и не двигается, возвращаемся в Idle
+                // Это означает, что он ушел с рабочего места и остановился
                 if c.pos != workplace && !c.moving {
                     c.state = CitizenState::Idle;
                 }
+                // Если гражданин на рабочем месте, остаемся в Working - ничего не делаем
             } else {
                 // Если рабочее место потеряно, возвращаемся в Idle
                 c.state = CitizenState::Idle;
@@ -564,6 +628,11 @@ fn update_production(
     config: &crate::input::Config,
 ) {
     for c in citizens.iter_mut() {
+        // Пропускаем граждан, которые уже несут ресурс (они должны доставить его на склад)
+        if c.carrying.is_some() {
+            continue;
+        }
+        
         if !matches!(c.state, CitizenState::Working) {
             continue;
         }
