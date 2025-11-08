@@ -40,7 +40,7 @@ pub fn handle_left_click(
     ui_tab: &mut ui::UITab,
     tax_rate: &mut f32,
     food_policy: &mut FoodPolicy,
-    selected_building: &mut BuildingKind,
+    selected_building: &mut Option<BuildingKind>,
     active_building_panel: &mut Option<IVec2>,
     world: &mut World,
     buildings: &mut Vec<Building>,
@@ -198,7 +198,7 @@ pub fn handle_left_click(
         };
         let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { *selected_building = bk; return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { *selected_building = Some(bk); return true; }
         bx += bw + 6 * ui_s;
     }
 
@@ -273,32 +273,36 @@ pub fn handle_left_click(
             }
             return true;
         }
-        // строительство
-        let allowed = building_allowed_at(world, *selected_building, tp);
-        if allowed {
-            let cost = building_cost(*selected_building);
-            if crate::types::can_afford_building(warehouses, resources, &cost) {
-                let _ = crate::types::spend_building_cost(warehouses, resources, &cost);
-                world.occupy(tp);
-                let default_workers = match *selected_building { BuildingKind::House | BuildingKind::Warehouse => 0, _ => 1 };
-                let capacity = match *selected_building { BuildingKind::House => 2, _ => 0 };
-                buildings.push(Building { kind: *selected_building, pos: tp, timer_ms: 0, workers_target: default_workers, capacity, is_highlighted: false });
-                // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
-                if *selected_building == BuildingKind::Warehouse {
-                    warehouses.push(WarehouseStore { pos: tp, ..Default::default() });
+        // строительство (только если здание выбрано)
+        if let Some(building_kind) = *selected_building {
+            let allowed = building_allowed_at(world, building_kind, tp);
+            if allowed {
+                let cost = building_cost(building_kind);
+                if crate::types::can_afford_building(warehouses, resources, &cost) {
+                    let _ = crate::types::spend_building_cost(warehouses, resources, &cost);
+                    world.occupy(tp);
+                    let default_workers = match building_kind { BuildingKind::House | BuildingKind::Warehouse => 0, _ => 1 };
+                    let capacity = match building_kind { BuildingKind::House => 2, _ => 0 };
+                    buildings.push(Building { kind: building_kind, pos: tp, timer_ms: 0, workers_target: default_workers, capacity, is_highlighted: false });
+                    // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
+                    if building_kind == BuildingKind::Warehouse {
+                        warehouses.push(WarehouseStore { pos: tp, ..Default::default() });
+                    }
+                    *buildings_dirty = true;
+                    if building_kind == BuildingKind::House {
+                        citizens.push(Citizen {
+                            pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None,
+                            idle_timer_ms: 0, home: tp, workplace: None, state: CitizenState::Idle, work_timer_ms: 0,
+                            carrying: None, pending_input: None, path: Vec::new(), path_index: 0, fed_today: true, manual_workplace: false,
+                            happiness: 50, last_food_mask: 0,
+                        });
+                        *population += 1;
+                    }
+                    // Отменяем выбор здания после постройки
+                    *selected_building = None;
+                    // Не открываем панель автоматически после постройки
+                    return true;
                 }
-                *buildings_dirty = true;
-                if *selected_building == BuildingKind::House {
-                    citizens.push(Citizen {
-                        pos: tp, target: tp, moving: false, progress: 0.0, carrying_log: false, assigned_job: None,
-                        idle_timer_ms: 0, home: tp, workplace: None, state: CitizenState::Idle, work_timer_ms: 0,
-                        carrying: None, pending_input: None, path: Vec::new(), path_index: 0, fed_today: true, manual_workplace: false,
-                        happiness: 50, last_food_mask: 0,
-                    });
-                    *population += 1;
-                }
-                // Не открываем панель автоматически после постройки
-                return true;
             }
         }
     }

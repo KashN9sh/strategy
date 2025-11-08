@@ -14,7 +14,7 @@ pub fn draw_ui_gpu(
     resources: &Resources,
     total_wood: i32,
     population: i32,
-    selected: BuildingKind,
+    selected: Option<BuildingKind>,
     fps: f32,
     speed: f32,
     paused: bool,
@@ -265,7 +265,7 @@ pub fn draw_ui_gpu(
             if current_x + btn_w > fw as f32 - pad {
                 break;
             }
-            gpu.draw_button(current_x, build_y, btn_w, btn_h, label, *bk == selected, btn_scale);
+            gpu.draw_button(current_x, build_y, btn_w, btn_h, label, selected == Some(*bk), btn_scale);
             current_x += btn_w + 6.0 * scale;
         }
     } else {

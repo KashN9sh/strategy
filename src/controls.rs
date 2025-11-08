@@ -17,7 +17,7 @@ pub fn handle_key_press(
     citizens: &mut Vec<Citizen>,
     population: &mut i32,
     resources: &mut Resources,
-    selected_building: &mut BuildingKind,
+    selected_building: &mut Option<BuildingKind>,
     show_grid: &mut bool,
     show_forest_overlay: &mut bool,
     show_tree_stage_overlay: &mut bool,
@@ -41,8 +41,8 @@ pub fn handle_key_press(
     if code == KeyCode::KeyU { *show_ui = !*show_ui; }
     if code == input.toggle_road_mode { *road_mode = !*road_mode; }
     if code == KeyCode::KeyP { *path_debug_mode = !*path_debug_mode; *path_sel_a=None; *path_sel_b=None; *last_path=None; }
-    if code == input.build_lumberjack { *selected_building = BuildingKind::Lumberjack; }
-    if code == input.build_house { *selected_building = BuildingKind::House; }
+    if code == input.build_lumberjack { *selected_building = Some(BuildingKind::Lumberjack); }
+    if code == input.build_house { *selected_building = Some(BuildingKind::House); }
     if code == input.reset_new_seed {
         *seed = rng.random();
         world.reset_noise(*seed);

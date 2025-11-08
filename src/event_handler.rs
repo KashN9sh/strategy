@@ -54,8 +54,14 @@ pub fn handle_keyboard_input(
     
     // Используем Command Pattern для обработки основных команд
     if let PhysicalKey::Code(key_code) = key {
-        // Выход из игры
+        // Escape: отменить выбор здания или выйти из игры
         if key_code == KeyCode::Escape {
+            // Если консоль закрыта и выбрано здание - отменяем выбор
+            if !game_state.console.open && game_state.selected_building.is_some() {
+                game_state.selected_building = None;
+                return true;
+            }
+            // Иначе - выход из игры
             let exit_cmd = ExitCommand;
             return exit_cmd.execute(game_state, camera, elwt, input, config, gpu_renderer);
         }

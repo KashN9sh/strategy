@@ -50,7 +50,7 @@ pub struct GameState {
     
     // === UI состояние ===
     pub hovered_tile: Option<IVec2>,
-    pub selected_building: BuildingKind,
+    pub selected_building: Option<BuildingKind>,
     pub ui_category: UICategory,
     pub ui_tab: UITab,
     pub show_ui: bool,
@@ -151,7 +151,7 @@ impl GameState {
             
             // UI состояние
             hovered_tile: None,
-            selected_building: BuildingKind::Lumberjack,
+            selected_building: None,
             ui_category: UICategory::Forestry,
             ui_tab: UITab::Build,
             show_ui: true,

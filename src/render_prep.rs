@@ -107,16 +107,16 @@ pub fn prepare_rendering_data(
         );
     }
     
-    // Предпросмотр зданий при наведении (если не в режиме дорог)
+    // Предпросмотр зданий при наведении (если не в режиме дорог и здание выбрано)
     if !game_state.road_mode {
-        if let Some(tile_pos) = game_state.hovered_tile {
+        if let (Some(tile_pos), Some(building_kind)) = (game_state.hovered_tile, game_state.selected_building) {
             let is_allowed = crate::ui_interaction::building_allowed_at(
                 &mut game_state.world,
-                game_state.selected_building,
+                building_kind,
                 tile_pos,
             );
             gpu_renderer.prepare_building_preview(
-                game_state.selected_building,
+                building_kind,
                 tile_pos,
                 is_allowed,
                 &game_state.building_atlas,
