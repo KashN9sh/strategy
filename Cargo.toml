@@ -2,6 +2,7 @@
 name = "strategy"
 version = "0.1.0"
 edition = "2024"
+default-run = "strategy"
 
 [dependencies]
 anyhow = "1.0.98"
@@ -32,6 +33,12 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+# Основной бинарник (игра) - запускается по умолчанию через cargo run
+[[bin]]
+name = "strategy"
+path = "src/main.rs"
+
+# Утилита для просмотра props.png - запускается через cargo run --bin props_viewer
 [[bin]]
 name = "props_viewer"
 path = "src/bin/props_viewer.rs"
