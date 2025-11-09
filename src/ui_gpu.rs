@@ -6,6 +6,33 @@ use crate::types::{Resources, BuildingKind, FoodPolicy};
 use crate::ui::{self, UICategory, UITab};
 use glam;
 
+// Маппинг ресурсов на индексы спрайтов в props.png (сетка 16x16)
+// Индексы можно легко изменить, если структура props.png отличается
+fn get_props_index_for_resource(resource_name: &str) -> u32 {
+    match resource_name {
+        "Population" => 0,   // Первый спрайт (0, 0)
+        "Gold" => 1,        // Второй спрайт (1, 0)
+        "Happiness" => 2,   // Третий спрайт (2, 0)
+        "Tax" => 3,         // Четвертый спрайт (3, 0)
+        "Idle" => 4,        // Пятый спрайт (4, 0)
+        "Working" => 5,     // Шестой спрайт (5, 0)
+        "Sleeping" => 6,    // Седьмой спрайт (6, 0)
+        "Hauling" => 7,     // Восьмой спрайт (7, 0)
+        "Fetching" => 8,   // Девятый спрайт (8, 0)
+        "Wood" => 16,       // Первый спрайт второй строки (0, 1)
+        "Stone" => 17,      // Второй спрайт второй строки (1, 1)
+        "Clay" => 18,       // Третий спрайт второй строки (2, 1)
+        "Bricks" => 19,     // Четвертый спрайт второй строки (3, 1)
+        "Wheat" => 20,      // Пятый спрайт второй строки (4, 1)
+        "Flour" => 21,      // Шестой спрайт второй строки (5, 1)
+        "Bread" => 22,      // Седьмой спрайт второй строки (6, 1)
+        "Fish" => 23,       // Восьмой спрайт второй строки (7, 1)
+        "Iron Ore" => 24,   // Девятый спрайт второй строки (8, 1)
+        "Iron Ingots" => 25, // Десятый спрайт второй строки (9, 1)
+        _ => 0,             // По умолчанию первый спрайт
+    }
+}
+
 /// GPU версия draw_ui - использует GpuRenderer вместо CPU frame buffer
 pub fn draw_ui_gpu(
     gpu: &mut GpuRenderer,
@@ -70,7 +97,12 @@ pub fn draw_ui_gpu(
     gpu.draw_ui_panel(0.0, 0.0, fw as f32, panel_height);
     
     let pad = (8 * s) as f32;
-    let icon_size = (10 * s) as f32;
+    let icon_size = (12 * s) as f32;
+    
+    // Высота текста: 5 строк * 2 пикселя * scale = 10 * scale
+    let text_height = 10.0 * scale;
+    // Выравнивание: сдвигаем текст вниз на половину разницы высот для центрирования с иконкой
+    let text_y_offset = (icon_size - text_height) / 2.0;
     
     // Первая строка: Population, Gold, Happiness, Tax, статусы граждан
     let row1_y = pad;
@@ -78,44 +110,44 @@ pub fn draw_ui_gpu(
     let mut x = pad;
     
     // Population
-    gpu.draw_ui_resource_icon(x, row1_y, icon_size, [180.0/255.0, 60.0/255.0, 60.0/255.0, 1.0]);
+    gpu.draw_ui_props_icon(x, row1_y, icon_size, get_props_index_for_resource("Population"));
     x += icon_size + 4.0;
-    gpu.draw_number(x, row1_y, population.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
+    gpu.draw_number(x, row1_y + text_y_offset, population.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
     x += ((population.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * scale) + gap;
     
     // Gold
-    gpu.draw_ui_resource_icon(x, row1_y, icon_size, [220.0/255.0, 180.0/255.0, 60.0/255.0, 1.0]);
+    gpu.draw_ui_props_icon(x, row1_y, icon_size, get_props_index_for_resource("Gold"));
     x += icon_size + 4.0;
-    gpu.draw_number(x, row1_y, resources.gold.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
+    gpu.draw_number(x, row1_y + text_y_offset, resources.gold.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
     x += ((resources.gold.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * scale) + gap;
     
     // Happiness
-    gpu.draw_ui_resource_icon(x, row1_y, icon_size, [220.0/255.0, 120.0/255.0, 160.0/255.0, 1.0]);
+    gpu.draw_ui_props_icon(x, row1_y, icon_size, get_props_index_for_resource("Happiness"));
     x += icon_size + 4.0;
     let hap = avg_happiness.round().clamp(0.0, 100.0) as u32;
-    gpu.draw_number(x, row1_y, hap, [1.0, 1.0, 1.0, 1.0], scale);
+    gpu.draw_number(x, row1_y + text_y_offset, hap, [1.0, 1.0, 1.0, 1.0], scale);
     x += (hap.to_string().len() as f32 * 4.0 * 2.0 * scale) + gap;
     
     // Tax
-    gpu.draw_ui_resource_icon(x, row1_y, icon_size, [200.0/255.0, 180.0/255.0, 90.0/255.0, 1.0]);
+    gpu.draw_ui_props_icon(x, row1_y, icon_size, get_props_index_for_resource("Tax"));
     x += icon_size + 4.0;
     let taxp = (tax_rate * 100.0).round().clamp(0.0, 100.0) as u32;
-    gpu.draw_number(x, row1_y, taxp, [1.0, 1.0, 1.0, 1.0], scale);
+    gpu.draw_number(x, row1_y + text_y_offset, taxp, [1.0, 1.0, 1.0, 1.0], scale);
     x += (taxp.to_string().len() as f32 * 4.0 * 2.0 * scale) + gap;
     
     // Citizen status icons
     let stat_icons = [
-        ([70.0/255.0, 160.0/255.0, 70.0/255.0, 1.0], citizens_idle),
-        ([70.0/255.0, 110.0/255.0, 200.0/255.0, 1.0], citizens_working),
-        ([120.0/255.0, 120.0/255.0, 120.0/255.0, 1.0], citizens_sleeping),
-        ([210.0/255.0, 150.0/255.0, 70.0/255.0, 1.0], citizens_hauling),
-        ([80.0/255.0, 200.0/255.0, 200.0/255.0, 1.0], citizens_fetching),
+        ("Idle", citizens_idle),
+        ("Working", citizens_working),
+        ("Sleeping", citizens_sleeping),
+        ("Hauling", citizens_hauling),
+        ("Fetching", citizens_fetching),
     ];
     
-    for (color, count) in stat_icons {
-        gpu.draw_ui_resource_icon(x, row1_y, icon_size, color);
+    for (name, count) in stat_icons {
+        gpu.draw_ui_props_icon(x, row1_y, icon_size, get_props_index_for_resource(name));
         x += icon_size + 4.0;
-        gpu.draw_number(x, row1_y, count.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
+        gpu.draw_number(x, row1_y + text_y_offset, count.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
         x += (count.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * scale + gap;
     }
     
@@ -146,6 +178,7 @@ pub fn draw_ui_gpu(
     right_x -= weather_text_w;
     gpu.draw_text(right_x, row1_y + 2.0, weather_label, [230.0/255.0, 230.0/255.0, 230.0/255.0, 1.0], scale);
     right_x -= icon_size + 4.0;
+    // Погода пока оставляем как цветной квадратик (можно будет заменить позже)
     gpu.draw_ui_resource_icon(right_x, row1_y, icon_size, weather_icon_col);
     
     // PAUSED (если активна, вторая строка)
@@ -160,22 +193,22 @@ pub fn draw_ui_gpu(
     x = pad;
     
     let resources_list = [
-        (total_wood, [110.0/255.0, 70.0/255.0, 30.0/255.0, 1.0]),
-        (resources.stone, [120.0/255.0, 120.0/255.0, 120.0/255.0, 1.0]),
-        (resources.clay, [150.0/255.0, 90.0/255.0, 70.0/255.0, 1.0]),
-        (resources.bricks, [180.0/255.0, 120.0/255.0, 90.0/255.0, 1.0]),
-        (resources.wheat, [200.0/255.0, 180.0/255.0, 80.0/255.0, 1.0]),
-        (resources.flour, [210.0/255.0, 210.0/255.0, 180.0/255.0, 1.0]),
-        (resources.bread, [200.0/255.0, 160.0/255.0, 120.0/255.0, 1.0]),
-        (resources.fish, [100.0/255.0, 140.0/255.0, 200.0/255.0, 1.0]),
-        (resources.iron_ore, [90.0/255.0, 90.0/255.0, 110.0/255.0, 1.0]),
-        (resources.iron_ingots, [190.0/255.0, 190.0/255.0, 210.0/255.0, 1.0]),
+        ("Wood", total_wood),
+        ("Stone", resources.stone),
+        ("Clay", resources.clay),
+        ("Bricks", resources.bricks),
+        ("Wheat", resources.wheat),
+        ("Flour", resources.flour),
+        ("Bread", resources.bread),
+        ("Fish", resources.fish),
+        ("Iron Ore", resources.iron_ore),
+        ("Iron Ingots", resources.iron_ingots),
     ];
     
-    for (amount, color) in resources_list {
-        gpu.draw_ui_resource_icon(x, row2_y, icon_size, color);
+    for (name, amount) in resources_list {
+        gpu.draw_ui_props_icon(x, row2_y, icon_size, get_props_index_for_resource(name));
         x += icon_size + 4.0;
-        gpu.draw_number(x, row2_y, amount.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
+        gpu.draw_number(x, row2_y + text_y_offset, amount.max(0) as u32, [1.0, 1.0, 1.0, 1.0], scale);
         x += (amount.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * scale + gap;
     }
     
@@ -376,6 +409,9 @@ pub fn draw_ui_gpu(
     );
     
     // === ТУЛТИПЫ ===
+    // Запоминаем текущий размер ui_rects как начало тултипов
+    gpu.start_tooltips();
+    
     if let Some(building) = hovered_building {
         // Показываем тултип здания только на вкладке Build
         if ui_tab == UITab::Build {

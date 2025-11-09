@@ -69,6 +69,7 @@ fn run() -> Result<()> {
         &mut game_state.atlas,
         &mut game_state.building_atlas,
         &mut game_state.tree_atlas,
+        &mut game_state.props_atlas,
     );
     game_state.width_i32 = size.width as i32;
     game_state.height_i32 = size.height as i32;

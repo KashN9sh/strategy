@@ -5,7 +5,7 @@ use crate::types::{
 };
 use crate::ui::{UICategory, UITab};
 use crate::world::World;
-use crate::atlas::{TileAtlas, BuildingAtlas, TreeAtlas};
+use crate::atlas::{TileAtlas, BuildingAtlas, TreeAtlas, PropsAtlas};
 use crate::weather::WeatherSystem;
 use crate::console::DeveloperConsole;
 use crate::input::Config;
@@ -83,6 +83,7 @@ pub struct GameState {
     pub atlas: TileAtlas,
     pub building_atlas: Option<BuildingAtlas>,
     pub tree_atlas: Option<TreeAtlas>,
+    pub props_atlas: Option<PropsAtlas>,
     pub water_anim_time: f32,
     
     // === Визуальные эффекты ===
@@ -191,6 +192,7 @@ impl GameState {
             atlas: TileAtlas::new(),
             building_atlas: None,
             tree_atlas: None,
+            props_atlas: None,
             water_anim_time: 0.0,
             
             // Визуальные эффекты

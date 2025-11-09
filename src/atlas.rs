@@ -170,11 +170,22 @@ pub struct BuildingAtlas { pub w: i32, pub h: i32 }
 // Отдельный атлас деревьев (кадры по горизонтали: стадии роста)
 pub struct TreeAtlas { pub w: i32, pub h: i32 }
 
+// Атлас пропсов и UI элементов
+pub struct PropsAtlas { 
+    pub w: i32, 
+    pub h: i32,
+    pub sprite_w: i32,  // Ширина одного спрайта
+    pub sprite_h: i32,  // Высота одного спрайта
+    pub cols: i32,      // Количество колонок в атласе
+    pub rows: i32,      // Количество строк в атласе
+}
+
 /// Загрузить все текстуры и настроить атласы
 pub fn load_textures(
     atlas: &mut TileAtlas,
     building_atlas: &mut Option<BuildingAtlas>,
     tree_atlas: &mut Option<TreeAtlas>,
+    props_atlas: &mut Option<PropsAtlas>,
 ) {
     // Загрузка тайлов из spritesheet.png или tiles.png
     if let Ok(img) = image::open("assets/spritesheet.png") {
@@ -321,6 +332,44 @@ pub fn load_textures(
         *tree_atlas = Some(TreeAtlas {
             w: base_w as i32,
             h: ih as i32,
+        });
+    }
+
+    // Загрузка пропсов и UI элементов
+    if let Ok(img) = image::open("assets/props.png") {
+        let img = img.to_rgba8();
+        let (iw, ih) = img.dimensions();
+        
+        // Определяем размер спрайта (обычно 16x16 или 32x32 для UI элементов)
+        // Попробуем определить автоматически, проверив несколько вариантов
+        let sprite_size = if iw >= 32 && ih >= 32 {
+            // Проверяем, является ли это сеткой 32x32
+            if iw % 32 == 0 && ih % 32 == 0 {
+                32
+            } else if iw % 16 == 0 && ih % 16 == 0 {
+                16
+            } else {
+                // Пробуем найти размер по первой строке
+                // Ищем первый непрозрачный пиксель для определения размера
+                32 // По умолчанию 32x32
+            }
+        } else {
+            16 // По умолчанию 16x16 для маленьких атласов
+        };
+        
+        let cols = (iw / sprite_size) as i32;
+        let rows = (ih / sprite_size) as i32;
+        
+        println!("Загружено {}x{} спрайтов пропсов из props.png (размер спрайта: {}x{}, всего: {} спрайтов)", 
+                 cols, rows, sprite_size, sprite_size, cols * rows);
+        
+        *props_atlas = Some(PropsAtlas {
+            w: iw as i32,
+            h: ih as i32,
+            sprite_w: sprite_size as i32,
+            sprite_h: sprite_size as i32,
+            cols,
+            rows,
         });
     }
 }
