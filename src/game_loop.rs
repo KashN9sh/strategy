@@ -56,6 +56,13 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
     // Обновление погоды и светлячков
     game_state.weather_system.update(frame_ms, &mut game_state.rng);
     update_fireflies(game_state, frame_ms);
+    
+    // Обновление музыки
+    if let Some(ref mut music_manager) = game_state.music_manager {
+        if let Err(e) = music_manager.update() {
+            eprintln!("Ошибка обновления музыки: {}", e);
+        }
+    }
 }
 
 /// Обновить светлячков для ночного освещения

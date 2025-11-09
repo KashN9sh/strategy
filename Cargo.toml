@@ -18,6 +18,7 @@ wgpu = "0.19"
 bytemuck = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 env_logger = "0.10"
+rodio = "0.18"
 
 [profile.release]
 lto = true

@@ -9,6 +9,7 @@ use crate::atlas::{TileAtlas, BuildingAtlas, TreeAtlas};
 use crate::weather::WeatherSystem;
 use crate::console::DeveloperConsole;
 use crate::input::Config;
+use crate::music::MusicManager;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
 
@@ -91,6 +92,7 @@ pub struct GameState {
     pub weather_system: WeatherSystem,
     pub console: DeveloperConsole,
     pub rng: StdRng,
+    pub music_manager: Option<MusicManager>,
     
     // === Размеры окна ===
     pub width_i32: i32,
@@ -198,6 +200,7 @@ impl GameState {
             weather_system: WeatherSystem::new(crate::types::WeatherKind::Clear, rng),
             console: DeveloperConsole::new(),
             rng: StdRng::seed_from_u64(rng.random()),
+            music_manager: None, // Инициализируется в main.rs после создания GameState
             
             // Размеры
             width_i32: 1280,

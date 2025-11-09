@@ -26,6 +26,7 @@ mod building_production;
 mod citizen_state;
 mod resource_visitor;
 mod commands;
+mod music;
 use gpu_renderer::GpuRenderer;
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
@@ -71,6 +72,16 @@ fn run() -> Result<()> {
     );
     game_state.width_i32 = size.width as i32;
     game_state.height_i32 = size.height as i32;
+    
+    // Инициализировать менеджер музыки
+    match music::MusicManager::new() {
+        Ok(music_manager) => {
+            game_state.music_manager = Some(music_manager);
+        }
+        Err(e) => {
+            eprintln!("Не удалось инициализировать музыку: {}", e);
+        }
+    }
 
     let window = window.clone();
     event_loop.run(move |event, elwt| {
