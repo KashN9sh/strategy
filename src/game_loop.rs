@@ -216,7 +216,7 @@ pub fn update_game_simulation(
         );
     }
 
-    update_citizen_movement(step_ms, citizens, world, warehouses);
+    update_citizen_movement(step_ms, citizens, world, warehouses, buildings);
 
     if is_day {
         update_production(
@@ -440,7 +440,7 @@ fn generate_haul_jobs(
 }
 
 /// Обновить движение граждан
-fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mut World, warehouses: &mut Vec<WarehouseStore>) {
+fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mut World, warehouses: &mut Vec<WarehouseStore>, buildings: &Vec<Building>) {
     for c in citizens.iter_mut() {
         if !c.moving {
             c.idle_timer_ms += step_ms as i32;
@@ -452,7 +452,7 @@ fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mu
                 c.idle_timer_ms = 0;
             }
             // смена состояний при прибытии
-            handle_arrival_state(c, world, warehouses);
+            handle_arrival_state(c, world, warehouses, buildings);
         } else {
             c.idle_timer_ms = 0;
             update_movement(step_ms, c, world);
@@ -461,7 +461,7 @@ fn update_citizen_movement(step_ms: f32, citizens: &mut Vec<Citizen>, world: &mu
 }
 
 /// Обработать состояние граждан при прибытии
-fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec<WarehouseStore>) {
+fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec<WarehouseStore>, buildings: &Vec<Building>) {
     match c.state {
         CitizenState::Idle => {
             // Если у гражданина есть рабочее место
@@ -553,17 +553,88 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec
             }
         }
         CitizenState::GoingToFetch => {
-            // Обрабатывается через jobs::process_jobs при достижении цели
-            // Здесь просто проверяем, что позиция достигнута
+            // Обработка получения ресурса со склада
+            if let Some(resource_kind) = c.pending_input {
+                // Ищем склад на текущей позиции или рядом (в пределах 1 клетки)
+                let warehouse = warehouses.iter_mut().find(|w| {
+                    let dist = (w.pos.x - c.pos.x).abs() + (w.pos.y - c.pos.y).abs();
+                    dist <= 1
+                });
+                if let Some(warehouse) = warehouse {
+                    // Проверяем наличие ресурса и забираем его
+                    use crate::resource_visitor::{ResourceVisitable, CheckEnoughVisitor, SpendVisitor};
+                    let mut check_visitor = CheckEnoughVisitor::new(1);
+                    warehouse.accept(&mut check_visitor, resource_kind);
+                    if check_visitor.result {
+                        let mut spend_visitor = SpendVisitor::new(1);
+                        warehouse.accept_mut(&mut spend_visitor, resource_kind);
+                        c.carrying = Some((resource_kind, 1));
+                        c.pending_input = None;
+                        
+                        // Возвращаемся на рабочее место
+                        if let Some(workplace) = c.workplace {
+                            crate::game::plan_path(world, c, workplace);
+                            c.state = CitizenState::GoingToWork;
+                        } else {
+                            c.state = CitizenState::Idle;
+                        }
+                    } else {
+                        // Ресурса нет на складе, возвращаемся на рабочее место
+                        c.pending_input = None;
+                        if let Some(workplace) = c.workplace {
+                            crate::game::plan_path(world, c, workplace);
+                            c.state = CitizenState::GoingToWork;
+                        } else {
+                            c.state = CitizenState::Idle;
+                        }
+                    }
+                } else if !c.moving {
+                    // Если не нашли склад, но гражданин не двигается, попробуем найти склад снова
+                    if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
+                        crate::game::plan_path(world, c, dst);
+                    } else {
+                        // Если складов нет, возвращаемся на рабочее место
+                        c.pending_input = None;
+                        if let Some(workplace) = c.workplace {
+                            crate::game::plan_path(world, c, workplace);
+                            c.state = CitizenState::GoingToWork;
+                        } else {
+                            c.state = CitizenState::Idle;
+                        }
+                    }
+                }
+            } else {
+                // Если pending_input потерян, возвращаемся на рабочее место
+                if let Some(workplace) = c.workplace {
+                    crate::game::plan_path(world, c, workplace);
+                    c.state = CitizenState::GoingToWork;
+                } else {
+                    c.state = CitizenState::Idle;
+                }
+            }
         }
         CitizenState::Sleeping => {}
         CitizenState::Working => {
-            // Если гражданин несет ресурс, он должен доставить его на склад
-            if c.carrying.is_some() {
-                if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
-                    crate::game::plan_path(world, c, dst);
-                    c.state = CitizenState::GoingToDeposit;
-                    return;
+            // Если гражданин несет ресурс, проверяем, является ли он входным для производства
+            if let Some((carrying_resource, _)) = c.carrying {
+                if let Some(workplace) = c.workplace {
+                    if let Some(b) = buildings.iter().find(|b| b.pos == workplace) {
+                        let strategy = building_production::create_production_strategy(b.kind);
+                        let is_input_resource = strategy.required_input_resource() == Some(carrying_resource);
+                        
+                        // Если это входной ресурс и работник на рабочем месте, разрешаем производство
+                        // (производство обработается в update_production)
+                        if is_input_resource && c.pos == workplace {
+                            // Ничего не делаем, производство обработается в update_production
+                        } else {
+                            // Это выходной ресурс или работник не на рабочем месте - отправляем на склад
+                            if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, c.pos) {
+                                crate::game::plan_path(world, c, dst);
+                                c.state = CitizenState::GoingToDeposit;
+                                return;
+                            }
+                        }
+                    }
                 }
             }
             
@@ -643,11 +714,6 @@ fn update_production(
     config: &crate::input::Config,
 ) {
     for c in citizens.iter_mut() {
-        // Пропускаем граждан, которые уже несут ресурс (они должны доставить его на склад)
-        if c.carrying.is_some() {
-            continue;
-        }
-        
         if !matches!(c.state, CitizenState::Working) {
             continue;
         }
@@ -664,6 +730,20 @@ fn update_production(
         let Some(b) = buildings.iter().find(|b| b.pos == wp) else {
             continue;
         };
+
+        // Проверяем, является ли ресурс, который несет работник, входным для производства
+        // Если да, разрешаем производство; если нет (выходной ресурс), пропускаем
+        let strategy = building_production::create_production_strategy(b.kind);
+        let is_input_resource = if let Some(carrying) = c.carrying {
+            strategy.required_input_resource() == Some(carrying.0)
+        } else {
+            true // Если не несет ресурс, разрешаем производство
+        };
+        
+        // Пропускаем граждан, которые несут выходной ресурс (они должны доставить его на склад)
+        if c.carrying.is_some() && !is_input_resource {
+            continue;
+        }
 
         c.work_timer_ms += step_ms as i32;
         

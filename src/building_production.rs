@@ -141,10 +141,8 @@ impl ProductionStrategy for ProcessingStrategy {
             if have_any {
                 if let Some(dst) = crate::types::find_nearest_warehouse(warehouses, building.pos) {
                     citizen.pending_input = Some(self.input);
-                    citizen.target = dst;
-                    citizen.moving = true;
-                    citizen.progress = 0.0;
                     citizen.state = crate::types::CitizenState::GoingToFetch;
+                    crate::game::plan_path(world, citizen, dst);
                     return true;
                 }
             }
