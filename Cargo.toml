@@ -31,3 +31,7 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[[bin]]
+name = "props_viewer"
+path = "src/bin/props_viewer.rs"
