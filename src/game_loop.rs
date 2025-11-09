@@ -335,11 +335,11 @@ fn generate_lumberjack_jobs(
         if workers_here <= 0 {
             continue;
         }
-        // лимит задач = работников_here; считаем только Chop-задачи рядом
+        // лимит задач = работников_here; считаем только активные (не завершенные и назначенные) Chop-задачи рядом
         let active_tasks_here = jobs
             .iter()
             .filter(|j| {
-                match j.kind {
+                !j.done && j.taken && match j.kind {
                     JobKind::ChopWood { pos } => {
                         (pos.x - b.pos.x).abs() + (pos.y - b.pos.y).abs() <= 48
                     }
@@ -350,21 +350,34 @@ fn generate_lumberjack_jobs(
         if active_tasks_here >= workers_here {
             continue;
         }
-        // ищем ближайшее зрелое дерево
+        // ищем ближайшее зрелое дерево (stage 2) или почти зрелое (stage 1)
+        // Приоритет отдаем зрелым деревьям (stage 2)
         let search = |rad: i32| -> Option<IVec2> {
-            let mut best: Option<(i32, IVec2)> = None;
+            let mut best_stage2: Option<(i32, IVec2)> = None;
+            let mut best_stage1: Option<(i32, IVec2)> = None;
             for dy in -rad..=rad {
                 for dx in -rad..=rad {
                     let np = IVec2::new(b.pos.x + dx, b.pos.y + dy);
-                    if matches!(world.tree_stage(np), Some(2)) {
-                        let d = dx.abs() + dy.abs();
-                        if best.map(|(bd, _)| d < bd).unwrap_or(true) {
-                            best = Some((d, np));
+                    let d = dx.abs() + dy.abs();
+                    match world.tree_stage(np) {
+                        Some(2) => {
+                            // Зрелое дерево - приоритет
+                            if best_stage2.map(|(bd, _)| d < bd).unwrap_or(true) {
+                                best_stage2 = Some((d, np));
+                            }
                         }
+                        Some(1) => {
+                            // Почти зрелое дерево - запасной вариант
+                            if best_stage1.map(|(bd, _)| d < bd).unwrap_or(true) {
+                                best_stage1 = Some((d, np));
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
-            best.map(|(_, p)| p)
+            // Сначала возвращаем зрелое дерево, если есть, иначе почти зрелое
+            best_stage2.or(best_stage1).map(|(_, p)| p)
         };
         if let Some(np) = search(24)
             .or_else(|| search(32))
@@ -555,12 +568,16 @@ fn handle_arrival_state(c: &mut Citizen, world: &mut World, warehouses: &mut Vec
             }
             
             // Если гражданин в Working, но не на рабочем месте и не двигается, возвращаемся в Idle
-            // НО только если он действительно ушел с рабочего места
+            // НО только если он действительно ушел с рабочего места И не выполняет задачу
             if let Some(workplace) = c.workplace {
                 // Если гражданин не на рабочем месте и не двигается, возвращаемся в Idle
-                // Это означает, что он ушел с рабочего места и остановился
+                // НО если у него есть активная задача (например, дровосек рубит дерево) или несет полено,
+                // остаемся в Working
                 if c.pos != workplace && !c.moving {
-                    c.state = CitizenState::Idle;
+                    // Остаемся в Working, если выполняем задачу или несем полено (для дровосеков)
+                    if c.assigned_job.is_none() && !c.carrying_log {
+                        c.state = CitizenState::Idle;
+                    }
                 }
                 // Если гражданин на рабочем месте, остаемся в Working - ничего не делаем
             } else {
