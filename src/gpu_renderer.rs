@@ -2425,7 +2425,7 @@ impl GpuRenderer {
     }
     
     // Рисует спрайт из props.png по индексу (col + row * cols)
-    // props.png имеет сетку спрайтов, предположим 16x16 спрайтов по 16x16 пикселей каждый
+    // props.png имеет сетку спрайтов 5x4 (5 колонок, 4 строки), каждый спрайт 16x16 пикселей
     pub fn draw_ui_props_icon(&mut self, x: f32, y: f32, size: f32, props_index: u32) {
         use glam::{Mat4, Vec3};
         

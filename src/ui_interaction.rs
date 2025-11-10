@@ -513,7 +513,7 @@ pub fn get_hovered_resource(
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let panel_height = ui::top_panel_height(ui_s);
     let pad = (8 * ui_s) as f32;
-    let icon_size = (10 * ui_s) as f32;
+    let icon_size = (12 * ui_s) as f32;
     let gap = (6 * ui_s) as f32;
     
     // Проверяем, что курсор в верхней панели

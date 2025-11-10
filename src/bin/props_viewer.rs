@@ -24,7 +24,7 @@ struct ViewUniform {
 }
 
 const SPRITE_SIZE: u32 = 16; // Размер одного спрайта в пикселях
-const COLS: u32 = 16; // Количество колонок в атласе
+const COLS: u32 = 5; // Количество колонок в атласе
 
 fn main() -> Result<()> {
     env_logger::init();

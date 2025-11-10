@@ -67,18 +67,18 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // props.png имеет сетку 16x137 спрайтов (16 колонок, 137 строк)
-    // Каждый спрайт 16x16 пикселей, текстура 256x2192 пикселей
-    let sprites_per_row = 16.0;
-    let sprites_per_col = 137.0;
+    // props.png имеет сетку 5x4 спрайтов (5 колонок, 4 строки)
+    // Каждый спрайт 16x16 пикселей, текстура 80x64 пикселей
+    let sprites_per_row = 5.0;
+    let sprites_per_col = 4.0;
     
     // Размер одного спрайта в UV координатах (0..1)
-    let sprite_size_u = 1.0 / sprites_per_row; // 1.0 / 16.0 = 0.0625
-    let sprite_size_v = 1.0 / sprites_per_col; // 1.0 / 137.0 ≈ 0.0073
+    let sprite_size_u = 1.0 / sprites_per_row; // 1.0 / 5.0 = 0.2
+    let sprite_size_v = 1.0 / sprites_per_col; // 1.0 / 4.0 = 0.25
     
     // Вычисляем позицию спрайта в сетке (колонка и строка)
-    let sprite_col = f32(in.props_id % 16u);
-    let sprite_row = f32(in.props_id / 16u);
+    let sprite_col = f32(in.props_id % 5u);
+    let sprite_row = f32(in.props_id / 5u);
     
     // Вычисляем UV координаты для конкретного спрайта
     // in.uv идет от 0 до 1 для всего квада, масштабируем до размера одного спрайта в атласе
