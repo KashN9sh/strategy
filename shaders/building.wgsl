@@ -140,8 +140,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Обычные здания (ID 0-12) - рендерим из текстуры
     if building_id <= 12u {
         // Текстура buildings.png содержит спрайты зданий
-        let building_sprites = 7.0; // количество спрайтов в текстуре
-        let sprite_x = f32(building_id % 7u); // используем доступные спрайты
+        let building_sprites = 8.0; // количество спрайтов в текстуре
+        let sprite_x = f32(building_id % 8u); // используем доступные спрайты
         
         // Вычисляем UV координаты для конкретного спрайта здания
         let u = (sprite_x + in.tex_coords.x) / building_sprites;
