@@ -374,7 +374,7 @@ pub fn create_production_strategy(kind: BuildingKind) -> Box<dyn ProductionStrat
         Smelter => Box::new(ProcessingStrategy::new(IronOre, IronIngot, 6000)),
         Forester => Box::new(ForesterStrategy),
         // Здания без производства
-        Lumberjack | House | Warehouse => {
+        Lumberjack | House | Warehouse | ResearchLab => {
             // Возвращаем пустую стратегию (или можно сделать NoOpStrategy)
             Box::new(NoOpStrategy)
         }

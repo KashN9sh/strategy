@@ -167,6 +167,8 @@ impl Command for SaveGameCommand {
             camera.pos,
             camera.zoom,
             &game_state.world,
+            &game_state.research_system,
+            &game_state.notification_system,
         ));
         false
     }
@@ -208,6 +210,21 @@ impl Command for LoadGameCommand {
                     stage: t.stage,
                     age_ms: t.age_ms,
                 });
+            }
+            
+            // восстановим системы исследований и уведомлений
+            if let Some(research_system) = save.research_system {
+                game_state.research_system = research_system;
+            } else {
+                // Для старых сохранений создаем новую систему исследований
+                game_state.research_system = crate::research::ResearchSystem::new();
+            }
+            
+            if let Some(notification_system) = save.notification_system {
+                game_state.notification_system = notification_system;
+            } else {
+                // Для старых сохранений создаем новую систему уведомлений
+                game_state.notification_system = crate::notifications::NotificationSystem::new();
             }
         }
         false

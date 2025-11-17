@@ -18,6 +18,7 @@ pub fn building_color(kind: BuildingKind) -> [u8; 4] {
         Fishery => [100, 140, 200, 255],
         IronMine => [90, 90, 110, 255],
         Smelter => [190, 190, 210, 255],
+        ResearchLab => [100, 100, 255, 255], // Синий цвет для лаборатории
     }
 }
 

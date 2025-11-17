@@ -2,6 +2,8 @@ use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{Building, BuildingKind, Resources};
+use crate::research::ResearchSystem;
+use crate::notifications::NotificationSystem;
 
 #[derive(Serialize, Deserialize)]
 pub struct SaveData {
@@ -12,6 +14,10 @@ pub struct SaveData {
     pub cam_y: f32,
     pub zoom: f32,
     pub trees: Vec<SaveTree>,
+    #[serde(default)]
+    pub research_system: Option<ResearchSystem>,
+    #[serde(default)]
+    pub notification_system: Option<NotificationSystem>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -42,6 +48,8 @@ impl SaveData {
         cam_px: Vec2,
         zoom: f32,
         world: &crate::world::World,
+        research_system: &ResearchSystem,
+        notification_system: &NotificationSystem,
     ) -> Self {
         let buildings = buildings
             .iter()
@@ -58,7 +66,17 @@ impl SaveData {
         for (&(x, y), tr) in world.trees.iter() {
             trees.push(SaveTree { x, y, stage: tr.stage, age_ms: tr.age_ms });
         }
-        SaveData { seed, resources: *res, buildings, cam_x: cam_px.x, cam_y: cam_px.y, zoom, trees }
+        SaveData { 
+            seed, 
+            resources: *res, 
+            buildings, 
+            cam_x: cam_px.x, 
+            cam_y: cam_px.y, 
+            zoom, 
+            trees,
+            research_system: Some(research_system.clone()),
+            notification_system: Some(notification_system.clone()),
+        }
     }
 
     pub fn to_buildings(&self) -> Vec<Building> {

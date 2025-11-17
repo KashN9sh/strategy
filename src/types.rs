@@ -39,6 +39,7 @@ pub enum BuildingKind {
     Fishery,
     IronMine,
     Smelter,
+    ResearchLab,  // Лаборатория исследований
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +86,7 @@ pub fn building_cost(kind: BuildingKind) -> Resources {
         BuildingKind::Fishery => Resources { wood: 15, gold: 10, ..Default::default() },
         BuildingKind::IronMine => Resources { wood: 15, gold: 20, ..Default::default() },
         BuildingKind::Smelter => Resources { wood: 20, gold: 25, ..Default::default() },
+        BuildingKind::ResearchLab => Resources { wood: 50, gold: 100, stone: 30, ..Default::default() },
     }
 }
 

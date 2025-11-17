@@ -59,8 +59,6 @@ pub fn defaults() -> (input::Config, input::InputConfig) {
         build_lumberjack: "Z".into(),
         build_house: "X".into(),
         toggle_road_mode: "R".into(),
-        reset_new_seed: "T".into(),
-        reset_same_seed: "N".into(),
         save_game: "F5".into(),
         load_game: "F9".into(),
         tax_up: "]".into(),

@@ -10,6 +10,8 @@ use crate::weather::WeatherSystem;
 use crate::console::DeveloperConsole;
 use crate::input::Config;
 use crate::music::MusicManager;
+use crate::research::ResearchSystem;
+use crate::notifications::NotificationSystem;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
 
@@ -57,6 +59,7 @@ pub struct GameState {
     pub show_ui: bool,
     pub cursor_xy: IVec2,
     pub active_building_panel: Option<IVec2>,
+    pub show_research_tree: bool,  // Показать окно дерева исследований
     
     // === Дороги ===
     pub road_mode: bool,
@@ -94,6 +97,8 @@ pub struct GameState {
     pub console: DeveloperConsole,
     pub rng: StdRng,
     pub music_manager: Option<MusicManager>,
+    pub research_system: ResearchSystem,
+    pub notification_system: NotificationSystem,
     
     // === Размеры окна ===
     pub width_i32: i32,
@@ -166,6 +171,7 @@ impl GameState {
             show_ui: true,
             cursor_xy: IVec2::new(0, 0),
             active_building_panel: None,
+            show_research_tree: false,
             
             // Дороги
             road_mode: false,
@@ -203,6 +209,8 @@ impl GameState {
             console: DeveloperConsole::new(),
             rng: StdRng::seed_from_u64(rng.random()),
             music_manager: None, // Инициализируется в main.rs после создания GameState
+            research_system: ResearchSystem::new(),
+            notification_system: NotificationSystem::new(),
             
             // Размеры
             width_i32: 1280,

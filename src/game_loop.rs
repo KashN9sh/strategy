@@ -11,6 +11,8 @@ use crate::weather::WeatherSystem;
 use crate::game_state::{GameState, Firefly};
 use crate::building_production;
 use crate::citizen_state;
+use crate::research::ResearchSystem;
+use crate::notifications::{NotificationSystem, NotificationKind};
 
 pub const DAY_LENGTH_MS: f32 = 120_000.0;
 
@@ -44,6 +46,8 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
                 game_state.food_policy,
                 config,
                 &game_state.weather_system,
+                &mut game_state.research_system,
+                &mut game_state.notification_system,
             );
             game_state.accumulator_ms -= step_ms;
             if game_state.accumulator_ms > 10.0 * step_ms {
@@ -52,6 +56,9 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
             }
         }
     }
+    
+    // Обновление уведомлений
+    game_state.notification_system.update(frame_ms);
     
     // Обновление погоды и светлячков
     game_state.weather_system.update(frame_ms, &mut game_state.rng);
@@ -153,6 +160,8 @@ pub fn update_game_simulation(
     food_policy: crate::types::FoodPolicy,
     config: &crate::input::Config,
     weather_system: &WeatherSystem,
+    research_system: &mut ResearchSystem,
+    notification_system: &mut NotificationSystem,
 ) {
     // Подтянем готовые чанки перед генерацией задач
     world.integrate_ready_chunks();
@@ -185,6 +194,46 @@ pub fn update_game_simulation(
             jobs,
             is_day,
         );
+        
+        // Обновление исследований (каждый день)
+        // Проверяем наличие лаборатории
+        research_system.has_research_lab = buildings.iter().any(|b| b.kind == BuildingKind::ResearchLab);
+        
+        // Обновляем прогресс исследования (только если есть лаборатория)
+        if research_system.has_research_lab {
+            if let Some(completed_research) = research_system.update_daily() {
+                let info = completed_research.info();
+                
+                // Добавляем уведомление о завершении исследования
+                notification_system.add(NotificationKind::ResearchCompleted {
+                    name: info.name.to_string(),
+                });
+                
+                // Добавляем уведомления о разблокированных зданиях
+                for &building in info.unlocks_buildings {
+                    let building_name = match building {
+                        BuildingKind::Lumberjack => "Lumberjack",
+                        BuildingKind::House => "House",
+                        BuildingKind::Warehouse => "Warehouse",
+                        BuildingKind::Forester => "Forester",
+                        BuildingKind::StoneQuarry => "Quarry",
+                        BuildingKind::ClayPit => "Clay Pit",
+                        BuildingKind::Kiln => "Kiln",
+                        BuildingKind::WheatField => "Wheat Field",
+                        BuildingKind::Mill => "Mill",
+                        BuildingKind::Bakery => "Bakery",
+                        BuildingKind::Fishery => "Fishery",
+                        BuildingKind::IronMine => "Iron Mine",
+                        BuildingKind::Smelter => "Smelter",
+                        BuildingKind::ResearchLab => "Laboratory",
+                    };
+                    
+                    notification_system.add(NotificationKind::BuildingUnlocked {
+                        name: building_name.to_string(),
+                    });
+                }
+            }
+        }
     }
     *prev_is_day_flag = is_day;
 

@@ -43,17 +43,6 @@ pub fn handle_key_press(
     if code == KeyCode::KeyP { *path_debug_mode = !*path_debug_mode; *path_sel_a=None; *path_sel_b=None; *last_path=None; }
     if code == input.build_lumberjack { *selected_building = Some(BuildingKind::Lumberjack); }
     if code == input.build_house { *selected_building = Some(BuildingKind::House); }
-    if code == input.reset_new_seed {
-        *seed = rng.random();
-        world.reset_noise(*seed);
-        buildings.clear(); *buildings_dirty = true; citizens.clear(); *population = 0;
-        *resources = Resources { wood: 20, gold: 100, ..Default::default() };
-    }
-    if code == input.reset_same_seed {
-        world.reset_noise(*seed);
-        buildings.clear(); *buildings_dirty = true; citizens.clear(); *population = 0;
-        *resources = Resources { wood: 20, gold: 100, ..Default::default() };
-    }
 }
 
 

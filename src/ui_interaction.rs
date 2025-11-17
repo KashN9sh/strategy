@@ -6,6 +6,7 @@ use crate::types::{Building, BuildingKind, Citizen, Resources, WarehouseStore, C
 use crate::ui;
 use crate::types::FoodPolicy;
 use crate::world::World;
+use crate::research::ResearchSystem;
 
 /// Проверка возможности размещения здания указанного типа в клетке `tp`.
 pub fn building_allowed_at(world: &mut World, kind: BuildingKind, tp: IVec2) -> bool {
@@ -59,6 +60,8 @@ pub fn handle_left_click(
     path_sel_b: &mut Option<IVec2>,
     last_path: &mut Option<Vec<IVec2>>,
     show_deposits: &mut bool,
+    research_system: &mut ResearchSystem,
+    show_research_tree: &mut bool,
 ) -> bool {
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let _bar_h = ui::top_panel_height(ui_s);
@@ -101,6 +104,17 @@ pub fn handle_left_click(
     if ui::point_in_rect(cursor_xy.x, cursor_xy.y, deposits_x, deposits_y, deposits_w, btn_h) { 
         *show_deposits = !*show_deposits; 
         return true; 
+    }
+
+    // Кнопка Research (только если есть лаборатория)
+    if research_system.has_research_lab {
+        let research_w = ui::button_w_for(b"Research (T)", s).max(100);
+        let research_x = deposits_x + deposits_w + 6 * s;
+        let research_y = by0 + padb;
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, research_x, research_y, research_w, btn_h) { 
+            *show_research_tree = !*show_research_tree; 
+            return true; 
+        }
     }
 
     // Если вкладка Economy — клики по её контролам (динамический расчет)
@@ -164,6 +178,7 @@ pub fn handle_left_click(
         (ui::UICategory::Mining, b"Mining".as_ref()),
         (ui::UICategory::Food, b"Food".as_ref()),
         (ui::UICategory::Logistics, b"Logistics".as_ref()),
+        (ui::UICategory::Research, b"Research".as_ref()),
     ];
     let row_y = [by0 + padb + btn_h + 6 * s, by0 + padb + (btn_h + 6 * s) * 2];
     let mut row: usize = 0; let mut cx = padb;
@@ -183,6 +198,7 @@ pub fn handle_left_click(
         ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln],
         ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
         ui::UICategory::Logistics => &[],
+        ui::UICategory::Research => &[BuildingKind::ResearchLab],
     };
     for &bk in buildings_for_cat.iter() {
         let label = match bk {
@@ -199,6 +215,7 @@ pub fn handle_left_click(
             BuildingKind::Fishery => b"Fishery".as_ref(),
             BuildingKind::IronMine => b"Iron Mine".as_ref(),
             BuildingKind::Smelter => b"Smelter".as_ref(),
+            BuildingKind::ResearchLab => b"Research Lab".as_ref(),
         };
         let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
@@ -281,6 +298,16 @@ pub fn handle_left_click(
         if let Some(building_kind) = *selected_building {
             let allowed = building_allowed_at(world, building_kind, tp);
             if allowed {
+                // Проверка разблокировки здания через систему исследований
+                // ResearchLab всегда разблокирована
+                let is_unlocked = building_kind == BuildingKind::ResearchLab 
+                    || research_system.is_building_unlocked(building_kind);
+                
+                if !is_unlocked {
+                    // Здание не разблокировано, не строим
+                    return true;
+                }
+                
                 let cost = building_cost(building_kind);
                 if crate::types::can_afford_building(warehouses, resources, &cost) {
                     let _ = crate::types::spend_building_cost(warehouses, resources, &cost);
@@ -291,6 +318,10 @@ pub fn handle_left_click(
                     // если построен склад — зарегистрировать его в списке складов, чтобы заработали доставки
                     if building_kind == BuildingKind::Warehouse {
                         warehouses.push(WarehouseStore { pos: tp, ..Default::default() });
+                    }
+                    // если построена лаборатория — обновить флаг
+                    if building_kind == BuildingKind::ResearchLab {
+                        research_system.has_research_lab = true;
                     }
                     *buildings_dirty = true;
                     if building_kind == BuildingKind::House {
@@ -465,6 +496,7 @@ pub fn get_hovered_button(
         ui::UICategory::Mining => &[BuildingKind::StoneQuarry, BuildingKind::ClayPit, BuildingKind::IronMine, BuildingKind::Kiln],
         ui::UICategory::Food => &[BuildingKind::WheatField, BuildingKind::Mill, BuildingKind::Bakery, BuildingKind::Fishery],
         ui::UICategory::Logistics => &[],
+        ui::UICategory::Research => &[BuildingKind::ResearchLab],
     };
     for &bk in buildings_for_cat.iter() {
         let label = match bk {
@@ -481,6 +513,7 @@ pub fn get_hovered_button(
             BuildingKind::Fishery => "Fishery",
             BuildingKind::IronMine => "Iron Mine",
             BuildingKind::Smelter => "Smelter",
+            BuildingKind::ResearchLab => "Research Lab",
         };
         let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }

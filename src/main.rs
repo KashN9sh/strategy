@@ -27,6 +27,8 @@ mod citizen_state;
 mod resource_visitor;
 mod commands;
 mod music;
+mod research;
+mod notifications;
 use gpu_renderer::GpuRenderer;
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
@@ -245,6 +247,31 @@ fn run() -> Result<()> {
             } else {
                 gpu_renderer.clear_ui();
             }
+                
+                // Рендеринг окна исследований (если открыто)
+                if game_state.show_research_tree {
+                    let visible = types::total_resources(&game_state.warehouses, &game_state.resources);
+                    ui_gpu::draw_research_tree_gpu(
+                        &mut gpu_renderer,
+                        game_state.width_i32,
+                        game_state.height_i32,
+                        &game_state.research_system,
+                        &visible,
+                        config.ui_scale_base,
+                        game_state.cursor_xy.x,
+                        game_state.cursor_xy.y,
+                    );
+                }
+                
+                // Рендеринг уведомлений
+                ui_gpu::draw_notifications_gpu(
+                    &mut gpu_renderer,
+                    game_state.width_i32,
+                    game_state.height_i32,
+                    &game_state.notification_system.notifications,
+                    config.ui_scale_base,
+                );
+                
                 let t = (game_state.world_clock_ms / game_loop::DAY_LENGTH_MS).clamp(0.0, 1.0);
                 let angle = t * std::f32::consts::TAU;
                 let daylight = 0.5 - 0.5 * angle.cos();

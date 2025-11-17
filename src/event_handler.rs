@@ -54,8 +54,13 @@ pub fn handle_keyboard_input(
     
     // Используем Command Pattern для обработки основных команд
     if let PhysicalKey::Code(key_code) = key {
-        // Escape: отменить выбор здания или выйти из игры
+        // Escape: отменить выбор здания, закрыть окно исследований или выйти из игры
         if key_code == KeyCode::Escape {
+            // Закрыть окно исследований, если оно открыто
+            if game_state.show_research_tree {
+                game_state.show_research_tree = false;
+                return true;
+            }
             // Если консоль закрыта и выбрано здание - отменяем выбор
             if !game_state.console.open && game_state.selected_building.is_some() {
                 game_state.selected_building = None;
@@ -64,6 +69,14 @@ pub fn handle_keyboard_input(
             // Иначе - выход из игры
             let exit_cmd = ExitCommand;
             return exit_cmd.execute(game_state, camera, elwt, input, config, gpu_renderer);
+        }
+        
+        // T: открыть/закрыть окно исследований (только если есть лаборатория)
+        if key_code == KeyCode::KeyT && !game_state.console.open {
+            if game_state.research_system.has_research_lab {
+                game_state.show_research_tree = !game_state.show_research_tree;
+                return true;
+            }
         }
         
         // Создаем менеджер команд с предустановленными командами
@@ -157,6 +170,45 @@ pub fn handle_mouse_input(
         if state == ElementState::Pressed {
             game_state.left_mouse_down = true;
             
+            // Обработка кликов в окне исследований
+            if game_state.show_research_tree {
+                // Рендерим окно исследований с обработкой кликов
+                let clicked_research = crate::ui_gpu::draw_research_tree_gpu(
+                    gpu_renderer,
+                    game_state.width_i32,
+                    game_state.height_i32,
+                    &game_state.research_system,
+                    &crate::types::total_resources(&game_state.warehouses, &game_state.resources),
+                    config.ui_scale_base,
+                    game_state.cursor_xy.x,
+                    game_state.cursor_xy.y,
+                );
+                
+                if let Some(research_kind) = clicked_research {
+                    let info = research_kind.info();
+                    let total_res = crate::types::total_resources(&game_state.warehouses, &game_state.resources);
+                    
+                    // Проверяем, хватает ли ресурсов
+                    let can_afford = total_res.wood >= info.cost.wood 
+                        && total_res.gold >= info.cost.gold
+                        && total_res.stone >= info.cost.stone;
+                    
+                    if can_afford {
+                        // Списываем ресурсы
+                        let _ = crate::types::spend_building_cost(
+                            &mut game_state.warehouses,
+                            &mut game_state.resources,
+                            &info.cost
+                        );
+                        
+                        // Начинаем исследование
+                        game_state.research_system.start_research(research_kind);
+                    }
+                }
+                
+                return true;
+            }
+            
             if game_state.road_mode {
                 if let Some(tp) = game_state.hovered_tile {
                     let on = !game_state.world.is_road(tp);
@@ -195,6 +247,8 @@ pub fn handle_mouse_input(
                     &mut game_state.path_sel_b,
                     &mut game_state.last_path,
                     &mut game_state.show_deposits,
+                    &mut game_state.research_system,
+                    &mut game_state.show_research_tree,
                 ) {
                     return true;
                 }

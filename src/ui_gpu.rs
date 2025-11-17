@@ -242,6 +242,14 @@ pub fn draw_ui_gpu(
     // Кнопка для депозитов ресурсов
     let deposits_w = (ui::button_w_for(b"Deposits", s) as f32).max(80.0);
     gpu.draw_button(current_x, tab_y, deposits_w, btn_h, b"Deposits", show_deposits, btn_scale);
+    current_x += deposits_w + 6.0 * scale;
+    
+    // Кнопка для открытия окна исследований (только если есть лаборатория)
+    let has_lab = buildings.iter().any(|b| b.kind == crate::types::BuildingKind::ResearchLab);
+    if has_lab {
+        let research_w = (ui::button_w_for(b"Research (T)", s) as f32).max(100.0);
+        gpu.draw_button(current_x, tab_y, research_w, btn_h, b"Research (T)", false, btn_scale);
+    }
     
     if ui_tab == UITab::Build {
         // Категории зданий (вторая строка)
@@ -255,6 +263,7 @@ pub fn draw_ui_gpu(
             (UICategory::Mining, b"Mining"),
             (UICategory::Food, b"Food"),
             (UICategory::Logistics, b"Logistics"),
+            (UICategory::Research, b"Research"),
         ];
         
         for (cat, label) in categories.iter() {
@@ -291,6 +300,7 @@ pub fn draw_ui_gpu(
                 (BuildingKind::Fishery, b"Fishery")
             ],
             UICategory::Logistics => &[],
+            UICategory::Research => &[(BuildingKind::ResearchLab, b"Research Lab")],
         };
         
         for (bk, label) in buildings_for_cat.iter() {
@@ -551,6 +561,7 @@ pub fn draw_building_tooltip(
         BuildingKind::Bakery => ("Bakery", "+ Bread", Some("- Flour, - Wood")),
         BuildingKind::Smelter => ("Smelter", "+ Iron Ingot", Some("- Iron Ore, - Wood")),
         BuildingKind::Fishery => ("Fishery", "+ Fish", None),
+        BuildingKind::ResearchLab => ("Research Lab", "Research", None),
     };
     
     // Вычисляем размер тултипа
@@ -876,5 +887,271 @@ pub fn draw_biome_debug_tooltip(
     
     // Позиция
     gpu.draw_text(tooltip_x + pad, text_y, pos_text.as_bytes(), [0.8, 0.8, 1.0, 1.0], scale);
+}
+
+/// Рисование окна дерева исследований
+pub fn draw_research_tree_gpu(
+    gpu: &mut GpuRenderer,
+    fw: i32,
+    fh: i32,
+    research_system: &crate::research::ResearchSystem,
+    _resources: &Resources,
+    base_scale_k: f32,
+    cursor_x: i32,
+    cursor_y: i32,
+) -> Option<crate::research::ResearchKind> {
+    use crate::research::{ResearchKind, ResearchStatus};
+    
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    
+    // Полупрозрачный фон на весь экран
+    gpu.add_ui_rect(0.0, 0.0, fw as f32, fh as f32, [0.0, 0.0, 0.0, 0.7]);
+    
+    // Окно дерева исследований (80% экрана по центру)
+    let window_w = (fw as f32 * 0.8).max(800.0);
+    let window_h = (fh as f32 * 0.8).max(600.0);
+    let window_x = (fw as f32 - window_w) / 2.0;
+    let window_y = (fh as f32 - window_h) / 2.0;
+    
+    // Фон окна
+    gpu.add_ui_rect(window_x, window_y, window_w, window_h, [0.1, 0.1, 0.15, 0.95]);
+    gpu.add_ui_rect(window_x + 2.0, window_y + 2.0, window_w - 4.0, window_h - 4.0, [0.15, 0.15, 0.2, 1.0]);
+    
+    let pad = (12 * s) as f32;
+    let title_height = (30 * s) as f32;
+    
+    // Заголовок
+    let title = if research_system.has_research_lab {
+        "RESEARCH TREE"
+    } else {
+        "BUILD A LABORATORY FOR RESEARCH"
+    };
+    gpu.draw_text(window_x + pad, window_y + pad, title.as_bytes(), [1.0, 1.0, 0.0, 1.0], scale * 1.5);
+    
+    // Подсказка (T или ESC для закрытия)
+    let hint = "Press T or ESC to close";
+    gpu.draw_text(window_x + window_w - pad - (hint.len() as f32 * 4.0 * scale), 
+                  window_y + pad, hint.as_bytes(), [0.7, 0.7, 0.7, 1.0], scale);
+    
+    if !research_system.has_research_lab {
+        return None;
+    }
+    
+    // Информация об активном исследовании
+    if let Some(ref active) = research_system.active_research {
+        let info = active.kind.info();
+        let progress_text = format!("Researching: {} ({} days left)", info.name, active.days_remaining);
+        gpu.draw_text(window_x + pad, window_y + title_height + pad, 
+                      progress_text.as_bytes(), [0.0, 1.0, 1.0, 1.0], scale);
+    } else {
+        let hint = "Select research to begin";
+        gpu.draw_text(window_x + pad, window_y + title_height + pad, 
+                      hint.as_bytes(), [0.7, 0.7, 0.7, 1.0], scale);
+    }
+    
+    // Дерево исследований
+    let tree_start_y = window_y + title_height + pad * 3.0;
+    let node_w = (120 * s) as f32;
+    let node_h = (80 * s) as f32;
+    let gap_x = (30 * s) as f32;
+    let gap_y = (40 * s) as f32;
+    
+    let mut clicked_research = None;
+    
+    for &research_kind in ResearchKind::all() {
+        let (col, row) = research_kind.tree_position();
+        let status = research_system.get_status(research_kind);
+        let info = research_kind.info();
+        
+        // Пропускаем завершенные базовые исследования (они не отображаются)
+        if status == ResearchStatus::Completed && info.days_required == 0 {
+            continue;
+        }
+        
+        let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
+        let node_y = tree_start_y + (row as f32) * (node_h + gap_y);
+        
+        // Проверка, находится ли курсор над узлом
+        let is_hovered = cursor_x >= node_x as i32 && cursor_x < (node_x + node_w) as i32
+            && cursor_y >= node_y as i32 && cursor_y < (node_y + node_h) as i32;
+        
+        // Цвет узла в зависимости от статуса
+        let (bg_color, border_color, text_color) = match status {
+            ResearchStatus::Locked => (
+                [0.2, 0.2, 0.2, 0.8],
+                [0.3, 0.3, 0.3, 1.0],
+                [0.5, 0.5, 0.5, 1.0],
+            ),
+            ResearchStatus::Available => (
+                [0.2, 0.3, 0.5, 0.9],
+                [0.3, 0.5, 0.8, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            ),
+            ResearchStatus::InProgress => (
+                [0.5, 0.4, 0.1, 0.9],
+                [0.8, 0.6, 0.1, 1.0],
+                [1.0, 1.0, 0.0, 1.0],
+            ),
+            ResearchStatus::Completed => (
+                [0.1, 0.5, 0.2, 0.9],
+                [0.2, 0.8, 0.3, 1.0],
+                [0.8, 1.0, 0.8, 1.0],
+            ),
+        };
+        
+        // Подсветка при наведении
+        let (bg_final, border_final) = if is_hovered && status == ResearchStatus::Available {
+            ([bg_color[0] + 0.1, bg_color[1] + 0.1, bg_color[2] + 0.1, bg_color[3]],
+             [border_color[0] + 0.2, border_color[1] + 0.2, border_color[2] + 0.2, border_color[3]])
+        } else {
+            (bg_color, border_color)
+        };
+        
+        // Рисуем узел
+        gpu.add_ui_rect(node_x, node_y, node_w, node_h, border_final);
+        gpu.add_ui_rect(node_x + 2.0, node_y + 2.0, node_w - 4.0, node_h - 4.0, bg_final);
+        
+        // Название (многострочное, если не помещается)
+        let name_lines = split_text(info.name, (node_w / (4.0 * scale)) as usize);
+        let mut text_y = node_y + pad / 2.0;
+        for line in name_lines.iter().take(2) {
+            gpu.draw_text(node_x + pad / 2.0, text_y, line.as_bytes(), text_color, scale * 0.9);
+            text_y += (6 * s) as f32;
+        }
+        
+        // Информация о стоимости и времени
+        if status != ResearchStatus::Completed {
+            let cost_text = format!("{}W {}G", info.cost.wood, info.cost.gold);
+            gpu.draw_text(node_x + pad / 2.0, node_y + node_h - (20 * s) as f32, 
+                          cost_text.as_bytes(), [0.8, 0.8, 0.0, 1.0], scale * 0.7);
+            
+            if info.days_required > 0 {
+                let time_text = format!("{}d", info.days_required);
+                gpu.draw_text(node_x + pad / 2.0, node_y + node_h - (10 * s) as f32, 
+                              time_text.as_bytes(), [0.6, 0.8, 1.0, 1.0], scale * 0.7);
+            }
+        } else {
+            gpu.draw_text(node_x + pad / 2.0, node_y + node_h - (12 * s) as f32, 
+                          "ГОТОВО".as_bytes(), [0.0, 1.0, 0.0, 1.0], scale * 0.8);
+        }
+        
+        // Проверка клика
+        if is_hovered && status == ResearchStatus::Available {
+            clicked_research = Some(research_kind);
+        }
+        
+        // Рисуем линии связи к пререквизитам
+        for &prereq in info.prerequisites {
+            let (prereq_col, prereq_row) = prereq.tree_position();
+            let prereq_x = window_x + pad + (prereq_col as f32) * (node_w + gap_x) + node_w / 2.0;
+            let prereq_y = tree_start_y + (prereq_row as f32) * (node_h + gap_y) + node_h;
+            let current_x = node_x + node_w / 2.0;
+            let current_y = node_y;
+            
+            // Простая линия (можно улучшить)
+            let line_color = if research_system.get_status(prereq) == ResearchStatus::Completed {
+                [0.2, 0.8, 0.3, 0.6]
+            } else {
+                [0.3, 0.3, 0.3, 0.4]
+            };
+            
+            // Вертикальная линия от пререквизита
+            let mid_y = (prereq_y + current_y) / 2.0;
+            gpu.add_ui_rect(prereq_x - 1.0, prereq_y, 2.0, mid_y - prereq_y, line_color);
+            // Горизонтальная линия
+            let h_width = (current_x - prereq_x).abs();
+            let h_x = prereq_x.min(current_x);
+            gpu.add_ui_rect(h_x, mid_y - 1.0, h_width, 2.0, line_color);
+            // Вертикальная линия к текущему
+            gpu.add_ui_rect(current_x - 1.0, mid_y, 2.0, current_y - mid_y, line_color);
+        }
+    }
+    
+    clicked_research
+}
+
+/// Разделить текст на строки по максимальной ширине
+fn split_text(text: &str, max_width: usize) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    
+    for word in words {
+        if current_line.is_empty() {
+            current_line = word.to_string();
+        } else {
+            let test_line = format!("{} {}", current_line, word);
+            if test_line.len() <= max_width {
+                current_line = test_line;
+            } else {
+                lines.push(current_line);
+                current_line = word.to_string();
+            }
+        }
+    }
+    
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    
+    if lines.is_empty() {
+        lines.push(text.to_string());
+    }
+    
+    lines
+}
+
+/// Рисование уведомлений
+pub fn draw_notifications_gpu(
+    gpu: &mut GpuRenderer,
+    fw: i32,
+    fh: i32,
+    notifications: &[crate::notifications::Notification],
+    base_scale_k: f32,
+) {
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    
+    let pad = (8 * s) as f32;
+    let notification_h = (40 * s) as f32;
+    let notification_w = (400 * s) as f32;
+    let gap = (8 * s) as f32;
+    
+    // Уведомления отображаются в верхнем правом углу
+    let mut y = pad;
+    
+    for notification in notifications.iter().take(5) {
+        let alpha = notification.alpha();
+        let text = notification.text();
+        
+        // Цвет фона в зависимости от типа уведомления
+        let bg_color = match &notification.kind {
+            crate::notifications::NotificationKind::ResearchCompleted { .. } => {
+                [0.1, 0.5, 0.8, 0.9 * alpha]
+            }
+            crate::notifications::NotificationKind::BuildingUnlocked { .. } => {
+                [0.1, 0.7, 0.3, 0.9 * alpha]
+            }
+            crate::notifications::NotificationKind::Warning { .. } => {
+                [0.8, 0.5, 0.1, 0.9 * alpha]
+            }
+            crate::notifications::NotificationKind::Info { .. } => {
+                [0.3, 0.3, 0.3, 0.9 * alpha]
+            }
+        };
+        
+        let x = fw as f32 - notification_w - pad;
+        
+        // Фон уведомления
+        gpu.add_ui_rect(x, y, notification_w, notification_h, [0.0, 0.0, 0.0, 0.8 * alpha]);
+        gpu.add_ui_rect(x + 2.0, y + 2.0, notification_w - 4.0, notification_h - 4.0, bg_color);
+        
+        // Текст уведомления
+        let text_color = [1.0, 1.0, 1.0, alpha];
+        gpu.draw_text(x + pad, y + pad, text.as_bytes(), text_color, scale);
+        
+        y += notification_h + gap;
+    }
 }
 

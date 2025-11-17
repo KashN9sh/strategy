@@ -2707,6 +2707,7 @@ impl GpuRenderer {
                         BuildingKind::Fishery => 10,
                         BuildingKind::IronMine => 11,
                         BuildingKind::Smelter => 12,
+                        BuildingKind::ResearchLab => 13,
                     };
                     
                     // Подсветка здания при наведении
@@ -2900,6 +2901,7 @@ impl GpuRenderer {
             BuildingKind::Fishery => 10,
             BuildingKind::IronMine => 11,
             BuildingKind::Smelter => 12,
+            BuildingKind::ResearchLab => 13,
         };
         
         // Цвет предпросмотра: зеленоватый если можно построить, красноватый если нельзя
@@ -3157,6 +3159,7 @@ impl GpuRenderer {
                     crate::types::BuildingKind::Bakery => [0.9, 0.7, 0.4, 1.0], // светло-коричневый
                     crate::types::BuildingKind::Smelter => [0.4, 0.4, 0.6, 1.0], // сине-серый
                     crate::types::BuildingKind::Fishery => [0.2, 0.6, 0.8, 1.0], // голубой
+                    crate::types::BuildingKind::ResearchLab => [0.4, 0.4, 1.0, 1.0], // синий
                 };
                 
                 // Поворачиваем относительно центра миникарты

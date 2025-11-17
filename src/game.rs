@@ -36,6 +36,7 @@ pub fn simulate(
             BuildingKind::Fishery => {}
             BuildingKind::IronMine => {}
             BuildingKind::Smelter => {}
+            BuildingKind::ResearchLab => {}
         }
         // при желании можно применить biome_mod к таймерам производства (пока заглушка)
         let _ = biome_mod;
@@ -54,7 +55,7 @@ pub fn production_weather_wmul(weather: crate::types::WeatherKind, building: Bui
             WheatField => 1.10,       // поле страдает от дождя
             Lumberjack | StoneQuarry | ClayPit | IronMine => 1.05,
             Forester => 1.00,         // лесник почти без изменений
-            Mill | Bakery | Kiln | Smelter | House | Warehouse => 1.00,
+            Mill | Bakery | Kiln | Smelter | House | Warehouse | ResearchLab => 1.00,
         },
         Fog => match building {
             Forester => 1.02,         // туман мешает меньше
@@ -65,7 +66,7 @@ pub fn production_weather_wmul(weather: crate::types::WeatherKind, building: Bui
             Fishery => 1.10,
             Forester => 1.15,
             Lumberjack | StoneQuarry | ClayPit | IronMine => 1.15,
-            Mill | Bakery | Kiln | Smelter | House | Warehouse => 1.10,
+            Mill | Bakery | Kiln | Smelter | House | Warehouse | ResearchLab => 1.10,
         },
     }
 }
@@ -144,6 +145,7 @@ pub fn economy_new_day(citizens: &mut Vec<Citizen>, resources: &mut Resources, w
             Kiln => cfg.upkeep_kiln,
             Fishery => cfg.upkeep_fishery,
             Smelter => cfg.upkeep_smelter,
+            ResearchLab => 10, // Небольшое содержание для лаборатории
         };
         upkeep += u;
     }
