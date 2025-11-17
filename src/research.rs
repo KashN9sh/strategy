@@ -64,24 +64,24 @@ impl ResearchKind {
     pub fn info(self) -> ResearchInfo {
         match self {
             ResearchKind::BasicHousing => ResearchInfo {
-                name: "Базовое жильё",
-                description: "Разблокирует строительство домов для жителей",
+                name: "Basic Housing",
+                description: "Unlocks construction of houses for citizens",
                 days_required: 0,
                 cost: Resources::default(),
                 prerequisites: &[],
                 unlocks_buildings: &[BuildingKind::House],
             },
             ResearchKind::BasicStorage => ResearchInfo {
-                name: "Базовое хранилище",
-                description: "Разблокирует строительство складов",
+                name: "Basic Storage",
+                description: "Unlocks construction of warehouses",
                 days_required: 0,
                 cost: Resources::default(),
                 prerequisites: &[],
                 unlocks_buildings: &[BuildingKind::Warehouse],
             },
             ResearchKind::BasicForestry => ResearchInfo {
-                name: "Базовое лесничество",
-                description: "Разблокирует лесорубов и лесничих",
+                name: "Basic Forestry",
+                description: "Unlocks lumberjacks and foresters",
                 days_required: 0,
                 cost: Resources::default(),
                 prerequisites: &[],
@@ -89,32 +89,32 @@ impl ResearchKind {
             },
             
             ResearchKind::AdvancedHousing => ResearchInfo {
-                name: "Улучшенное жильё",
-                description: "Улучшенные дома с большей вместимостью",
+                name: "Advanced Housing",
+                description: "Improved houses with greater capacity",
                 days_required: 3,
                 cost: Resources { wood: 50, gold: 100, ..Default::default() },
                 prerequisites: &[ResearchKind::BasicHousing],
                 unlocks_buildings: &[],
             },
             ResearchKind::StoneWorking => ResearchInfo {
-                name: "Обработка камня",
-                description: "Разблокирует каменоломню и глиняный карьер",
+                name: "Stone Working",
+                description: "Unlocks quarry and clay pit",
                 days_required: 5,
                 cost: Resources { wood: 100, gold: 150, ..Default::default() },
                 prerequisites: &[ResearchKind::BasicForestry],
                 unlocks_buildings: &[BuildingKind::StoneQuarry, BuildingKind::ClayPit],
             },
             ResearchKind::BasicFarming => ResearchInfo {
-                name: "Базовое земледелие",
-                description: "Разблокирует пшеничные поля",
+                name: "Basic Farming",
+                description: "Unlocks wheat fields",
                 days_required: 4,
                 cost: Resources { wood: 80, gold: 120, ..Default::default() },
                 prerequisites: &[ResearchKind::BasicForestry],
                 unlocks_buildings: &[BuildingKind::WheatField],
             },
             ResearchKind::BasicFishing => ResearchInfo {
-                name: "Базовая рыбалка",
-                description: "Разблокирует рыбацкую хижину",
+                name: "Basic Fishing",
+                description: "Unlocks fishing hut",
                 days_required: 3,
                 cost: Resources { wood: 60, gold: 80, ..Default::default() },
                 prerequisites: &[ResearchKind::BasicForestry],
@@ -122,24 +122,24 @@ impl ResearchKind {
             },
             
             ResearchKind::Brickmaking => ResearchInfo {
-                name: "Производство кирпича",
-                description: "Разблокирует печь для обжига кирпичей",
+                name: "Brickmaking",
+                description: "Unlocks kiln for brick production",
                 days_required: 6,
                 cost: Resources { wood: 150, gold: 200, stone: 50, clay: 50, ..Default::default() },
                 prerequisites: &[ResearchKind::StoneWorking],
                 unlocks_buildings: &[BuildingKind::Kiln],
             },
             ResearchKind::FoodProcessing => ResearchInfo {
-                name: "Переработка пищи",
-                description: "Разблокирует мельницу и пекарню",
+                name: "Food Processing",
+                description: "Unlocks mill and bakery",
                 days_required: 7,
                 cost: Resources { wood: 180, gold: 250, stone: 30, ..Default::default() },
                 prerequisites: &[ResearchKind::BasicFarming],
                 unlocks_buildings: &[BuildingKind::Mill, BuildingKind::Bakery],
             },
             ResearchKind::Mining => ResearchInfo {
-                name: "Горное дело",
-                description: "Разблокирует железную шахту",
+                name: "Mining",
+                description: "Unlocks iron mine",
                 days_required: 8,
                 cost: Resources { wood: 200, gold: 300, stone: 100, ..Default::default() },
                 prerequisites: &[ResearchKind::StoneWorking],
@@ -147,24 +147,24 @@ impl ResearchKind {
             },
             
             ResearchKind::Metallurgy => ResearchInfo {
-                name: "Металлургия",
-                description: "Разблокирует плавильню для производства слитков",
+                name: "Metallurgy",
+                description: "Unlocks smelter for ingot production",
                 days_required: 10,
                 cost: Resources { wood: 250, gold: 400, stone: 150, bricks: 50, ..Default::default() },
                 prerequisites: &[ResearchKind::Mining, ResearchKind::Brickmaking],
                 unlocks_buildings: &[BuildingKind::Smelter],
             },
             ResearchKind::AdvancedFarming => ResearchInfo {
-                name: "Продвинутое земледелие",
-                description: "Улучшенные методы ведения сельского хозяйства",
+                name: "Advanced Farming",
+                description: "Improved farming methods",
                 days_required: 12,
                 cost: Resources { wood: 300, gold: 500, ..Default::default() },
                 prerequisites: &[ResearchKind::FoodProcessing],
                 unlocks_buildings: &[],
             },
             ResearchKind::AdvancedMining => ResearchInfo {
-                name: "Продвинутое горное дело",
-                description: "Улучшенные методы добычи руды",
+                name: "Advanced Mining",
+                description: "Improved mining methods",
                 days_required: 12,
                 cost: Resources { wood: 300, gold: 500, iron_ingots: 20, ..Default::default() },
                 prerequisites: &[ResearchKind::Metallurgy],
@@ -245,11 +245,16 @@ impl ResearchSystem {
             researches.push(Research { kind, status });
         }
         
-        Self {
+        let mut system = Self {
             researches,
             active_research: None,
             has_research_lab: false,
-        }
+        };
+        
+        // Обновляем статусы, чтобы разблокировать доступные исследования
+        system.update_statuses();
+        
+        system
     }
     
     /// Обновить статусы исследований на основе завершённых

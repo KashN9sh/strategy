@@ -157,6 +157,18 @@ impl DeveloperConsole {
                     self.log.push("ERR: usage weather <clear|rain|fog|snow>".to_string());
                 }
             }
+            "wood" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.wood = resources.wood.saturating_add(delta);
+                        self.log.push(format!("OK: wood += {} -> {}", delta, resources.wood));
+                    } else {
+                        self.log.push("ERR: usage wood <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage wood <±N>".to_string());
+                }
+            }
             "gold" => {
                 if let Some(arg) = parts.next() {
                     if let Ok(delta) = arg.parse::<i32>() {
@@ -169,12 +181,132 @@ impl DeveloperConsole {
                     self.log.push("ERR: usage gold <±N>".to_string());
                 }
             }
+            "stone" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.stone = resources.stone.saturating_add(delta);
+                        self.log.push(format!("OK: stone += {} -> {}", delta, resources.stone));
+                    } else {
+                        self.log.push("ERR: usage stone <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage stone <±N>".to_string());
+                }
+            }
+            "clay" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.clay = resources.clay.saturating_add(delta);
+                        self.log.push(format!("OK: clay += {} -> {}", delta, resources.clay));
+                    } else {
+                        self.log.push("ERR: usage clay <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage clay <±N>".to_string());
+                }
+            }
+            "bricks" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.bricks = resources.bricks.saturating_add(delta);
+                        self.log.push(format!("OK: bricks += {} -> {}", delta, resources.bricks));
+                    } else {
+                        self.log.push("ERR: usage bricks <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage bricks <±N>".to_string());
+                }
+            }
+            "wheat" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.wheat = resources.wheat.saturating_add(delta);
+                        self.log.push(format!("OK: wheat += {} -> {}", delta, resources.wheat));
+                    } else {
+                        self.log.push("ERR: usage wheat <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage wheat <±N>".to_string());
+                }
+            }
+            "flour" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.flour = resources.flour.saturating_add(delta);
+                        self.log.push(format!("OK: flour += {} -> {}", delta, resources.flour));
+                    } else {
+                        self.log.push("ERR: usage flour <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage flour <±N>".to_string());
+                }
+            }
+            "bread" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.bread = resources.bread.saturating_add(delta);
+                        self.log.push(format!("OK: bread += {} -> {}", delta, resources.bread));
+                    } else {
+                        self.log.push("ERR: usage bread <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage bread <±N>".to_string());
+                }
+            }
+            "fish" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.fish = resources.fish.saturating_add(delta);
+                        self.log.push(format!("OK: fish += {} -> {}", delta, resources.fish));
+                    } else {
+                        self.log.push("ERR: usage fish <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage fish <±N>".to_string());
+                }
+            }
+            "iron_ore" | "ironore" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.iron_ore = resources.iron_ore.saturating_add(delta);
+                        self.log.push(format!("OK: iron_ore += {} -> {}", delta, resources.iron_ore));
+                    } else {
+                        self.log.push("ERR: usage iron_ore <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage iron_ore <±N>".to_string());
+                }
+            }
+            "iron_ingots" | "ironingots" | "iron" => {
+                if let Some(arg) = parts.next() {
+                    if let Ok(delta) = arg.parse::<i32>() {
+                        resources.iron_ingots = resources.iron_ingots.saturating_add(delta);
+                        self.log.push(format!("OK: iron_ingots += {} -> {}", delta, resources.iron_ingots));
+                    } else {
+                        self.log.push("ERR: usage iron_ingots <±N>".to_string());
+                    }
+                } else {
+                    self.log.push("ERR: usage iron_ingots <±N>".to_string());
+                }
+            }
             "set" => {
                 let Some(what) = parts.next() else {
-                    self.log.push("ERR: usage set gold <N>".to_string());
+                    self.log.push("ERR: usage set <resource> <N>".to_string());
                     return;
                 };
                 match what.to_ascii_lowercase().as_str() {
+                    "wood" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.wood = val;
+                                self.log.push(format!("OK: wood = {}", resources.wood));
+                            } else {
+                                self.log.push("ERR: usage set wood <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set wood <N>".to_string());
+                        }
+                    }
                     "gold" => {
                         if let Some(arg) = parts.next() {
                             if let Ok(val) = arg.parse::<i32>() {
@@ -187,7 +319,115 @@ impl DeveloperConsole {
                             self.log.push("ERR: usage set gold <N>".to_string());
                         }
                     }
-                    _ => self.log.push("ERR: unknown 'set' target".to_string()),
+                    "stone" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.stone = val;
+                                self.log.push(format!("OK: stone = {}", resources.stone));
+                            } else {
+                                self.log.push("ERR: usage set stone <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set stone <N>".to_string());
+                        }
+                    }
+                    "clay" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.clay = val;
+                                self.log.push(format!("OK: clay = {}", resources.clay));
+                            } else {
+                                self.log.push("ERR: usage set clay <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set clay <N>".to_string());
+                        }
+                    }
+                    "bricks" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.bricks = val;
+                                self.log.push(format!("OK: bricks = {}", resources.bricks));
+                            } else {
+                                self.log.push("ERR: usage set bricks <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set bricks <N>".to_string());
+                        }
+                    }
+                    "wheat" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.wheat = val;
+                                self.log.push(format!("OK: wheat = {}", resources.wheat));
+                            } else {
+                                self.log.push("ERR: usage set wheat <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set wheat <N>".to_string());
+                        }
+                    }
+                    "flour" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.flour = val;
+                                self.log.push(format!("OK: flour = {}", resources.flour));
+                            } else {
+                                self.log.push("ERR: usage set flour <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set flour <N>".to_string());
+                        }
+                    }
+                    "bread" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.bread = val;
+                                self.log.push(format!("OK: bread = {}", resources.bread));
+                            } else {
+                                self.log.push("ERR: usage set bread <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set bread <N>".to_string());
+                        }
+                    }
+                    "fish" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.fish = val;
+                                self.log.push(format!("OK: fish = {}", resources.fish));
+                            } else {
+                                self.log.push("ERR: usage set fish <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set fish <N>".to_string());
+                        }
+                    }
+                    "iron_ore" | "ironore" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.iron_ore = val;
+                                self.log.push(format!("OK: iron_ore = {}", resources.iron_ore));
+                            } else {
+                                self.log.push("ERR: usage set iron_ore <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set iron_ore <N>".to_string());
+                        }
+                    }
+                    "iron_ingots" | "ironingots" | "iron" => {
+                        if let Some(arg) = parts.next() {
+                            if let Ok(val) = arg.parse::<i32>() {
+                                resources.iron_ingots = val;
+                                self.log.push(format!("OK: iron_ingots = {}", resources.iron_ingots));
+                            } else {
+                                self.log.push("ERR: usage set iron_ingots <N>".to_string());
+                            }
+                        } else {
+                            self.log.push("ERR: usage set iron_ingots <N>".to_string());
+                        }
+                    }
+                    _ => self.log.push("ERR: unknown resource. Available: wood, gold, stone, clay, bricks, wheat, flour, bread, fish, iron_ore, iron_ingots".to_string()),
                 }
             }
             "time" => {

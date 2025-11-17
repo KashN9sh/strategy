@@ -630,4 +630,90 @@ pub fn get_hovered_resource(
     None
 }
 
+/// Обработка кликов в окне дерева исследований
+/// Возвращает true если нужно закрыть окно
+pub fn handle_research_tree_click(
+    cursor_xy: IVec2,
+    fw: i32,
+    fh: i32,
+    base_scale_k: f32,
+    research_system: &mut crate::research::ResearchSystem,
+    warehouses: &mut Vec<crate::types::WarehouseStore>,
+    resources: &mut crate::types::Resources,
+    scroll_offset: f32,
+) -> bool {
+    use crate::research::{ResearchKind, ResearchStatus};
+    use crate::types;
+    
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    
+    // Размеры окна (те же, что в draw_research_tree_gpu)
+    let window_w = (fw as f32 * 0.9).max(900.0);
+    let window_h = (fh as f32 * 0.85).max(650.0);
+    let window_x = (fw as f32 - window_w) / 2.0;
+    let window_y = (fh as f32 - window_h) / 2.0;
+    
+    let pad = (16 * s) as f32;
+    
+    // Проверка клика на кнопку закрытия (крестик)
+    let close_btn_size = (20 * s) as f32;
+    let close_btn_x = window_x + window_w - pad - close_btn_size;
+    let close_btn_y = window_y + pad;
+    
+    if ui::point_in_rect(
+        cursor_xy.x, cursor_xy.y,
+        close_btn_x as i32, close_btn_y as i32,
+        close_btn_size as i32, close_btn_size as i32
+    ) {
+        return true; // Закрыть окно
+    }
+    let title_height = (24 * s) as f32;
+    let info_y = window_y + pad + title_height + 8.0;
+    let tree_start_y = info_y + (20 * s) as f32;
+    
+    let node_w = (110 * s) as f32; // Уменьшенный размер
+    let node_h = (60 * s) as f32;  // Уменьшенный размер
+    let gap_x = (20 * s) as f32;
+    let gap_y = (35 * s) as f32;
+    
+    // Проверяем клики по узлам
+    for &research_kind in ResearchKind::all() {
+        let (col, row) = research_kind.tree_position();
+        let status = research_system.get_status(research_kind);
+        let info = research_kind.info();
+        
+        // Пропускаем завершенные базовые исследования
+        if status == ResearchStatus::Completed && info.days_required == 0 {
+            continue;
+        }
+        
+        let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
+        let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
+        
+        // Проверка клика
+        if ui::point_in_rect(
+            cursor_xy.x, cursor_xy.y,
+            node_x as i32, node_y as i32,
+            node_w as i32, node_h as i32
+        ) && status == ResearchStatus::Available {
+            // Проверяем ресурсы
+            let total_res = types::total_resources(warehouses, resources);
+            let can_afford = total_res.wood >= info.cost.wood 
+                && total_res.gold >= info.cost.gold
+                && total_res.stone >= info.cost.stone;
+            
+            if can_afford {
+                // Списываем ресурсы
+                let _ = types::spend_building_cost(warehouses, resources, &info.cost);
+                // Начинаем исследование
+                research_system.start_research(research_kind);
+            }
+            
+            return true;
+        }
+    }
+    
+    false
+}
 

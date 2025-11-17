@@ -60,6 +60,7 @@ pub struct GameState {
     pub cursor_xy: IVec2,
     pub active_building_panel: Option<IVec2>,
     pub show_research_tree: bool,  // Показать окно дерева исследований
+    pub research_tree_scroll: f32, // Позиция скролла для дерева исследований
     
     // === Дороги ===
     pub road_mode: bool,
@@ -172,6 +173,7 @@ impl GameState {
             cursor_xy: IVec2::new(0, 0),
             active_building_panel: None,
             show_research_tree: false,
+            research_tree_scroll: 0.0,
             
             // Дороги
             road_mode: false,

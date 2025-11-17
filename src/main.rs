@@ -117,7 +117,7 @@ fn run() -> Result<()> {
                     event_handler::handle_resize(new_size, &mut game_state, &mut gpu_renderer);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    event_handler::handle_mouse_wheel(delta, &mut camera);
+                    event_handler::handle_mouse_wheel(delta, &mut camera, &mut game_state);
                 }
                 WindowEvent::RedrawRequested => {
                     if MINIMAP_CELL_PX.load(Ordering::Relaxed) == 0 {
@@ -260,6 +260,7 @@ fn run() -> Result<()> {
                         config.ui_scale_base,
                         game_state.cursor_xy.x,
                         game_state.cursor_xy.y,
+                        game_state.research_tree_scroll,
                     );
                 }
                 

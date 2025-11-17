@@ -75,6 +75,10 @@ pub fn handle_keyboard_input(
         if key_code == KeyCode::KeyT && !game_state.console.open {
             if game_state.research_system.has_research_lab {
                 game_state.show_research_tree = !game_state.show_research_tree;
+                // Сбрасываем скролл при открытии
+                if game_state.show_research_tree {
+                    game_state.research_tree_scroll = 0.0;
+                }
                 return true;
             }
         }
@@ -172,41 +176,24 @@ pub fn handle_mouse_input(
             
             // Обработка кликов в окне исследований
             if game_state.show_research_tree {
-                // Рендерим окно исследований с обработкой кликов
-                let clicked_research = crate::ui_gpu::draw_research_tree_gpu(
-                    gpu_renderer,
+                // Обрабатываем клики в дереве исследований
+                // Функция возвращает true если нужно закрыть окно (клик на крестик)
+                let should_close = crate::ui_interaction::handle_research_tree_click(
+                    game_state.cursor_xy,
                     game_state.width_i32,
                     game_state.height_i32,
-                    &game_state.research_system,
-                    &crate::types::total_resources(&game_state.warehouses, &game_state.resources),
                     config.ui_scale_base,
-                    game_state.cursor_xy.x,
-                    game_state.cursor_xy.y,
+                    &mut game_state.research_system,
+                    &mut game_state.warehouses,
+                    &mut game_state.resources,
+                    game_state.research_tree_scroll,
                 );
                 
-                if let Some(research_kind) = clicked_research {
-                    let info = research_kind.info();
-                    let total_res = crate::types::total_resources(&game_state.warehouses, &game_state.resources);
-                    
-                    // Проверяем, хватает ли ресурсов
-                    let can_afford = total_res.wood >= info.cost.wood 
-                        && total_res.gold >= info.cost.gold
-                        && total_res.stone >= info.cost.stone;
-                    
-                    if can_afford {
-                        // Списываем ресурсы
-                        let _ = crate::types::spend_building_cost(
-                            &mut game_state.warehouses,
-                            &mut game_state.resources,
-                            &info.cost
-                        );
-                        
-                        // Начинаем исследование
-                        game_state.research_system.start_research(research_kind);
-                    }
+                if should_close {
+                    game_state.show_research_tree = false;
                 }
                 
-                return true;
+                return true; // Поглощаем клик, если он в окне исследований
             }
             
             if game_state.road_mode {
@@ -311,12 +298,38 @@ pub fn handle_mouse_input(
 pub fn handle_mouse_wheel(
     delta: MouseScrollDelta,
     camera: &mut Camera,
+    game_state: &mut GameState,
 ) {
-    let factor = match delta {
-        MouseScrollDelta::LineDelta(_, y) => if y > 0.0 { 1.1 } else { 0.9 },
-        MouseScrollDelta::PixelDelta(p) => if p.y > 0.0 { 1.1 } else { 0.9 },
-    };
-    camera.zoom_by_factor(factor, 0.5, 8.0);
+    // Если открыто окно исследований, скроллим его
+    if game_state.show_research_tree {
+        let scroll_amount = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y * 30.0,
+            MouseScrollDelta::PixelDelta(p) => p.y as f32,
+        };
+        
+        game_state.research_tree_scroll = (game_state.research_tree_scroll - scroll_amount).max(0.0);
+        
+        // Вычисляем максимальный скролл (это должно соответствовать логике в draw_research_tree_gpu)
+        // Примерная максимальная высота дерева: 5 рядов * (60 + 35) = 475
+        // Доступная высота примерно 85% от высоты окна минус отступы
+        let window_h = (game_state.height_i32 as f32 * 0.85).max(650.0);
+        let s = crate::ui::ui_scale(game_state.height_i32, 1.0);
+        let node_h = (60 * s) as f32;
+        let gap_y = (35 * s) as f32;
+        let max_row = 4; // Максимальный ряд в дереве
+        let total_tree_height = (max_row as f32 + 1.0) * (node_h + gap_y);
+        let tree_area_height = window_h * 0.6; // Примерно
+        let max_scroll = (total_tree_height - tree_area_height).max(0.0);
+        
+        game_state.research_tree_scroll = game_state.research_tree_scroll.min(max_scroll);
+    } else {
+        // Иначе зумируем камеру
+        let factor = match delta {
+            MouseScrollDelta::LineDelta(_, y) => if y > 0.0 { 1.1 } else { 0.9 },
+            MouseScrollDelta::PixelDelta(p) => if p.y > 0.0 { 1.1 } else { 0.9 },
+        };
+        camera.zoom_by_factor(factor, 0.5, 8.0);
+    }
 }
 
 /// Обработать изменение размера окна
