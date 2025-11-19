@@ -667,14 +667,20 @@ pub fn handle_research_tree_click(
     ) {
         return true; // Закрыть окно
     }
-    let title_height = (24 * s) as f32;
-    let info_y = window_y + pad + title_height + 8.0;
-    let tree_start_y = info_y + (20 * s) as f32;
+    let title_height = (28 * s) as f32; // Обновлено под новую высоту заголовка
+    let info_y = window_y + pad + title_height + pad + 12.0;
+    let tree_start_y = info_y + (40 * s) as f32;
     
-    let node_w = (130 * s) as f32; // Ширина узла
-    let node_h = (70 * s) as f32;  // Высота узла
-    let gap_x = (30 * s) as f32;   // Горизонтальный отступ
-    let gap_y = (40 * s) as f32;   // Вертикальный отступ
+    let node_w = (140 * s) as f32; // Ширина узла
+    let node_h = (80 * s) as f32;  // Высота узла
+    let gap_x = (35 * s) as f32;   // Горизонтальный отступ
+    let gap_y = (45 * s) as f32;   // Вертикальный отступ
+    
+    // Вычисляем центрирование дерева (как в ui_gpu.rs)
+    let tree_cols = 4;
+    let total_tree_width = (tree_cols as f32 * node_w) + ((tree_cols - 1) as f32 * gap_x);
+    let tree_left_margin = ((window_w - pad * 2.0) - total_tree_width) / 2.0;
+    let tree_area_left = window_x + pad + tree_left_margin.max(0.0);
     
     // Проверяем клики по узлам
     for &research_kind in ResearchKind::all() {
@@ -687,7 +693,7 @@ pub fn handle_research_tree_click(
             continue;
         }
         
-        let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
+        let node_x = tree_area_left + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
         
         // Проверка клика

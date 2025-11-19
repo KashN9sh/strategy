@@ -312,11 +312,18 @@ pub fn handle_mouse_wheel(
         // Вычисляем максимальный скролл (это должно соответствовать логике в draw_research_tree_gpu)
         let window_h = (game_state.height_i32 as f32 * 0.85).max(650.0);
         let s = crate::ui::ui_scale(game_state.height_i32, 1.0);
-        let node_h = (70 * s) as f32;
-        let gap_y = (40 * s) as f32;
+        let pad = (16 * s) as f32;
+        let node_h = (80 * s) as f32;
+        let gap_y = (45 * s) as f32;
         let max_row = 4; // Максимальный ряд в дереве
         let total_tree_height = (max_row as f32 + 1.0) * (node_h + gap_y);
-        let tree_area_height = window_h * 0.6; // Примерно
+        
+        // Вычисляем высоту области дерева
+        let title_height = (28 * s) as f32;
+        let info_y = pad + title_height + pad + 12.0;
+        let tree_start_y = info_y + (40 * s) as f32;
+        let tree_area_height = window_h - tree_start_y - pad * 2.0;
+        
         let max_scroll = (total_tree_height - tree_area_height).max(0.0);
         
         game_state.research_tree_scroll = game_state.research_tree_scroll.min(max_scroll);

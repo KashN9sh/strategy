@@ -915,12 +915,25 @@ pub fn draw_research_tree_gpu(
     let window_x = (fw as f32 - window_w) / 2.0;
     let window_y = (fh as f32 - window_h) / 2.0;
     
-    // Фон окна с красивой рамкой
-    gpu.add_ui_rect(window_x, window_y, window_w, window_h, [0.15, 0.2, 0.3, 0.98]);
-    gpu.add_ui_rect(window_x + 3.0, window_y + 3.0, window_w - 6.0, window_h - 6.0, [0.08, 0.1, 0.15, 1.0]);
+    // Тень окна для глубины
+    let shadow_offset = 8.0;
+    gpu.add_ui_rect(window_x + shadow_offset, window_y + shadow_offset, window_w, window_h, [0.0, 0.0, 0.0, 0.5]);
+    
+    // Фон окна с двойной рамкой
+    gpu.add_ui_rect(window_x, window_y, window_w, window_h, [0.2, 0.3, 0.45, 0.98]);
+    gpu.add_ui_rect(window_x + 4.0, window_y + 4.0, window_w - 8.0, window_h - 8.0, [0.15, 0.2, 0.3, 1.0]);
+    gpu.add_ui_rect(window_x + 6.0, window_y + 6.0, window_w - 12.0, window_h - 12.0, [0.08, 0.1, 0.15, 1.0]);
     
     let pad = (16 * s) as f32;
-    let title_height = (24 * s) as f32;
+    let title_height = (28 * s) as f32;
+    
+    // Полоса заголовка с градиентом
+    let header_h = title_height + pad * 2.0;
+    gpu.add_ui_rect(window_x + 6.0, window_y + 6.0, window_w - 12.0, header_h, [0.12, 0.18, 0.28, 1.0]);
+    gpu.add_ui_rect(window_x + 6.0, window_y + 6.0, window_w - 12.0, header_h * 0.5, [0.15, 0.22, 0.35, 0.8]);
+    
+    // Разделитель под заголовком
+    gpu.add_ui_rect(window_x + pad, window_y + header_h + 6.0, window_w - pad * 2.0, 2.0, [0.3, 0.5, 0.7, 0.6]);
     
     // Заголовок
     let title = if research_system.has_research_lab {
@@ -928,7 +941,17 @@ pub fn draw_research_tree_gpu(
     } else {
         "BUILD A LABORATORY FOR RESEARCH"
     };
-    gpu.draw_text(window_x + pad, window_y + pad, title.as_bytes(), [1.0, 0.9, 0.2, 1.0], scale * 1.8);
+    
+    // Декоративные элементы по бокам заголовка
+    let deco_w = 8.0;
+    let deco_h = title_height * 0.6;
+    let deco_y = window_y + pad + title_height * 0.2;
+    gpu.add_ui_rect(window_x + pad - deco_w - 4.0, deco_y, deco_w, deco_h, [0.4, 0.7, 1.0, 0.8]);
+    
+    gpu.draw_text(window_x + pad, window_y + pad, title.as_bytes(), [0.95, 0.95, 0.5, 1.0], scale * 1.8);
+    
+    // Подсветка заголовка
+    gpu.draw_text(window_x + pad - 1.0, window_y + pad - 1.0, title.as_bytes(), [1.0, 1.0, 0.8, 0.3], scale * 1.8);
     
     // Кнопка закрытия (крестик) в правом верхнем углу
     let close_btn_size = (20 * s) as f32;
@@ -950,56 +973,86 @@ pub fn draw_research_tree_gpu(
         return None;
     }
     
-    // Информация об активном исследовании с красивым фоном
-    let info_y = window_y + pad + title_height + 8.0;
+    // Информация об активном исследовании с улучшенным дизайном
+    let info_y = window_y + pad + title_height + pad + 12.0;
     if let Some(ref active) = research_system.active_research {
         let info = active.kind.info();
-        let progress_text = format!("RESEARCHING: {}", info.name.to_uppercase());
-        // Подложка
+        
         let text_w = window_w - pad * 2.0;
-        let info_h = (24 * s) as f32;
-        gpu.add_ui_rect(window_x + pad, info_y - 2.0, text_w, info_h, [0.2, 0.4, 0.5, 0.8]);
-        gpu.add_ui_rect(window_x + pad + 2.0, info_y, text_w - 4.0, info_h - 4.0, [0.1, 0.2, 0.3, 0.9]);
+        let info_h = (32 * s) as f32;
         
-        gpu.draw_text(window_x + pad + 6.0, info_y + 2.0, 
-                      progress_text.as_bytes(), [0.3, 1.0, 1.0, 1.0], scale);
+        // Фон панели активного исследования с градиентом
+        gpu.add_ui_rect(window_x + pad, info_y, text_w, info_h, [0.15, 0.3, 0.45, 0.95]);
+        gpu.add_ui_rect(window_x + pad + 2.0, info_y + 2.0, text_w - 4.0, info_h - 4.0, [0.08, 0.15, 0.25, 1.0]);
         
-        // Прогресс бар
+        // Акцентная полоска слева
+        gpu.add_ui_rect(window_x + pad + 2.0, info_y + 2.0, 4.0, info_h - 4.0, [0.4, 0.8, 1.0, 0.9]);
+        
+        // Название исследования
+        let progress_text = format!("ACTIVE: {}", info.name.to_uppercase());
+        gpu.draw_text(window_x + pad + 12.0, info_y + 4.0, 
+                      progress_text.as_bytes(), [0.5, 1.0, 1.0, 1.0], scale * 0.8);
+        
+        // Прогресс бар с улучшенным дизайном
         let total_days = info.days_required;
         let progress = if total_days > 0 {
             1.0 - (active.days_remaining as f32 / total_days as f32)
         } else {
             1.0
         };
-        let bar_y = info_y + (12 * s) as f32;
-        let bar_w = text_w - 12.0;
-        let bar_h = (6 * s) as f32;
+        let bar_y = info_y + (16 * s) as f32;
+        let bar_w = text_w - 20.0;
+        let bar_h = (8 * s) as f32;
         
-        gpu.add_ui_rect(window_x + pad + 6.0, bar_y, bar_w, bar_h, [0.1, 0.1, 0.15, 0.8]);
-        gpu.add_ui_rect(window_x + pad + 6.0, bar_y, bar_w * progress, bar_h, [0.3, 0.9, 1.0, 0.9]);
+        // Фон прогресс бара с рамкой
+        gpu.add_ui_rect(window_x + pad + 10.0, bar_y, bar_w, bar_h, [0.2, 0.25, 0.3, 0.9]);
+        gpu.add_ui_rect(window_x + pad + 11.0, bar_y + 1.0, bar_w - 2.0, bar_h - 2.0, [0.05, 0.08, 0.12, 1.0]);
         
-        // Текст дней
-        let days_text = format!("{}/{} days", total_days - active.days_remaining, total_days);
-        gpu.draw_text(window_x + pad + bar_w - (days_text.len() as f32 * 4.0 * scale * 0.6), 
-                      bar_y - (2 * s) as f32, days_text.as_bytes(), [0.7, 0.9, 1.0, 1.0], scale * 0.6);
+        // Заполненная часть с градиентом
+        let filled_w = (bar_w - 2.0) * progress;
+        if filled_w > 0.0 {
+            gpu.add_ui_rect(window_x + pad + 11.0, bar_y + 1.0, filled_w, bar_h - 2.0, [0.3, 0.8, 1.0, 0.9]);
+            gpu.add_ui_rect(window_x + pad + 11.0, bar_y + 1.0, filled_w, (bar_h - 2.0) * 0.4, [0.5, 0.95, 1.0, 0.7]);
+        }
+        
+        // Текст прогресса
+        let days_text = format!("{}/{} days ({}%)", 
+            total_days - active.days_remaining, total_days, (progress * 100.0) as i32);
+        let text_x = window_x + pad + 10.0 + (bar_w - days_text.len() as f32 * 4.0 * scale * 0.7) / 2.0;
+        gpu.draw_text(text_x, bar_y + 1.0, days_text.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale * 0.7);
     } else {
-        let hint = "Click on available research to begin";
-        gpu.draw_text(window_x + pad, info_y, 
-                      hint.as_bytes(), [0.7, 0.7, 0.7, 1.0], scale);
+        // Подсказка когда нет активного исследования
+        let hint_h = (20 * s) as f32;
+        let text_w = window_w - pad * 2.0;
+        
+        gpu.add_ui_rect(window_x + pad, info_y, text_w, hint_h, [0.1, 0.15, 0.2, 0.7]);
+        gpu.add_ui_rect(window_x + pad + 1.0, info_y + 1.0, text_w - 2.0, hint_h - 2.0, [0.08, 0.12, 0.18, 0.9]);
+        
+        let hint = "Select an available research to begin...";
+        let hint_x = window_x + pad + (text_w - hint.len() as f32 * 4.0 * scale * 0.7) / 2.0;
+        gpu.draw_text(hint_x, info_y + 5.0, 
+                      hint.as_bytes(), [0.6, 0.7, 0.8, 1.0], scale * 0.7);
     }
     
     // Дерево исследований
-    let tree_start_y = info_y + (30 * s) as f32;
-    let node_w = (130 * s) as f32; // Ширина узла
-    let node_h = (70 * s) as f32;  // Высота узла
-    let gap_x = (30 * s) as f32;   // Горизонтальный отступ
-    let gap_y = (40 * s) as f32;   // Вертикальный отступ
+    let tree_start_y = info_y + (40 * s) as f32; // Увеличенный отступ после панели
+    let node_w = (140 * s) as f32; // Ширина узла (увеличена для лучших пропорций)
+    let node_h = (80 * s) as f32;  // Высота узла (увеличена для лучших пропорций)
+    let gap_x = (35 * s) as f32;   // Горизонтальный отступ между узлами
+    let gap_y = (45 * s) as f32;   // Вертикальный отступ между узлами
+    
+    // Вычисляем общую ширину дерева
+    let tree_cols = 4; // Максимум 4 колонки (от 0 до 3)
+    let total_tree_width = (tree_cols as f32 * node_w) + ((tree_cols - 1) as f32 * gap_x);
+    
+    // Центрируем дерево по горизонтали
+    let tree_left_margin = ((window_w - pad * 2.0) - total_tree_width) / 2.0;
+    let tree_area_left = window_x + pad + tree_left_margin.max(0.0);
     
     // Границы области для отрисовки дерева (clipping)
     let tree_area_top = tree_start_y;
-    let tree_area_bottom = window_y + window_h - pad;
+    let tree_area_bottom = window_y + window_h - pad * 2.0; // Отступ снизу
     let tree_area_height = tree_area_bottom - tree_area_top;
-    let tree_area_left = window_x + pad;
     let tree_area_right = window_x + window_w - pad;
     
     // Вычисляем максимальную высоту дерева
@@ -1032,29 +1085,42 @@ pub fn draw_research_tree_gpu(
             continue;
         }
         
-        let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
+        let node_x = tree_area_left + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
         
         for &prereq in info.prerequisites {
             let (prereq_col, prereq_row) = prereq.tree_position();
-            let prereq_x = window_x + pad + (prereq_col as f32) * (node_w + gap_x) + node_w / 2.0;
+            let prereq_x = tree_area_left + (prereq_col as f32) * (node_w + gap_x) + node_w / 2.0;
             let prereq_y = tree_start_y + (prereq_row as f32) * (node_h + gap_y) + node_h - scroll_offset;
             let current_x = node_x + node_w / 2.0;
             let current_y = node_y;
             
-            let line_color = if research_system.get_status(prereq) == ResearchStatus::Completed {
-                [0.3, 0.9, 0.4, 0.7]
+            let prereq_status = research_system.get_status(prereq);
+            let (line_color, line_glow) = if prereq_status == ResearchStatus::Completed {
+                ([0.35, 1.0, 0.5, 0.85], [0.2, 0.6, 0.3, 0.3])
             } else {
-                [0.25, 0.25, 0.3, 0.5]
+                ([0.3, 0.3, 0.35, 0.6], [0.15, 0.15, 0.18, 0.2])
             };
             
-            let line_width = 3.0 * scale;
+            let line_width = 2.5 * scale;
+            let glow_width = 5.0 * scale;
             let mid_y = (prereq_y + current_y) / 2.0;
-            gpu.add_ui_rect(prereq_x - line_width / 2.0, prereq_y, line_width, mid_y - prereq_y, line_color);
+            
+            // Рисуем свечение (более широкую линию снизу)
+            gpu.add_ui_rect(prereq_x - glow_width / 2.0, prereq_y, glow_width, mid_y - prereq_y, line_glow);
             let h_width = (current_x - prereq_x).abs();
             let h_x = prereq_x.min(current_x);
+            gpu.add_ui_rect(h_x, mid_y - glow_width / 2.0, h_width, glow_width, line_glow);
+            gpu.add_ui_rect(current_x - glow_width / 2.0, mid_y, glow_width, current_y - mid_y, line_glow);
+            
+            // Рисуем основную линию поверх свечения
+            gpu.add_ui_rect(prereq_x - line_width / 2.0, prereq_y, line_width, mid_y - prereq_y, line_color);
             gpu.add_ui_rect(h_x, mid_y - line_width / 2.0, h_width, line_width, line_color);
             gpu.add_ui_rect(current_x - line_width / 2.0, mid_y, line_width, current_y - mid_y, line_color);
+            
+            // Рисуем стрелку на конце линии
+            let arrow_size = 4.0 * scale;
+            gpu.add_ui_rect(current_x - arrow_size, current_y - arrow_size, arrow_size * 2.0, arrow_size, line_color);
         }
     }
     
@@ -1068,7 +1134,7 @@ pub fn draw_research_tree_gpu(
             continue;
         }
         
-        let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
+        let node_x = tree_area_left + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
         
         let is_hovered = cursor_x >= node_x as i32 && cursor_x < (node_x + node_w) as i32
@@ -1079,73 +1145,160 @@ pub fn draw_research_tree_gpu(
         }
         
         // Цвета в зависимости от статуса
-        let (bg_color, border_color, text_color, status_text, status_color) = match status {
+        let (bg_color, bg_color_top, border_color, text_color, status_text, status_color) = match status {
             ResearchStatus::Locked => (
-                [0.15, 0.15, 0.18, 0.9],
+                [0.12, 0.12, 0.15, 0.95],
+                [0.18, 0.18, 0.22, 0.95],
                 [0.3, 0.3, 0.35, 1.0],
-                [0.45, 0.45, 0.5, 1.0],
+                [0.5, 0.5, 0.55, 1.0],
                 "LOCKED",
                 [0.4, 0.4, 0.45, 1.0],
             ),
             ResearchStatus::Available => (
-                [0.15, 0.25, 0.45, 0.95],
-                [0.4, 0.6, 1.0, 1.0],
+                [0.12, 0.22, 0.42, 0.98],
+                [0.18, 0.32, 0.55, 0.98],
+                [0.4, 0.65, 1.0, 1.0],
                 [1.0, 1.0, 1.0, 1.0],
-                "AVAILABLE",
-                [0.5, 0.9, 0.5, 1.0],
+                "READY",
+                [0.5, 1.0, 0.5, 1.0],
             ),
             ResearchStatus::InProgress => (
-                [0.5, 0.35, 0.1, 0.95],
-                [1.0, 0.7, 0.2, 1.0],
-                [1.0, 1.0, 0.8, 1.0],
-                "IN PROGRESS",
-                [1.0, 0.9, 0.3, 1.0],
+                [0.45, 0.3, 0.08, 0.98],
+                [0.6, 0.42, 0.15, 0.98],
+                [1.0, 0.75, 0.3, 1.0],
+                [1.0, 1.0, 0.9, 1.0],
+                "ACTIVE",
+                [1.0, 0.95, 0.4, 1.0],
             ),
             ResearchStatus::Completed => (
-                [0.1, 0.4, 0.15, 0.95],
-                [0.3, 0.9, 0.4, 1.0],
-                [0.8, 1.0, 0.8, 1.0],
+                [0.08, 0.35, 0.12, 0.98],
+                [0.12, 0.45, 0.18, 0.98],
+                [0.35, 1.0, 0.45, 1.0],
+                [0.85, 1.0, 0.85, 1.0],
                 "DONE",
-                [0.4, 1.0, 0.5, 1.0],
+                [0.5, 1.0, 0.6, 1.0],
             ),
         };
         
-        let (bg_final, border_final) = if is_hovered && status == ResearchStatus::Available {
-            ([bg_color[0] * 1.3, bg_color[1] * 1.3, bg_color[2] * 1.3, bg_color[3]],
-             [border_color[0] * 1.2, border_color[1] * 1.2, border_color[2] * 1.2, border_color[3]])
+        let hover_mult = if is_hovered && status == ResearchStatus::Available { 1.15 } else { 1.0 };
+        let bg_bottom = [bg_color[0] * hover_mult, bg_color[1] * hover_mult, bg_color[2] * hover_mult, bg_color[3]];
+        let bg_top = [bg_color_top[0] * hover_mult, bg_color_top[1] * hover_mult, bg_color_top[2] * hover_mult, bg_color_top[3]];
+        let border_final = if is_hovered && status == ResearchStatus::Available {
+            [border_color[0] * 1.15, border_color[1] * 1.15, border_color[2] * 1.15, border_color[3]]
         } else {
-            (bg_color, border_color)
+            border_color
         };
         
-        // Рамка
-        let border_width = if is_hovered { 4.0 } else { 3.0 };
-        gpu.add_ui_rect(node_x, node_y, node_w, node_h, border_final);
-        gpu.add_ui_rect(node_x + border_width, node_y + border_width, 
-                       node_w - border_width * 2.0, node_h - border_width * 2.0, bg_final);
+        // Тень для объемности
+        let shadow_offset = 3.0;
+        gpu.add_ui_rect(node_x + shadow_offset, node_y + shadow_offset, node_w, node_h, [0.0, 0.0, 0.0, 0.4]);
         
-        // Название (уменьшенный шрифт для компактности)
-        let name_lines = split_text(info.name, ((node_w - 12.0) / (4.0 * scale * 0.75)) as usize);
-        let mut text_y = node_y + 6.0;
+        // Рамка с увеличенной толщиной при наведении
+        let border_width = if is_hovered { 3.5 } else { 2.5 };
+        gpu.add_ui_rect(node_x, node_y, node_w, node_h, border_final);
+        
+        // Градиент фона (симуляция через несколько прямоугольников)
+        let inner_x = node_x + border_width;
+        let inner_y = node_y + border_width;
+        let inner_w = node_w - border_width * 2.0;
+        let inner_h = node_h - border_width * 2.0;
+        
+        // Делим на 3 части для градиента
+        let grad_h = inner_h / 3.0;
+        gpu.add_ui_rect(inner_x, inner_y, inner_w, grad_h, bg_top);
+        gpu.add_ui_rect(inner_x, inner_y + grad_h, inner_w, grad_h, 
+            [(bg_top[0] + bg_bottom[0]) / 2.0, (bg_top[1] + bg_bottom[1]) / 2.0, 
+             (bg_top[2] + bg_bottom[2]) / 2.0, (bg_top[3] + bg_bottom[3]) / 2.0]);
+        gpu.add_ui_rect(inner_x, inner_y + grad_h * 2.0, inner_w, grad_h, bg_bottom);
+        
+        // Внутренние отступы карточки
+        let card_pad = (6 * s) as f32;
+        
+        // Полоска статуса в верхней части
+        let status_bar_h = 3.0;
+        gpu.add_ui_rect(inner_x, inner_y, inner_w, status_bar_h, status_color);
+        
+        // Название (более крупный шрифт)
+        let name_lines = split_text(info.name, ((inner_w - card_pad * 2.0) / (4.0 * scale * 0.85)) as usize);
+        let mut text_y = inner_y + status_bar_h + card_pad;
         for line in name_lines.iter().take(2) {
-            gpu.draw_text(node_x + 6.0, text_y, line.as_bytes(), text_color, scale * 0.75);
-            text_y += (6 * s) as f32;
+            gpu.draw_text(inner_x + card_pad, text_y, line.as_bytes(), text_color, scale * 0.85);
+            text_y += (11 * s) as f32;
         }
         
-        // Статус (меньше шрифт)
-        gpu.draw_text(node_x + 6.0, node_y + node_h - (20 * s) as f32, 
-                      status_text.as_bytes(), status_color, scale * 0.55);
+        // Разделитель (на 2/3 высоты карточки)
+        let separator_y = inner_y + inner_h * 0.62;
+        gpu.add_ui_rect(inner_x + card_pad, separator_y, inner_w - card_pad * 2.0, 1.0, [1.0, 1.0, 1.0, 0.25]);
         
-        // Стоимость и время (меньше шрифт)
+        // Информация о стоимости и времени
         if status != ResearchStatus::Completed {
-            let cost_text = format!("W:{} G:{}", info.cost.wood, info.cost.gold);
-            gpu.draw_text(node_x + 6.0, node_y + node_h - (12 * s) as f32, 
-                          cost_text.as_bytes(), [0.9, 0.8, 0.3, 1.0], scale * 0.5);
+            // Секция ресурсов
+            let cost_y = separator_y + card_pad;
             
-            if info.days_required > 0 {
-                let time_text = format!("{}d", info.days_required);
-                gpu.draw_text(node_x + 6.0, node_y + node_h - (6 * s) as f32, 
-                              time_text.as_bytes(), [0.5, 0.8, 1.0, 1.0], scale * 0.5);
+            // Иконки ресурсов
+            let icon_size = (8 * s) as f32;
+            let icon_gap = (4 * s) as f32;
+            let mut icon_x = inner_x + card_pad;
+            
+            if info.cost.wood > 0 {
+                // Рамка вокруг иконки
+                gpu.add_ui_rect(icon_x, cost_y, icon_size, icon_size, [0.4, 0.3, 0.15, 1.0]);
+                gpu.add_ui_rect(icon_x + 1.0, cost_y + 1.0, icon_size - 2.0, icon_size - 2.0, [0.7, 0.5, 0.3, 1.0]);
+                
+                let wood_text = format!("{}", info.cost.wood);
+                let text_x = icon_x + icon_size + 3.0;
+                gpu.draw_text(text_x, cost_y + 1.0, 
+                              wood_text.as_bytes(), [1.0, 0.9, 0.6, 1.0], scale * 0.65);
+                icon_x += icon_size + 3.0 + (wood_text.len() as f32 * 4.0 * scale * 0.65) + icon_gap;
             }
+            
+            if info.cost.gold > 0 {
+                // Рамка вокруг иконки
+                gpu.add_ui_rect(icon_x, cost_y, icon_size, icon_size, [0.7, 0.6, 0.0, 1.0]);
+                gpu.add_ui_rect(icon_x + 1.0, cost_y + 1.0, icon_size - 2.0, icon_size - 2.0, [1.0, 0.9, 0.2, 1.0]);
+                
+                let gold_text = format!("{}", info.cost.gold);
+                let text_x = icon_x + icon_size + 3.0;
+                gpu.draw_text(text_x, cost_y + 1.0, 
+                              gold_text.as_bytes(), [1.0, 1.0, 0.8, 1.0], scale * 0.65);
+                icon_x += icon_size + 3.0 + (gold_text.len() as f32 * 4.0 * scale * 0.65) + icon_gap;
+            }
+            
+            if info.cost.stone > 0 {
+                // Рамка вокруг иконки
+                gpu.add_ui_rect(icon_x, cost_y, icon_size, icon_size, [0.35, 0.35, 0.35, 1.0]);
+                gpu.add_ui_rect(icon_x + 1.0, cost_y + 1.0, icon_size - 2.0, icon_size - 2.0, [0.6, 0.6, 0.6, 1.0]);
+                
+                let stone_text = format!("{}", info.cost.stone);
+                let text_x = icon_x + icon_size + 3.0;
+                gpu.draw_text(text_x, cost_y + 1.0, 
+                              stone_text.as_bytes(), [0.9, 0.9, 0.9, 1.0], scale * 0.65);
+            }
+            
+            // Время исследования (под иконками)
+            if info.days_required > 0 {
+                let time_y = cost_y + icon_size + (3 * s) as f32;
+                let time_text = format!("{} days", info.days_required);
+                let time_x = inner_x + card_pad;
+                
+                // Иконка часов (декоративный квадратик)
+                let clock_size = (6 * s) as f32;
+                gpu.add_ui_rect(time_x, time_y + 1.0, clock_size, clock_size, [0.4, 0.7, 1.0, 0.8]);
+                
+                gpu.draw_text(time_x + clock_size + 3.0, time_y, 
+                              time_text.as_bytes(), [0.7, 0.9, 1.0, 1.0], scale * 0.6);
+            }
+        } else {
+            // Для завершенных - показываем статус с иконкой
+            let status_y = separator_y + card_pad + (2 * s) as f32;
+            let check_size = (8 * s) as f32;
+            
+            // Иконка галочки (зеленый квадрат)
+            gpu.add_ui_rect(inner_x + card_pad, status_y, check_size, check_size, [0.3, 0.8, 0.4, 1.0]);
+            gpu.add_ui_rect(inner_x + card_pad + 1.0, status_y + 1.0, check_size - 2.0, check_size - 2.0, [0.5, 1.0, 0.6, 1.0]);
+            
+            gpu.draw_text(inner_x + card_pad + check_size + 4.0, status_y + 1.0, 
+                          status_text.as_bytes(), status_color, scale * 0.7);
         }
         
     }
@@ -1153,55 +1306,101 @@ pub fn draw_research_tree_gpu(
     // Очищаем область клиппинга перед рисованием тултипов и скроллбара
     gpu.clear_clip_rect();
     
-    // Тултип для наведенного исследования
+    // Тултип для наведенного исследования с улучшенным дизайном
     if let Some((kind, status, _x, _y)) = hovered_research {
         let info = kind.info();
         
-        // Формируем текст для тултипа
-        let mut tooltip_content = vec![info.description.to_string()];
+        let tooltip_w = (340.0 * scale).min(fw as f32 * 0.45);
+        let line_h = (12 * s) as f32;
+        let tooltip_pad = 10.0;
         
-        // Добавляем информацию о разблокируемых зданиях
+        // Рассчитываем высоту динамически
+        let mut content_lines = Vec::new();
+        
+        // Заголовок
+        content_lines.push((info.name.to_uppercase(), [1.0, 0.95, 0.5, 1.0], 1.0));
+        
+        // Описание
+        let desc_lines = split_text(info.description, ((tooltip_w - tooltip_pad * 2.0) / (4.0 * scale * 0.75)) as usize);
+        for line in desc_lines {
+            content_lines.push((line, [0.9, 0.9, 0.9, 1.0], 0.75));
+        }
+        
+        // Разблокирует
         if !info.unlocks_buildings.is_empty() {
-            let buildings_text: Vec<String> = info.unlocks_buildings.iter()
-                .map(|b| format!("{:?}", b))
-                .collect();
-            tooltip_content.push(format!("Unlocks: {}", buildings_text.join(", ")));
+            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
+            content_lines.push(("UNLOCKS:".to_string(), [0.5, 1.0, 0.5, 1.0], 0.7));
+            for building in info.unlocks_buildings {
+                content_lines.push((format!("  - {:?}", building), [0.8, 1.0, 0.8, 1.0], 0.7));
+            }
         }
         
-        // Добавляем информацию о стоимости для доступных исследований
-        if status == ResearchStatus::Available {
-            tooltip_content.push(format!("Cost: Wood {} Gold {} ({}d)", 
-                info.cost.wood, info.cost.gold, info.days_required));
+        // Требования
+        if !info.prerequisites.is_empty() {
+            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
+            content_lines.push(("REQUIRES:".to_string(), [1.0, 0.7, 0.5, 1.0], 0.7));
+            for prereq in info.prerequisites {
+                let prereq_info = prereq.info();
+                content_lines.push((format!("  - {}", prereq_info.name), [1.0, 0.9, 0.7, 1.0], 0.7));
+            }
         }
         
-        let tooltip_w = (300.0 * scale).min(fw as f32 * 0.4);
-        let line_h = (9 * s) as f32;
-        let tooltip_h = (tooltip_content.len() as f32 * line_h + 12.0).max(40.0);
+        // Стоимость
+        if status == ResearchStatus::Available || status == ResearchStatus::Locked {
+            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
+            let cost_parts = vec![
+                if info.cost.wood > 0 { format!("Wood: {}", info.cost.wood) } else { String::new() },
+                if info.cost.gold > 0 { format!("Gold: {}", info.cost.gold) } else { String::new() },
+                if info.cost.stone > 0 { format!("Stone: {}", info.cost.stone) } else { String::new() },
+            ];
+            let cost_str = cost_parts.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ");
+            if !cost_str.is_empty() {
+                content_lines.push((format!("Cost: {}", cost_str), [1.0, 0.95, 0.6, 1.0], 0.7));
+                content_lines.push((format!("Time: {} days", info.days_required), [0.6, 0.9, 1.0, 1.0], 0.7));
+            }
+        }
+        
+        let tooltip_h = (content_lines.len() as f32 * line_h + tooltip_pad * 2.0).max(50.0);
         let tooltip_x = (cursor_x as f32 + 15.0).min(fw as f32 - tooltip_w - 10.0);
         let tooltip_y = (cursor_y as f32 + 15.0).min(fh as f32 - tooltip_h - 10.0);
         
-        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.95]);
-        gpu.add_ui_rect(tooltip_x + 2.0, tooltip_y + 2.0, tooltip_w - 4.0, tooltip_h - 4.0, [0.1, 0.15, 0.25, 0.98]);
+        // Тень тултипа
+        gpu.add_ui_rect(tooltip_x + 4.0, tooltip_y + 4.0, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.6]);
         
-        let mut ty = tooltip_y + 6.0;
-        for content in tooltip_content.iter() {
-            let lines = split_text(content, ((tooltip_w - 16.0) / (4.0 * scale * 0.75)) as usize);
-            for line in lines.iter() {
-                gpu.draw_text(tooltip_x + 8.0, ty, line.as_bytes(), [1.0, 1.0, 0.8, 1.0], scale * 0.75);
-                ty += line_h;
+        // Фон тултипа с тройной рамкой
+        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.25, 0.35, 0.5, 0.98]);
+        gpu.add_ui_rect(tooltip_x + 2.0, tooltip_y + 2.0, tooltip_w - 4.0, tooltip_h - 4.0, [0.12, 0.18, 0.28, 1.0]);
+        gpu.add_ui_rect(tooltip_x + 3.0, tooltip_y + 3.0, tooltip_w - 6.0, tooltip_h - 6.0, [0.08, 0.12, 0.18, 1.0]);
+        
+        // Акцентная полоска сверху
+        let accent_color = match status {
+            ResearchStatus::Available => [0.5, 1.0, 0.5, 0.9],
+            ResearchStatus::InProgress => [1.0, 0.9, 0.4, 0.9],
+            ResearchStatus::Completed => [0.4, 1.0, 0.5, 0.9],
+            ResearchStatus::Locked => [0.5, 0.5, 0.5, 0.9],
+        };
+        gpu.add_ui_rect(tooltip_x + 3.0, tooltip_y + 3.0, tooltip_w - 6.0, 3.0, accent_color);
+        
+        // Отрисовка текста
+        let mut ty = tooltip_y + tooltip_pad;
+        for (text, color, size_mult) in content_lines {
+            if !text.is_empty() {
+                gpu.draw_text(tooltip_x + tooltip_pad, ty, text.as_bytes(), color, scale * size_mult);
             }
+            ty += line_h * size_mult;
         }
     }
     
     // Рисуем скроллбар если дерево больше чем доступная область
     if total_tree_height > tree_area_height {
-        let scrollbar_width = (8 * s) as f32;
-        let scrollbar_x = window_x + window_w - pad - scrollbar_width;
+        let scrollbar_width = (10 * s) as f32;
+        let scrollbar_x = window_x + window_w - pad - scrollbar_width - 4.0;
         let scrollbar_track_y = tree_area_top;
         let scrollbar_track_h = tree_area_height;
         
-        // Фон скроллбара (трек)
-        gpu.add_ui_rect(scrollbar_x, scrollbar_track_y, scrollbar_width, scrollbar_track_h, [0.2, 0.2, 0.25, 0.8]);
+        // Фон скроллбара (трек) с рамкой
+        gpu.add_ui_rect(scrollbar_x, scrollbar_track_y, scrollbar_width, scrollbar_track_h, [0.15, 0.18, 0.22, 0.95]);
+        gpu.add_ui_rect(scrollbar_x + 1.0, scrollbar_track_y + 1.0, scrollbar_width - 2.0, scrollbar_track_h - 2.0, [0.08, 0.1, 0.12, 1.0]);
         
         // Вычисляем размер и позицию ползунка
         let max_scroll = (total_tree_height - tree_area_height).max(0.0);
@@ -1211,11 +1410,20 @@ pub fn draw_research_tree_gpu(
             0.0
         };
         
-        let thumb_height = (tree_area_height * (tree_area_height / total_tree_height)).max(30.0);
-        let thumb_y = scrollbar_track_y + (scrollbar_track_h - thumb_height) * scroll_ratio;
+        let thumb_height = (tree_area_height * (tree_area_height / total_tree_height)).max(40.0);
+        let thumb_y = scrollbar_track_y + 2.0 + (scrollbar_track_h - thumb_height - 4.0) * scroll_ratio;
         
-        // Ползунок скроллбара
-        gpu.add_ui_rect(scrollbar_x + 1.0, thumb_y, scrollbar_width - 2.0, thumb_height, [0.4, 0.5, 0.6, 0.9]);
+        // Ползунок скроллбара с градиентом
+        gpu.add_ui_rect(scrollbar_x + 2.0, thumb_y, scrollbar_width - 4.0, thumb_height, [0.3, 0.4, 0.5, 1.0]);
+        gpu.add_ui_rect(scrollbar_x + 3.0, thumb_y + 1.0, scrollbar_width - 6.0, thumb_height - 2.0, [0.4, 0.55, 0.7, 0.95]);
+        gpu.add_ui_rect(scrollbar_x + 3.0, thumb_y + 1.0, scrollbar_width - 6.0, thumb_height * 0.4, [0.5, 0.65, 0.85, 0.7]);
+        
+        // Индикаторы на ползунке (декоративные линии)
+        let line_y = thumb_y + thumb_height / 2.0 - 2.0;
+        for i in 0..3 {
+            let ly = line_y + (i as f32 * 2.0);
+            gpu.add_ui_rect(scrollbar_x + 3.5, ly, scrollbar_width - 7.0, 1.0, [0.7, 0.8, 0.9, 0.5]);
+        }
     }
     
     None // Функция больше не возвращает клики, только рендерит
