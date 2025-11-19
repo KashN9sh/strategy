@@ -1,0 +1,55 @@
+// Шаблоны тултипов
+
+ui {
+  // Тултип для здания
+  panel #building_tooltip position=fixed background=#1a1a1aee padding=6 border-color=#ffffff40 border-width=1 visible=false {
+    vbox gap=8 {
+      text #name bind="tooltip.building.name" color=#ffffff scale=1.0
+      text #production bind="tooltip.building.production" color=#b3ffb3 scale=0.9
+      
+      conditional if="tooltip.building.has_consumption" {
+        text #consumption bind="tooltip.building.consumption" color=#ffb3b3 scale=0.9
+      }
+      
+      hbox gap=4 {
+        text text="Workers:" color=#ffff66
+        text bind="tooltip.building.workers" color=#ffffff
+      }
+    }
+  }
+  
+  // Тултип для кнопки
+  panel #button_tooltip position=fixed background=#1a1a1aee padding=6 border-color=#ffffff40 border-width=1 visible=false {
+    vbox gap=4 {
+      text #button_name bind="tooltip.button.name" color=#ffffff scale=1.0
+      text #button_description bind="tooltip.button.description" color=#cccccc scale=0.8
+    }
+  }
+  
+  // Тултип для ресурса
+  panel #resource_tooltip position=fixed background=#1a1a1aee padding=6 border-color=#ffffff40 border-width=1 visible=false {
+    vbox gap=4 {
+      text #resource_name bind="tooltip.resource.name" color=#ffffff scale=1.0
+      text #resource_description bind="tooltip.resource.description" color=#cccccc scale=0.8
+      hbox gap=4 {
+        text text="Current:" color=#ffff66
+        text bind="tooltip.resource.amount" color=#ffffff
+      }
+    }
+  }
+  
+  // Тултип для биома (debug)
+  panel #biome_tooltip position=fixed background=#1a1a1aee padding=6 border-color=#ffff0080 border-width=1 visible=false {
+    vbox gap=4 {
+      text text="Biome Debug" color=#ffff00 scale=1.0
+      hbox gap=4 {
+        text text="Biome:" color=#ccffcc
+        text bind="tooltip.biome.name" color=#ffffff
+      }
+      hbox gap=4 {
+        text text="Position:" color=#ccccff
+        text bind="tooltip.biome.position" color=#ffffff
+      }
+    }
+  }
+}

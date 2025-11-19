@@ -1,0 +1,36 @@
+// Панель управления зданием
+
+ui {
+  panel #building_panel position=fixed background=#1a1a1acc padding=12 border-color=#3d5066 border-width=2 {
+    vbox gap=8 {
+      // Название здания
+      text #building_name bind="selected_building.name" color=#ffffff scale=1.2
+      
+      // Информация о производстве/потреблении
+      conditional if="selected_building.has_production" {
+        vbox gap=4 {
+          text bind="selected_building.production" color=#b3ffb3 scale=0.8
+          
+          conditional if="selected_building.has_consumption" {
+            text bind="selected_building.consumption" color=#ffb3b3 scale=0.8
+          }
+        }
+      }
+      
+      // Контролы работников
+      conditional if="selected_building.can_have_workers" {
+        hbox gap=8 align=center {
+          text text="Workers:" color=#cccccc
+          button #decrease_workers text="-" onclick="decrease_workers"
+          number bind="selected_building.workers_current" color=#ffffff
+          text text="/" color=#808080
+          number bind="selected_building.workers_target" color=#ffffff
+          button #increase_workers text="+" onclick="increase_workers"
+        }
+      }
+      
+      // Кнопка сноса
+      button #demolish text="Demolish" onclick="demolish_building" color=#ff6666
+    }
+  }
+}

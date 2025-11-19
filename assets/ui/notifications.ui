@@ -1,0 +1,22 @@
+// Система уведомлений
+
+ui {
+  // Контейнер для уведомлений (верхний правый угол)
+  vbox #notifications position=fixed x=right-420 y=top+8 width=400 gap=8 {
+    // Уведомления будут добавляться динамически
+    // Каждое уведомление - это panel с анимацией появления/исчезновения
+  }
+}
+
+// Шаблон уведомления (используется программно)
+// panel #notification_template background=#1a3d5eee padding=12 {
+//   vbox gap=4 {
+//     text bind="notification.text" color=#ffffff scale=1.0
+//   }
+// }
+
+// Цвета по типам:
+// ResearchCompleted: background=#1a507fее (синий)
+// BuildingUnlocked: background=#1a7033ee (зеленый)
+// Warning: background=#7f501aee (оранжевый)
+// Info: background=#4d4d4dee (серый)

@@ -29,6 +29,7 @@ mod commands;
 mod music;
 mod research;
 mod notifications;
+mod ui_markup;
 use gpu_renderer::GpuRenderer;
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
