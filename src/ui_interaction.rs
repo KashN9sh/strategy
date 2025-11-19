@@ -646,7 +646,6 @@ pub fn handle_research_tree_click(
     use crate::types;
     
     let s = ui::ui_scale(fh, base_scale_k);
-    let scale = s as f32;
     
     // Размеры окна (те же, что в draw_research_tree_gpu)
     let window_w = (fw as f32 * 0.9).max(900.0);
@@ -672,10 +671,10 @@ pub fn handle_research_tree_click(
     let info_y = window_y + pad + title_height + 8.0;
     let tree_start_y = info_y + (20 * s) as f32;
     
-    let node_w = (110 * s) as f32; // Уменьшенный размер
-    let node_h = (60 * s) as f32;  // Уменьшенный размер
-    let gap_x = (20 * s) as f32;
-    let gap_y = (35 * s) as f32;
+    let node_w = (130 * s) as f32; // Ширина узла
+    let node_h = (70 * s) as f32;  // Высота узла
+    let gap_x = (30 * s) as f32;   // Горизонтальный отступ
+    let gap_y = (40 * s) as f32;   // Вертикальный отступ
     
     // Проверяем клики по узлам
     for &research_kind in ResearchKind::all() {

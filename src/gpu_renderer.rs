@@ -715,6 +715,9 @@ pub struct GpuRenderer {
     minimap_buffer: wgpu::Buffer,
     ui_props_instance_buffer: wgpu::Buffer,
     props_texture_bind_group: Option<wgpu::BindGroup>, // Bind group для props текстуры
+    
+    // Клиппинг для UI (x, y, width, height)
+    ui_clip_rect: Option<(f32, f32, f32, f32)>,
 }
 
 impl GpuRenderer {
@@ -2038,6 +2041,7 @@ impl GpuRenderer {
             ui_props_instances: Vec::new(),
             ui_props_instance_buffer,
             props_texture_bind_group,
+            ui_clip_rect: None,
         })
     }
     
@@ -2381,20 +2385,75 @@ impl GpuRenderer {
         self.tooltip_start_index = self.ui_rects.len();
     }
     
+    // Установить область клиппинга для UI элементов
+    pub fn set_clip_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.ui_clip_rect = Some((x, y, width, height));
+    }
+    
+    // Очистить область клиппинга
+    pub fn clear_clip_rect(&mut self) {
+        self.ui_clip_rect = None;
+    }
+    
+    // Проверить, пересекается ли прямоугольник с областью клиппинга
+    fn is_rect_visible(&self, x: f32, y: f32, width: f32, height: f32) -> bool {
+        if let Some((clip_x, clip_y, clip_w, clip_h)) = self.ui_clip_rect {
+            // Проверяем пересечение прямоугольников
+            let rect_right = x + width;
+            let rect_bottom = y + height;
+            let clip_right = clip_x + clip_w;
+            let clip_bottom = clip_y + clip_h;
+            
+            // Если прямоугольники не пересекаются, элемент не виден
+            if rect_right < clip_x || x > clip_right || rect_bottom < clip_y || y > clip_bottom {
+                return false;
+            }
+        }
+        true
+    }
+    
+    // Обрезать прямоугольник по области клиппинга (возвращает новые координаты и размер)
+    fn clip_rect(&self, x: f32, y: f32, width: f32, height: f32) -> Option<(f32, f32, f32, f32)> {
+        if let Some((clip_x, clip_y, clip_w, clip_h)) = self.ui_clip_rect {
+            let rect_right = x + width;
+            let rect_bottom = y + height;
+            let clip_right = clip_x + clip_w;
+            let clip_bottom = clip_y + clip_h;
+            
+            // Обрезаем прямоугольник
+            let new_x = x.max(clip_x);
+            let new_y = y.max(clip_y);
+            let new_right = rect_right.min(clip_right);
+            let new_bottom = rect_bottom.min(clip_bottom);
+            
+            let new_width = new_right - new_x;
+            let new_height = new_bottom - new_y;
+            
+            if new_width > 0.0 && new_height > 0.0 {
+                return Some((new_x, new_y, new_width, new_height));
+            }
+            return None;
+        }
+        Some((x, y, width, height))
+    }
+    
     pub fn add_ui_rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: [f32; 4]) {
-        // Создаем матрицу трансформации для прямоугольника в экранных координатах
-        let model_matrix = Mat4::from_scale_rotation_translation(
-            Vec3::new(width, height, 1.0),
-            glam::Quat::IDENTITY,
-            Vec3::new(x + width * 0.5, y + height * 0.5, 0.0), // центрируем
-        );
-        
-        let ui_rect = UIRect {
-            model_matrix: model_matrix.to_cols_array_2d(),
-            color,
-        };
-        
-        self.ui_rects.push(ui_rect);
+        // Применяем клиппинг, если установлен
+        if let Some((clipped_x, clipped_y, clipped_w, clipped_h)) = self.clip_rect(x, y, width, height) {
+            // Создаем матрицу трансформации для обрезанного прямоугольника
+            let model_matrix = Mat4::from_scale_rotation_translation(
+                Vec3::new(clipped_w, clipped_h, 1.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(clipped_x + clipped_w * 0.5, clipped_y + clipped_h * 0.5, 0.0),
+            );
+            
+            let ui_rect = UIRect {
+                model_matrix: model_matrix.to_cols_array_2d(),
+                color,
+            };
+            
+            self.ui_rects.push(ui_rect);
+        }
     }
     
     // Добавляет UI прямоугольник с поворотом (для подложки миникарты)
@@ -2491,8 +2550,16 @@ impl GpuRenderer {
     
     // Рисует один глиф bitmap шрифта 3x5
     fn draw_glyph(&mut self, x: f32, y: f32, ch: u8, color: [f32; 4], scale: f32) {
-        let pattern = Self::get_glyph_pattern(ch);
         let px = 2.0 * scale; // размер одного пикселя глифа
+        let glyph_width = 3.0 * px;
+        let glyph_height = 5.0 * px;
+        
+        // Быстрая проверка видимости всего глифа
+        if !self.is_rect_visible(x, y, glyph_width, glyph_height) {
+            return;
+        }
+        
+        let pattern = Self::get_glyph_pattern(ch);
         
         for row in 0..5 {
             for col in 0..3 {

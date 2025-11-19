@@ -990,15 +990,17 @@ pub fn draw_research_tree_gpu(
     
     // Дерево исследований
     let tree_start_y = info_y + (30 * s) as f32;
-    let node_w = (110 * s) as f32; // Уменьшенный размер
-    let node_h = (60 * s) as f32;  // Уменьшенный размер
-    let gap_x = (20 * s) as f32;   // Меньший отступ
-    let gap_y = (35 * s) as f32;   // Меньший отступ
+    let node_w = (130 * s) as f32; // Ширина узла
+    let node_h = (70 * s) as f32;  // Высота узла
+    let gap_x = (30 * s) as f32;   // Горизонтальный отступ
+    let gap_y = (40 * s) as f32;   // Вертикальный отступ
     
     // Границы области для отрисовки дерева (clipping)
     let tree_area_top = tree_start_y;
     let tree_area_bottom = window_y + window_h - pad;
     let tree_area_height = tree_area_bottom - tree_area_top;
+    let tree_area_left = window_x + pad;
+    let tree_area_right = window_x + window_w - pad;
     
     // Вычисляем максимальную высоту дерева
     let mut max_row = 0;
@@ -1012,6 +1014,14 @@ pub fn draw_research_tree_gpu(
     
     let mut hovered_research = None;
     
+    // Устанавливаем область клиппинга для дерева исследований
+    gpu.set_clip_rect(
+        tree_area_left,
+        tree_area_top,
+        tree_area_right - tree_area_left,
+        tree_area_height
+    );
+    
     // Сначала рисуем все линии связей (чтобы они были под узлами)
     for &research_kind in ResearchKind::all() {
         let (col, row) = research_kind.tree_position();
@@ -1024,11 +1034,6 @@ pub fn draw_research_tree_gpu(
         
         let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
-        
-        // Clipping - не рисуем линии если узел за пределами видимой области
-        if node_y + node_h < tree_area_top || node_y > tree_area_bottom {
-            continue;
-        }
         
         for &prereq in info.prerequisites {
             let (prereq_col, prereq_row) = prereq.tree_position();
@@ -1065,11 +1070,6 @@ pub fn draw_research_tree_gpu(
         
         let node_x = window_x + pad + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
-        
-        // Clipping - не рисуем узлы если они за пределами видимой области
-        if node_y + node_h < tree_area_top || node_y > tree_area_bottom {
-            continue;
-        }
         
         let is_hovered = cursor_x >= node_x as i32 && cursor_x < (node_x + node_w) as i32
             && cursor_y >= node_y as i32 && cursor_y < (node_y + node_h) as i32;
@@ -1149,6 +1149,9 @@ pub fn draw_research_tree_gpu(
         }
         
     }
+    
+    // Очищаем область клиппинга перед рисованием тултипов и скроллбара
+    gpu.clear_clip_rect();
     
     // Тултип для наведенного исследования
     if let Some((kind, status, _x, _y)) = hovered_research {

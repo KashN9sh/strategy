@@ -195,26 +195,28 @@ impl ResearchKind {
     /// Позиция в дереве исследований (для UI)
     pub fn tree_position(self) -> (i32, i32) {
         match self {
-            // Уровень 0 (верхний ряд - стартовые)
+            // Уровень 0 (верхний ряд - стартовые, не показываются т.к. завершены)
             ResearchKind::BasicHousing => (0, 0),
             ResearchKind::BasicStorage => (1, 0),
             ResearchKind::BasicForestry => (2, 0),
             
-            // Уровень 1
+            // Уровень 1 - Первый ряд видимых исследований
             ResearchKind::AdvancedHousing => (0, 1),
-            ResearchKind::StoneWorking => (2, 1),
-            ResearchKind::BasicFarming => (3, 1),
-            ResearchKind::BasicFishing => (4, 1),
+            ResearchKind::StoneWorking => (1, 1),
+            ResearchKind::BasicFarming => (2, 1),
+            ResearchKind::BasicFishing => (3, 1),
             
-            // Уровень 2
-            ResearchKind::Brickmaking => (1, 2),
-            ResearchKind::FoodProcessing => (3, 2),
-            ResearchKind::Mining => (2, 2),
+            // Уровень 2 - Второй ряд
+            ResearchKind::Brickmaking => (0, 2),
+            ResearchKind::Mining => (1, 2),
+            ResearchKind::FoodProcessing => (2, 2),
             
-            // Уровень 3
-            ResearchKind::Metallurgy => (2, 3),
-            ResearchKind::AdvancedFarming => (3, 3),
-            ResearchKind::AdvancedMining => (2, 4),
+            // Уровень 3 - Третий ряд
+            ResearchKind::Metallurgy => (1, 3),
+            ResearchKind::AdvancedFarming => (2, 3),
+            
+            // Уровень 4 - Четвертый ряд
+            ResearchKind::AdvancedMining => (1, 4),
         }
     }
 }
