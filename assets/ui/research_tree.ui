@@ -1,0 +1,39 @@
+// Окно дерева исследований
+
+ui {
+  // Полупрозрачный фон на весь экран
+  panel #overlay position=fixed x=0 y=0 width=100% height=100% background=#000000bf {
+    // Окно дерева исследований (90% экрана по центру)
+    panel #research_window position=center width=90% height=85% background=#0f1418 border-color=#2d3f57 border-width=4 {
+      vbox padding=16 gap=12 {
+        // Заголовок
+        hbox #header justify=space-between {
+          text #title text="RESEARCH TREE" color=#f2f28c scale=1.8
+          button #close_btn text="X" onclick="close_research_tree"
+        }
+        
+        // Информация об активном исследовании
+        conditional if="has_active_research" {
+          panel #active_research background=#0f1e28 padding=8 {
+            vbox gap=4 {
+              text bind="active_research.name" color=#80ffff scale=0.8
+              progressbar bind="active_research.progress" color=#4dccff background=#0d1418 height=8
+              text bind="active_research.days_remaining" color=#ffffff scale=0.7
+            }
+          }
+        }
+        
+        conditional if="!has_active_research" {
+          panel #no_research background=#0f141280 padding=8 {
+            text text="Select an available research to begin..." color=#99b3cc scale=0.7
+          }
+        }
+        
+        // Дерево исследований (scroll area)
+        panel #tree_area width=100% height=100% {
+          // Узлы дерева будут отрисовываться программно с учетом scroll
+        }
+      }
+    }
+  }
+}

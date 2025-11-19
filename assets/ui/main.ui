@@ -1,0 +1,140 @@
+// Основной UI игры - верхняя и нижняя панели
+
+ui scale=auto {
+  // Верхняя панель с ресурсами и статистикой
+  panel #top_bar position=top height=auto background=#1a1a1aee padding=8 {
+    vbox gap=6 {
+      // Первая строка: Population, Gold, Happiness, Tax, статусы граждан
+      hbox #row1 gap=6 {
+        // Population
+        icon sprite="props:0" size=12
+        number bind="population" color=#ffffff scale=1.0
+        
+        // Gold
+        icon sprite="props:1" size=12
+        number bind="resources.gold" color=#ffffff scale=1.0
+        
+        // Happiness
+        icon sprite="props:2" size=12
+        number bind="happiness" color=#ffffff scale=1.0
+        
+        // Tax Rate
+        icon sprite="props:3" size=12
+        number bind="tax_rate" color=#ffffff scale=1.0
+        
+        // Citizen statuses
+        icon sprite="props:4" size=12
+        number bind="citizens.idle" color=#ffffff scale=1.0
+        
+        icon sprite="props:5" size=12
+        number bind="citizens.working" color=#ffffff scale=1.0
+        
+        icon sprite="props:6" size=12
+        number bind="citizens.sleeping" color=#ffffff scale=1.0
+        
+        icon sprite="props:7" size=12
+        number bind="citizens.hauling" color=#ffffff scale=1.0
+        
+        icon sprite="props:8" size=12
+        number bind="citizens.fetching" color=#ffffff scale=1.0
+      }
+      
+      // Вторая строка: ресурсы
+      hbox #row2 gap=6 {
+        icon sprite="props:9" size=12
+        number bind="resources.wood" color=#ffffff scale=1.0
+        
+        icon sprite="props:10" size=12
+        number bind="resources.stone" color=#ffffff scale=1.0
+        
+        icon sprite="props:11" size=12
+        number bind="resources.clay" color=#ffffff scale=1.0
+        
+        icon sprite="props:12" size=12
+        number bind="resources.bricks" color=#ffffff scale=1.0
+        
+        icon sprite="props:13" size=12
+        number bind="resources.wheat" color=#ffffff scale=1.0
+        
+        icon sprite="props:14" size=12
+        number bind="resources.flour" color=#ffffff scale=1.0
+        
+        icon sprite="props:15" size=12
+        number bind="resources.bread" color=#ffffff scale=1.0
+        
+        icon sprite="props:16" size=12
+        number bind="resources.fish" color=#ffffff scale=1.0
+        
+        icon sprite="props:17" size=12
+        number bind="resources.iron_ore" color=#ffffff scale=1.0
+        
+        icon sprite="props:18" size=12
+        number bind="resources.iron_ingots" color=#ffffff scale=1.0
+      }
+    }
+    
+    // Day progress bar
+    progressbar #day_progress position=bottom height=4 bind="day_progress" color=#dcb878cc background=#00000080
+  }
+  
+  // Нижняя панель с кнопками управления
+  panel #bottom_bar position=bottom height=auto background=#1a1a1aee padding=8 {
+    vbox gap=6 {
+      // Вкладки
+      hbox #tabs gap=6 {
+        button #tab_build text="Build" onclick="switch_tab:build" active="ui_tab==Build"
+        button #tab_economy text="Economy" onclick="switch_tab:economy" active="ui_tab==Economy"
+        button #btn_deposits text="Deposits" onclick="toggle_deposits"
+        
+        conditional if="has_research_lab" {
+          button #btn_research text="Research (T)" onclick="toggle_research"
+        }
+      }
+      
+      // Содержимое вкладки Build
+      conditional if="ui_tab==Build" {
+        // Категории зданий
+        hbox #categories gap=6 {
+          button text="Housing" onclick="select_category:housing" active="ui_category==Housing"
+          button text="Storage" onclick="select_category:storage" active="ui_category==Storage"
+          button text="Forestry" onclick="select_category:forestry" active="ui_category==Forestry"
+          button text="Mining" onclick="select_category:mining" active="ui_category==Mining"
+          button text="Food" onclick="select_category:food" active="ui_category==Food"
+          button text="Logistics" onclick="select_category:logistics" active="ui_category==Logistics"
+          button text="Research" onclick="select_category:research" active="ui_category==Research"
+        }
+        
+        // Здания выбранной категории
+        hbox #buildings gap=6 {
+          // Динамически заполняется в зависимости от категории
+        }
+      }
+      
+      // Содержимое вкладки Economy
+      conditional if="ui_tab==Economy" {
+        vbox gap=6 {
+          // Контролы налогов
+          hbox gap=6 {
+            text text="TAX" color=#c8c8c8
+            number bind="tax_rate" color=#ffffff
+            button text="-" onclick="decrease_tax"
+            button text="+" onclick="increase_tax"
+          }
+          
+          // Политика еды
+          hbox gap=6 {
+            text text="FOOD POLICY" color=#c8c8c8
+            button text="Balanced" onclick="set_food_policy:balanced" active="food_policy==Balanced"
+            button text="Bread" onclick="set_food_policy:bread" active="food_policy==BreadFirst"
+            button text="Fish" onclick="set_food_policy:fish" active="food_policy==FishFirst"
+          }
+        }
+      }
+    }
+  }
+  
+  // Кнопка паузы (если активна)
+  conditional if="paused" {
+    text #paused_label text="PAUSED" color=#ff7878 position=fixed x=800 y=50
+  }
+}
