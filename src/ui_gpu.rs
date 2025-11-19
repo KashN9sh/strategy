@@ -1306,88 +1306,190 @@ pub fn draw_research_tree_gpu(
     // Очищаем область клиппинга перед рисованием тултипов и скроллбара
     gpu.clear_clip_rect();
     
-    // Тултип для наведенного исследования с улучшенным дизайном
+    // Компактный тултип для наведенного исследования
     if let Some((kind, status, _x, _y)) = hovered_research {
         let info = kind.info();
         
-        let tooltip_w = (340.0 * scale).min(fw as f32 * 0.45);
-        let line_h = (12 * s) as f32;
-        let tooltip_pad = 10.0;
+        let tooltip_w = (240.0 * scale).min(fw as f32 * 0.32);
+        let tooltip_pad = (6 * s) as f32;
+        let section_gap = (4 * s) as f32;
         
-        // Рассчитываем высоту динамически
-        let mut content_lines = Vec::new();
+        // Вычисляем высоту тултипа
+        let mut tooltip_h = tooltip_pad * 2.0;
         
         // Заголовок
-        content_lines.push((info.name.to_uppercase(), [1.0, 0.95, 0.5, 1.0], 1.0));
+        let header_h = (10 * s) as f32;
+        tooltip_h += header_h + section_gap;
         
-        // Описание
-        let desc_lines = split_text(info.description, ((tooltip_w - tooltip_pad * 2.0) / (4.0 * scale * 0.75)) as usize);
-        for line in desc_lines {
-            content_lines.push((line, [0.9, 0.9, 0.9, 1.0], 0.75));
-        }
+        // Описание (одна строка, обрезается если нужно)
+        let desc_h = (8 * s) as f32;
+        tooltip_h += desc_h + section_gap;
         
-        // Разблокирует
+        // Разблокирует (если есть)
         if !info.unlocks_buildings.is_empty() {
-            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
-            content_lines.push(("UNLOCKS:".to_string(), [0.5, 1.0, 0.5, 1.0], 0.7));
-            for building in info.unlocks_buildings {
-                content_lines.push((format!("  - {:?}", building), [0.8, 1.0, 0.8, 1.0], 0.7));
-            }
+            tooltip_h += (7 * s) as f32 + (info.unlocks_buildings.len() as f32 * (7 * s) as f32) + section_gap;
         }
         
-        // Требования
+        // Требования (если есть)
         if !info.prerequisites.is_empty() {
-            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
-            content_lines.push(("REQUIRES:".to_string(), [1.0, 0.7, 0.5, 1.0], 0.7));
-            for prereq in info.prerequisites {
-                let prereq_info = prereq.info();
-                content_lines.push((format!("  - {}", prereq_info.name), [1.0, 0.9, 0.7, 1.0], 0.7));
-            }
+            tooltip_h += (7 * s) as f32 + (info.prerequisites.len() as f32 * (7 * s) as f32) + section_gap;
         }
         
-        // Стоимость
-        if status == ResearchStatus::Available || status == ResearchStatus::Locked {
-            content_lines.push((String::new(), [0.0, 0.0, 0.0, 0.0], 0.5)); // Отступ
-            let cost_parts = vec![
-                if info.cost.wood > 0 { format!("Wood: {}", info.cost.wood) } else { String::new() },
-                if info.cost.gold > 0 { format!("Gold: {}", info.cost.gold) } else { String::new() },
-                if info.cost.stone > 0 { format!("Stone: {}", info.cost.stone) } else { String::new() },
-            ];
-            let cost_str = cost_parts.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ");
-            if !cost_str.is_empty() {
-                content_lines.push((format!("Cost: {}", cost_str), [1.0, 0.95, 0.6, 1.0], 0.7));
-                content_lines.push((format!("Time: {} days", info.days_required), [0.6, 0.9, 1.0, 1.0], 0.7));
-            }
+        // Стоимость и время
+        if status != ResearchStatus::Completed {
+            tooltip_h += (14 * s) as f32;
         }
         
-        let tooltip_h = (content_lines.len() as f32 * line_h + tooltip_pad * 2.0).max(50.0);
         let tooltip_x = (cursor_x as f32 + 15.0).min(fw as f32 - tooltip_w - 10.0);
         let tooltip_y = (cursor_y as f32 + 15.0).min(fh as f32 - tooltip_h - 10.0);
         
         // Тень тултипа
-        gpu.add_ui_rect(tooltip_x + 4.0, tooltip_y + 4.0, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.6]);
+        gpu.add_ui_rect(tooltip_x + 3.0, tooltip_y + 3.0, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.5]);
         
-        // Фон тултипа с тройной рамкой
-        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.25, 0.35, 0.5, 0.98]);
-        gpu.add_ui_rect(tooltip_x + 2.0, tooltip_y + 2.0, tooltip_w - 4.0, tooltip_h - 4.0, [0.12, 0.18, 0.28, 1.0]);
-        gpu.add_ui_rect(tooltip_x + 3.0, tooltip_y + 3.0, tooltip_w - 6.0, tooltip_h - 6.0, [0.08, 0.12, 0.18, 1.0]);
+        // Фон тултипа
+        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.15, 0.22, 0.35, 0.98]);
+        gpu.add_ui_rect(tooltip_x + 2.0, tooltip_y + 2.0, tooltip_w - 4.0, tooltip_h - 4.0, [0.08, 0.12, 0.18, 1.0]);
         
-        // Акцентная полоска сверху
-        let accent_color = match status {
-            ResearchStatus::Available => [0.5, 1.0, 0.5, 0.9],
-            ResearchStatus::InProgress => [1.0, 0.9, 0.4, 0.9],
-            ResearchStatus::Completed => [0.4, 1.0, 0.5, 0.9],
-            ResearchStatus::Locked => [0.5, 0.5, 0.5, 0.9],
+        let mut current_y = tooltip_y + tooltip_pad;
+        
+        // === ЗАГОЛОВОК ===
+        let (status_text, status_color) = match status {
+            ResearchStatus::Available => ("READY", [0.5, 1.0, 0.5, 1.0]),
+            ResearchStatus::InProgress => ("ACTIVE", [1.0, 0.9, 0.4, 1.0]),
+            ResearchStatus::Completed => ("DONE", [0.4, 1.0, 0.5, 1.0]),
+            ResearchStatus::Locked => ("LOCKED", [0.6, 0.6, 0.6, 1.0]),
         };
-        gpu.add_ui_rect(tooltip_x + 3.0, tooltip_y + 3.0, tooltip_w - 6.0, 3.0, accent_color);
         
-        // Отрисовка текста
-        let mut ty = tooltip_y + tooltip_pad;
-        for (text, color, size_mult) in content_lines {
-            if !text.is_empty() {
-                gpu.draw_text(tooltip_x + tooltip_pad, ty, text.as_bytes(), color, scale * size_mult);
+        // Цветная полоска статуса
+        gpu.add_ui_rect(tooltip_x + 2.0, current_y, tooltip_w - 4.0, 2.0, status_color);
+        current_y += 4.0;
+        
+        // Название исследования
+        gpu.draw_text(tooltip_x + tooltip_pad, current_y, 
+                      info.name.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale * 0.7);
+        
+        // Статус справа
+        let status_x = tooltip_x + tooltip_w - tooltip_pad - (status_text.len() as f32 * 4.0 * scale * 0.5);
+        gpu.draw_text(status_x, current_y + 1.0, 
+                      status_text.as_bytes(), status_color, scale * 0.5);
+        current_y += header_h + section_gap;
+        
+        // === ОПИСАНИЕ ===
+        let max_desc_len = ((tooltip_w - tooltip_pad * 2.0) / (4.0 * scale * 0.55)) as usize;
+        let desc = if info.description.len() > max_desc_len {
+            format!("{}...", &info.description[..max_desc_len - 3])
+        } else {
+            info.description.to_string()
+        };
+        gpu.draw_text(tooltip_x + tooltip_pad, current_y, 
+                      desc.as_bytes(), [0.8, 0.85, 0.9, 1.0], scale * 0.55);
+        current_y += desc_h + section_gap;
+        
+        // === РАЗБЛОКИРУЕТ ===
+        if !info.unlocks_buildings.is_empty() {
+            // Разделитель
+            gpu.add_ui_rect(tooltip_x + tooltip_pad, current_y, tooltip_w - tooltip_pad * 2.0, 1.0, [0.3, 0.4, 0.5, 0.5]);
+            current_y += 2.0;
+            
+            gpu.draw_text(tooltip_x + tooltip_pad, current_y, 
+                          b"UNLOCKS:", [0.5, 1.0, 0.6, 1.0], scale * 0.55);
+            current_y += (7 * s) as f32;
+            
+            for building in info.unlocks_buildings {
+                // Маркер
+                gpu.add_ui_rect(tooltip_x + tooltip_pad + 3.0, current_y + 1.5, 2.5, 2.5, [0.5, 1.0, 0.6, 0.8]);
+                
+                let building_name = format!("{:?}", building);
+                gpu.draw_text(tooltip_x + tooltip_pad + 8.0, current_y, 
+                              building_name.as_bytes(), [0.8, 1.0, 0.85, 1.0], scale * 0.5);
+                current_y += (7 * s) as f32;
             }
-            ty += line_h * size_mult;
+            current_y += section_gap;
+        }
+        
+        // === ТРЕБОВАНИЯ ===
+        if !info.prerequisites.is_empty() {
+            // Разделитель
+            gpu.add_ui_rect(tooltip_x + tooltip_pad, current_y, tooltip_w - tooltip_pad * 2.0, 1.0, [0.3, 0.4, 0.5, 0.5]);
+            current_y += 2.0;
+            
+            gpu.draw_text(tooltip_x + tooltip_pad, current_y, 
+                          b"REQUIRES:", [1.0, 0.7, 0.5, 1.0], scale * 0.55);
+            current_y += (7 * s) as f32;
+            
+            for prereq in info.prerequisites {
+                let prereq_info = prereq.info();
+                let prereq_status = research_system.get_status(*prereq);
+                let prereq_done = prereq_status == ResearchStatus::Completed;
+                
+                // Маркер (галочка или крестик)
+                let marker_color = if prereq_done { 
+                    [0.5, 1.0, 0.6, 0.9] 
+                } else { 
+                    [1.0, 0.5, 0.5, 0.9] 
+                };
+                gpu.add_ui_rect(tooltip_x + tooltip_pad + 3.0, current_y + 1.5, 2.5, 2.5, marker_color);
+                
+                let text_color = if prereq_done { 
+                    [0.8, 1.0, 0.85, 1.0] 
+                } else { 
+                    [1.0, 0.8, 0.7, 1.0] 
+                };
+                gpu.draw_text(tooltip_x + tooltip_pad + 8.0, current_y, 
+                              prereq_info.name.as_bytes(), text_color, scale * 0.5);
+                current_y += (7 * s) as f32;
+            }
+            current_y += section_gap;
+        }
+        
+        // === СТОИМОСТЬ И ВРЕМЯ ===
+        if status != ResearchStatus::Completed {
+            // Разделитель
+            gpu.add_ui_rect(tooltip_x + tooltip_pad, current_y, tooltip_w - tooltip_pad * 2.0, 1.0, [0.3, 0.4, 0.5, 0.5]);
+            current_y += 3.0;
+            
+            let icon_size = (8 * s) as f32;
+            let mut icon_x = tooltip_x + tooltip_pad;
+            
+            // Иконки ресурсов
+            if info.cost.wood > 0 {
+                gpu.add_ui_rect(icon_x, current_y, icon_size, icon_size, [0.4, 0.3, 0.15, 1.0]);
+                gpu.add_ui_rect(icon_x + 0.5, current_y + 0.5, icon_size - 1.0, icon_size - 1.0, [0.7, 0.5, 0.3, 1.0]);
+                let text = format!("{}", info.cost.wood);
+                gpu.draw_text(icon_x + icon_size + 2.0, current_y + 1.0, 
+                              text.as_bytes(), [1.0, 0.9, 0.6, 1.0], scale * 0.55);
+                icon_x += icon_size + 2.0 + (text.len() as f32 * 4.0 * scale * 0.55) + 6.0;
+            }
+            
+            if info.cost.gold > 0 {
+                gpu.add_ui_rect(icon_x, current_y, icon_size, icon_size, [0.7, 0.6, 0.0, 1.0]);
+                gpu.add_ui_rect(icon_x + 0.5, current_y + 0.5, icon_size - 1.0, icon_size - 1.0, [1.0, 0.9, 0.2, 1.0]);
+                let text = format!("{}", info.cost.gold);
+                gpu.draw_text(icon_x + icon_size + 2.0, current_y + 1.0, 
+                              text.as_bytes(), [1.0, 1.0, 0.8, 1.0], scale * 0.55);
+                icon_x += icon_size + 2.0 + (text.len() as f32 * 4.0 * scale * 0.55) + 6.0;
+            }
+            
+            if info.cost.stone > 0 {
+                gpu.add_ui_rect(icon_x, current_y, icon_size, icon_size, [0.35, 0.35, 0.35, 1.0]);
+                gpu.add_ui_rect(icon_x + 0.5, current_y + 0.5, icon_size - 1.0, icon_size - 1.0, [0.6, 0.6, 0.6, 1.0]);
+                let text = format!("{}", info.cost.stone);
+                gpu.draw_text(icon_x + icon_size + 2.0, current_y + 1.0, 
+                              text.as_bytes(), [0.9, 0.9, 0.9, 1.0], scale * 0.55);
+            }
+            
+            // Время справа
+            if info.days_required > 0 {
+                let time_text = format!("{}d", info.days_required);
+                let time_x = tooltip_x + tooltip_w - tooltip_pad - (time_text.len() as f32 * 4.0 * scale * 0.55);
+                
+                // Иконка часов
+                let clock_size = (6 * s) as f32;
+                gpu.add_ui_rect(time_x - clock_size - 2.0, current_y + 1.0, clock_size, clock_size, [0.4, 0.7, 1.0, 0.8]);
+                
+                gpu.draw_text(time_x, current_y + 1.0, 
+                              time_text.as_bytes(), [0.7, 0.9, 1.0, 1.0], scale * 0.55);
+            }
         }
     }
     
