@@ -68,12 +68,14 @@ fn calculate_resources_list_width(
 }
 
 /// Вспомогательная функция для отображения списка ресурсов с иконками
+/// Если available_resources передан, проверяет достаточность и красит недостающие ресурсы красным
 fn draw_resources_list(
     gpu: &mut GpuRenderer,
     x: f32,
     y: f32,
     cost: &crate::types::Resources,
     scale: f32,
+    available_resources: Option<&crate::types::Resources>,
 ) {
     let icon_size = (10.0 * scale).max(8.0);
     let gap = 4.0 * scale;
@@ -100,8 +102,33 @@ fn draw_resources_list(
             gpu.draw_ui_props_icon(current_x, y, icon_size, get_props_index_for_resource(name));
             current_x += icon_size + 2.0 * scale;
             
+            // Определяем цвет числа: красный если ресурсов не хватает, белый если хватает
+            let number_color = if let Some(available) = available_resources {
+                let available_amount = match *name {
+                    "Wood" => available.wood,
+                    "Gold" => available.gold,
+                    "Stone" => available.stone,
+                    "Clay" => available.clay,
+                    "Bricks" => available.bricks,
+                    "Wheat" => available.wheat,
+                    "Flour" => available.flour,
+                    "Bread" => available.bread,
+                    "Fish" => available.fish,
+                    "Iron Ore" => available.iron_ore,
+                    "Iron Ingots" => available.iron_ingots,
+                    _ => *amount,
+                };
+                if available_amount < *amount {
+                    [1.0, 0.3, 0.3, 1.0] // красный цвет для недостающих ресурсов
+                } else {
+                    [1.0, 1.0, 1.0, 1.0] // белый цвет если ресурсов достаточно
+                }
+            } else {
+                [1.0, 1.0, 1.0, 1.0] // белый по умолчанию
+            };
+            
             // Число
-            gpu.draw_number(current_x, y + (icon_size - 8.0 * scale) / 2.0, *amount as u32, [1.0, 1.0, 1.0, 1.0], scale * 0.8);
+            gpu.draw_number(current_x, y + (icon_size - 8.0 * scale) / 2.0, *amount as u32, number_color, scale * 0.8);
             current_x += (amount.to_string().len() as f32 * 4.0 * 2.0 * scale * 0.8) + gap;
         }
     }
@@ -513,6 +540,7 @@ pub fn draw_ui_gpu(
             scale,
             fw as f32,
             fh as f32,
+            Some(resources), // Передаем доступные ресурсы для проверки достаточности
         );
         }
     } else if let Some(button_text) = hovered_button {
@@ -538,6 +566,7 @@ pub fn draw_ui_gpu(
                 scale,
                 fw as f32,
                 fh as f32,
+                Some(resources), // Передаем доступные ресурсы для проверки достаточности
             );
         }
     } else if let Some(resource_name) = hovered_resource {
@@ -615,6 +644,7 @@ pub fn draw_building_tooltip(
     scale: f32,
     screen_width: f32,
     _screen_height: f32,
+    _available_resources: Option<&Resources>, // Не используется для построенных зданий, только для кнопок строительства
 ) {
     use crate::types::building_cost;
     
@@ -650,7 +680,7 @@ pub fn draw_building_tooltip(
     let cons_w = cons.map(|c| c.len() as f32 * 4.0 * 2.0 * scale).unwrap_or(0.0);
     let workers_w = format!("Workers: {}/{}", workers_current, workers_target).len() as f32 * 4.0 * 2.0 * scale;
     
-    // Ширина для строки с материалами
+    // Ширина для строки с материалами (без учета доступных ресурсов, так как это только для вычисления размера)
     let cost_w = calculate_resources_list_width(&cost, scale);
     
     let tooltip_w = [name_w, prod_w, cons_w, workers_w, cost_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
@@ -688,10 +718,10 @@ pub fn draw_building_tooltip(
         text_y += line_height;
     }
     
-    // Стоимость материалов (с иконками)
+    // Стоимость материалов (с иконками) - без проверки доступности для построенных зданий
     text_y += pad * 0.5;
     let cost_y = text_y;
-    draw_resources_list(gpu, tooltip_x + pad, cost_y, &cost, scale);
+    draw_resources_list(gpu, tooltip_x + pad, cost_y, &cost, scale, None);
     text_y += icon_size + pad * 0.5;
     
     // Работники
@@ -708,6 +738,7 @@ pub fn draw_button_tooltip(
     scale: f32,
     screen_width: f32,
     _screen_height: f32,
+    available_resources: Option<&Resources>,
 ) {
     use crate::types::{building_cost, BuildingKind};
     
@@ -827,9 +858,10 @@ pub fn draw_button_tooltip(
     text_y += line_height;
     
     // Стоимость материалов (с иконками) - только для кнопок строительства
+    // Показываем красным цветом, если ресурсов не хватает
     if let Some(ref cost) = cost_opt {
         text_y += pad * 0.5;
-        draw_resources_list(gpu, tooltip_x + pad, text_y, cost, scale);
+        draw_resources_list(gpu, tooltip_x + pad, text_y, cost, scale, available_resources);
     }
 }
 
