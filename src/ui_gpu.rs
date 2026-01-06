@@ -33,6 +33,80 @@ fn get_props_index_for_resource(resource_name: &str) -> u32 {
     }
 }
 
+/// Вычисляет ширину, которую займет список ресурсов
+fn calculate_resources_list_width(
+    cost: &crate::types::Resources,
+    scale: f32,
+) -> f32 {
+    let icon_size = (10.0 * scale).max(8.0);
+    let gap = 4.0 * scale;
+    let mut width = 0.0;
+    
+    // Список ресурсов для отображения (в порядке приоритета)
+    let resources_to_show = [
+        ("Wood", cost.wood),
+        ("Gold", cost.gold),
+        ("Stone", cost.stone),
+        ("Clay", cost.clay),
+        ("Bricks", cost.bricks),
+        ("Wheat", cost.wheat),
+        ("Flour", cost.flour),
+        ("Bread", cost.bread),
+        ("Fish", cost.fish),
+        ("Iron Ore", cost.iron_ore),
+        ("Iron Ingots", cost.iron_ingots),
+    ];
+    
+    for (_name, amount) in resources_to_show.iter() {
+        if *amount > 0 {
+            width += icon_size + 2.0 * scale; // иконка + отступ
+            width += (amount.to_string().len() as f32 * 4.0 * 2.0 * scale * 0.8) + gap; // число + отступ
+        }
+    }
+    
+    width
+}
+
+/// Вспомогательная функция для отображения списка ресурсов с иконками
+fn draw_resources_list(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    cost: &crate::types::Resources,
+    scale: f32,
+) {
+    let icon_size = (10.0 * scale).max(8.0);
+    let gap = 4.0 * scale;
+    let mut current_x = x;
+    
+    // Список ресурсов для отображения (в порядке приоритета)
+    let resources_to_show = [
+        ("Wood", cost.wood),
+        ("Gold", cost.gold),
+        ("Stone", cost.stone),
+        ("Clay", cost.clay),
+        ("Bricks", cost.bricks),
+        ("Wheat", cost.wheat),
+        ("Flour", cost.flour),
+        ("Bread", cost.bread),
+        ("Fish", cost.fish),
+        ("Iron Ore", cost.iron_ore),
+        ("Iron Ingots", cost.iron_ingots),
+    ];
+    
+    for (name, amount) in resources_to_show.iter() {
+        if *amount > 0 {
+            // Иконка ресурса
+            gpu.draw_ui_props_icon(current_x, y, icon_size, get_props_index_for_resource(name));
+            current_x += icon_size + 2.0 * scale;
+            
+            // Число
+            gpu.draw_number(current_x, y + (icon_size - 8.0 * scale) / 2.0, *amount as u32, [1.0, 1.0, 1.0, 1.0], scale * 0.8);
+            current_x += (amount.to_string().len() as f32 * 4.0 * 2.0 * scale * 0.8) + gap;
+        }
+    }
+}
+
 /// GPU версия draw_ui - использует GpuRenderer вместо CPU frame buffer
 pub fn draw_ui_gpu(
     gpu: &mut GpuRenderer,
@@ -542,9 +616,15 @@ pub fn draw_building_tooltip(
     screen_width: f32,
     _screen_height: f32,
 ) {
+    use crate::types::building_cost;
+    
     let s = scale as i32;
     let pad = (4 * s) as f32;
     let line_height = (12 * s) as f32;
+    let icon_size = (10.0 * scale).max(8.0);
+    
+    // Получаем стоимость здания
+    let cost = building_cost(building_kind);
     
     // Получаем информацию о здании
     let (name, prod, cons) = match building_kind {
@@ -570,8 +650,18 @@ pub fn draw_building_tooltip(
     let cons_w = cons.map(|c| c.len() as f32 * 4.0 * 2.0 * scale).unwrap_or(0.0);
     let workers_w = format!("Workers: {}/{}", workers_current, workers_target).len() as f32 * 4.0 * 2.0 * scale;
     
-    let tooltip_w = [name_w, prod_w, cons_w, workers_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
-    let tooltip_h = line_height * 4.0 + pad * 2.0;
+    // Ширина для строки с материалами
+    let cost_w = calculate_resources_list_width(&cost, scale);
+    
+    let tooltip_w = [name_w, prod_w, cons_w, workers_w, cost_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    
+    // Вычисляем высоту тултипа (учитываем строку с материалами)
+    let mut tooltip_h = line_height * 3.0 + pad * 2.0; // название, производство, работники
+    if cons.is_some() {
+        tooltip_h += line_height; // потребление
+    }
+    // Добавляем высоту для строки с материалами
+    tooltip_h += icon_size + pad;
     
     // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
     let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
@@ -598,6 +688,12 @@ pub fn draw_building_tooltip(
         text_y += line_height;
     }
     
+    // Стоимость материалов (с иконками)
+    text_y += pad * 0.5;
+    let cost_y = text_y;
+    draw_resources_list(gpu, tooltip_x + pad, cost_y, &cost, scale);
+    text_y += icon_size + pad * 0.5;
+    
     // Работники
     let workers_text = format!("Workers: {}/{}", workers_current, workers_target);
     gpu.draw_text(tooltip_x + pad, text_y, workers_text.as_bytes(), [1.0, 1.0, 0.7, 1.0], scale);
@@ -613,16 +709,42 @@ pub fn draw_button_tooltip(
     screen_width: f32,
     _screen_height: f32,
 ) {
+    use crate::types::{building_cost, BuildingKind};
+    
     let s = scale as i32;
     let pad = (4 * s) as f32;
     let line_height = (12 * s) as f32;
+    let icon_size = (10.0 * scale).max(8.0);
+    
+    // Определяем BuildingKind из button_text (для кнопок строительства)
+    // Важно: названия должны совпадать с теми, что возвращает get_hovered_button
+    let building_kind_opt = match button_text {
+        "Lumberjack" => Some(BuildingKind::Lumberjack),
+        "Forester" => Some(BuildingKind::Forester),
+        "Quarry" => Some(BuildingKind::StoneQuarry), // В UI это "Quarry", не "Stone Quarry"
+        "Clay Pit" => Some(BuildingKind::ClayPit),
+        "Iron Mine" => Some(BuildingKind::IronMine),
+        "Wheat Field" => Some(BuildingKind::WheatField),
+        "Mill" => Some(BuildingKind::Mill),
+        "Bakery" => Some(BuildingKind::Bakery),
+        "Kiln" => Some(BuildingKind::Kiln),
+        "Smelter" => Some(BuildingKind::Smelter),
+        "Fishery" => Some(BuildingKind::Fishery),
+        "House" => Some(BuildingKind::House),
+        "Warehouse" => Some(BuildingKind::Warehouse),
+        "Research Lab" => Some(BuildingKind::ResearchLab),
+        _ => None,
+    };
+    
+    // Получаем стоимость, если это кнопка строительства
+    let cost_opt = building_kind_opt.map(|bk| building_cost(bk));
     
     // Получаем информацию о кнопке
     let (name, description) = match button_text {
-        // Здания
+        // Здания (названия должны совпадать с get_hovered_button)
         "Lumberjack" => ("Lumberjack", "Produces wood from trees. Requires workers."),
         "Forester" => ("Forester", "Plants new trees. Requires workers."),
-        "Stone Quarry" => ("Stone Quarry", "Mines stone from deposits. Requires workers."),
+        "Quarry" => ("Stone Quarry", "Mines stone from deposits. Requires workers."),
         "Clay Pit" => ("Clay Pit", "Mines clay from deposits. Requires workers."),
         "Iron Mine" => ("Iron Mine", "Mines iron ore from deposits. Requires workers."),
         "Wheat Field" => ("Wheat Field", "Grows wheat for food. Requires workers."),
@@ -633,6 +755,7 @@ pub fn draw_button_tooltip(
         "Fishery" => ("Fishery", "Catches fish from water. Requires workers."),
         "House" => ("House", "Provides housing for citizens."),
         "Warehouse" => ("Warehouse", "Stores resources and goods."),
+        "Research Lab" => ("Research Lab", "Enables research and unlocks new technologies."),
         
         // Управление
         "Pause" => ("Pause", "Pause/unpause the game."),
@@ -669,8 +792,20 @@ pub fn draw_button_tooltip(
     let name_w = name.len() as f32 * 4.0 * 2.0 * scale;
     let desc_w = description.len() as f32 * 4.0 * 2.0 * scale;
     
-    let tooltip_w = [name_w, desc_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
-    let tooltip_h = line_height * 2.0 + pad * 2.0;
+    // Если есть стоимость, учитываем её в ширине
+    let cost_w = if let Some(ref cost) = cost_opt {
+        calculate_resources_list_width(cost, scale)
+    } else {
+        0.0
+    };
+    
+    let tooltip_w = [name_w, desc_w, cost_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    
+    // Вычисляем высоту тултипа
+    let mut tooltip_h = line_height * 2.0 + pad * 2.0; // название + описание
+    if cost_opt.is_some() {
+        tooltip_h += icon_size + pad; // строка с материалами
+    }
     
     // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
     let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
@@ -689,6 +824,13 @@ pub fn draw_button_tooltip(
     
     // Описание
     gpu.draw_text(tooltip_x + pad, text_y, description.as_bytes(), [0.8, 0.8, 0.8, 1.0], scale);
+    text_y += line_height;
+    
+    // Стоимость материалов (с иконками) - только для кнопок строительства
+    if let Some(ref cost) = cost_opt {
+        text_y += pad * 0.5;
+        draw_resources_list(gpu, tooltip_x + pad, text_y, cost, scale);
+    }
 }
 
 /// Рендеринг тултипа для ресурса

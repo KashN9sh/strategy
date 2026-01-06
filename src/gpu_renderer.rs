@@ -703,6 +703,7 @@ pub struct GpuRenderer {
     tooltip_start_index: usize, // Индекс, где начинаются тултипы в ui_rects
     minimap_instances: Vec<UIRect>,
     ui_props_instances: Vec<UIPropsInstance>, // UI спрайты из props.png
+    tooltip_props_start_index: usize, // Индекс, где начинаются иконки тултипов в ui_props_instances
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
     citizen_instance_buffer: wgpu::Buffer,
@@ -2027,6 +2028,7 @@ impl GpuRenderer {
             fog_instances: Vec::new(),
             ui_rects: Vec::new(),
             tooltip_start_index: 0,
+            tooltip_props_start_index: 0,
             minimap_instances: Vec::new(),
             tile_instance_buffer,
             building_instance_buffer,
@@ -2378,11 +2380,13 @@ impl GpuRenderer {
         self.ui_rects.clear();
         self.tooltip_start_index = 0;
         self.ui_props_instances.clear();
+        self.tooltip_props_start_index = 0;
     }
     
     // Запоминает текущий размер ui_rects как начало тултипов
     pub fn start_tooltips(&mut self) {
         self.tooltip_start_index = self.ui_rects.len();
+        self.tooltip_props_start_index = self.ui_props_instances.len();
     }
     
     // Установить область клиппинга для UI элементов
@@ -3594,8 +3598,8 @@ impl GpuRenderer {
                 render_pass.draw_indexed(0..6, 0, 0..self.ui_rects.len() as u32);
             }
             
-            // 2. Рендерим UI спрайты из props.png (иконки)
-            if !self.ui_props_instances.is_empty() {
+            // 2. Рендерим UI спрайты из props.png (иконки) - только обычные, не тултипы
+            if self.tooltip_props_start_index > 0 {
                 if let Some(ref props_bind_group) = self.props_texture_bind_group {
                     render_pass.set_pipeline(&self.ui_props_render_pipeline);
                     render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -3603,7 +3607,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.ui_props_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.ui_props_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..self.tooltip_props_start_index as u32);
                 }
             }
             
@@ -3630,6 +3634,22 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(tooltip_offset..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..6, 0, 0..tooltip_count as u32);
+            }
+            
+            // 5. Рендерим иконки тултипов поверх тултипов
+            if self.tooltip_props_start_index < self.ui_props_instances.len() {
+                let tooltip_props_count = self.ui_props_instances.len() - self.tooltip_props_start_index;
+                if let Some(ref props_bind_group) = self.props_texture_bind_group {
+                    render_pass.set_pipeline(&self.ui_props_render_pipeline);
+                    render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                    render_pass.set_bind_group(1, props_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                    // Используем offset для иконок тултипов в буфере
+                    let tooltip_props_offset = (std::mem::size_of::<UIPropsInstance>() * self.tooltip_props_start_index) as wgpu::BufferAddress;
+                    render_pass.set_vertex_buffer(1, self.ui_props_instance_buffer.slice(tooltip_props_offset..));
+                    render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..tooltip_props_count as u32);
+                }
             }
             
             
