@@ -1881,42 +1881,72 @@ pub fn draw_notifications_gpu(
     let scale = s as f32;
     
     let pad = (8 * s) as f32;
-    let notification_h = (40 * s) as f32;
-    let notification_w = (400 * s) as f32;
-    let gap = (8 * s) as f32;
+    let gap = (6 * s) as f32;
+    let icon_size = (12 * s) as f32;
+    let notification_pad = (6 * s) as f32;
     
     // Уведомления отображаются в верхнем правом углу
     let mut y = pad;
+    let right_x = fw as f32 - pad;
     
     for notification in notifications.iter().take(5) {
         let alpha = notification.alpha();
         let text = notification.text();
         
-        // Цвет фона в зависимости от типа уведомления
-        let bg_color = match &notification.kind {
+        // Белый текст для всех уведомлений
+        let text_color = [1.0, 1.0, 1.0, alpha];
+        
+        // Иконка для типа уведомления
+        let icon_index = match &notification.kind {
             crate::notifications::NotificationKind::ResearchCompleted { .. } => {
-                [0.1, 0.5, 0.8, 0.9 * alpha]
+                get_props_index_for_resource("Happiness") // Можно заменить на иконку исследования
             }
             crate::notifications::NotificationKind::BuildingUnlocked { .. } => {
-                [0.1, 0.7, 0.3, 0.9 * alpha]
+                get_props_index_for_resource("Working")
             }
             crate::notifications::NotificationKind::Warning { .. } => {
-                [0.8, 0.5, 0.1, 0.9 * alpha]
+                get_props_index_for_resource("Idle")
             }
             crate::notifications::NotificationKind::Info { .. } => {
-                [0.3, 0.3, 0.3, 0.9 * alpha]
+                get_props_index_for_resource("Gold")
             }
         };
         
-        let x = fw as f32 - notification_w - pad;
+        // Вычисляем ширину уведомления
+        let text_w = text.len() as f32 * 4.0 * 2.0 * scale;
+        let notification_w = text_w + icon_size + notification_pad * 3.0;
+        let notification_h = icon_size + notification_pad * 2.0;
+        let x = right_x - notification_w;
+        
+        // Цветной фон уведомления в зависимости от типа (почти непрозрачный)
+        let bg_color = match &notification.kind {
+            crate::notifications::NotificationKind::ResearchCompleted { .. } => {
+                [0.1, 0.4, 0.7, 0.95 * alpha] // Голубой
+            }
+            crate::notifications::NotificationKind::BuildingUnlocked { .. } => {
+                [0.1, 0.6, 0.3, 0.95 * alpha] // Зеленый
+            }
+            crate::notifications::NotificationKind::Warning { .. } => {
+                [0.7, 0.4, 0.1, 0.95 * alpha] // Оранжевый
+            }
+            crate::notifications::NotificationKind::Info { .. } => {
+                [0.2, 0.2, 0.2, 0.95 * alpha] // Темно-серый
+            }
+        };
         
         // Фон уведомления
         gpu.add_ui_rect(x, y, notification_w, notification_h, [0.0, 0.0, 0.0, 0.8 * alpha]);
-        gpu.add_ui_rect(x + 2.0, y + 2.0, notification_w - 4.0, notification_h - 4.0, bg_color);
+        gpu.add_ui_rect(x + 1.0, y + 1.0, notification_w - 2.0, notification_h - 2.0, bg_color);
         
-        // Текст уведомления
-        let text_color = [1.0, 1.0, 1.0, alpha];
-        gpu.draw_text(x + pad, y + pad, text.as_bytes(), text_color, scale);
+        // Иконка
+        let icon_x = x + notification_pad;
+        let icon_y = y + notification_pad;
+        gpu.draw_ui_props_icon(icon_x, icon_y, icon_size, icon_index);
+        
+        // Текст белый без обводки
+        let text_x = icon_x + icon_size + notification_pad;
+        let text_y = icon_y;
+        gpu.draw_text(text_x, text_y, text.as_bytes(), text_color, scale);
         
         y += notification_h + gap;
     }
