@@ -29,6 +29,7 @@ pub struct Firefly {
 pub enum AppState {
     MainMenu,
     Playing,
+    Paused,
 }
 
 /// Полное состояние игры

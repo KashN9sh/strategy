@@ -69,6 +69,7 @@ fn run() -> Result<()> {
     let mut rng_init = StdRng::seed_from_u64(42);
     let mut game_state = game_state::GameState::new(&mut rng_init, &config);
     let mut main_menu = MainMenu::new();
+    let mut pause_menu = menu::PauseMenu::new();
     
     // Загрузить все текстуры
     atlas::load_textures(
@@ -96,7 +97,12 @@ fn run() -> Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => elwt.exit(),
                 WindowEvent::KeyboardInput { event, .. } => {
-                    // Обработка меню
+                    // Обрабатываем только нажатия клавиш, не отпускания
+                    if event.state != winit::event::ElementState::Pressed {
+                        return;
+                    }
+                    
+                    // Обработка главного меню
                     if game_state.app_state == game_state::AppState::MainMenu {
                         if let Some(action) = main_menu.handle_key(event.physical_key) {
                             match action {
@@ -136,17 +142,40 @@ fn run() -> Result<()> {
                         return;
                     }
                     
-                    if event_handler::handle_keyboard_input(
-                        event.physical_key,
-                        &event.state,
-                        elwt,
-                        &mut game_state,
-                        &mut camera,
-                        &input,
-                        &config,
-                        &mut gpu_renderer,
-                    ) {
+                    // Обработка меню паузы
+                    if game_state.app_state == game_state::AppState::Paused {
+                        use menu::PauseMenuAction;
+                        if let Some(action) = pause_menu.handle_key(event.physical_key) {
+                            match action {
+                                PauseMenuAction::Resume => {
+                                    game_state.app_state = game_state::AppState::Playing;
+                                }
+                                PauseMenuAction::Settings => {
+                                    // TODO: Реализовать настройки
+                                    eprintln!("Настройки пока не реализованы");
+                                }
+                                PauseMenuAction::QuitToMenu => {
+                                    game_state.app_state = game_state::AppState::MainMenu;
+                                }
+                            }
+                        }
                         return;
+                    }
+                    
+                    // Обработка событий клавиатуры в игре (только если мы в состоянии Playing)
+                    if game_state.app_state == game_state::AppState::Playing {
+                        if event_handler::handle_keyboard_input(
+                            event.physical_key,
+                            &event.state,
+                            elwt,
+                            &mut game_state,
+                            &mut camera,
+                            &input,
+                            &config,
+                            &mut gpu_renderer,
+                        ) {
+                            return;
+                        }
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {
@@ -161,11 +190,48 @@ fn run() -> Result<()> {
                             game_state.height_i32,
                             config.ui_scale_base,
                         );
+                    } else if game_state.app_state == game_state::AppState::Paused {
+                        pause_menu.handle_hover(
+                            game_state.cursor_xy.x,
+                            game_state.cursor_xy.y,
+                            game_state.width_i32,
+                            game_state.height_i32,
+                            config.ui_scale_base,
+                        );
                     } else if game_state.app_state == game_state::AppState::Playing {
                         event_handler::handle_cursor_moved(position, &mut game_state, &camera);
                     }
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
+                    if game_state.app_state == game_state::AppState::Paused {
+                        if let winit::event::MouseButton::Left = button {
+                            if state == winit::event::ElementState::Pressed {
+                                use menu::PauseMenuAction;
+                                if let Some(action) = pause_menu.handle_click(
+                                    game_state.cursor_xy.x,
+                                    game_state.cursor_xy.y,
+                                    game_state.width_i32,
+                                    game_state.height_i32,
+                                    config.ui_scale_base,
+                                ) {
+                                    match action {
+                                        PauseMenuAction::Resume => {
+                                            game_state.app_state = game_state::AppState::Playing;
+                                        }
+                                        PauseMenuAction::Settings => {
+                                            // TODO: Реализовать настройки
+                                            eprintln!("Настройки пока не реализованы");
+                                        }
+                                        PauseMenuAction::QuitToMenu => {
+                                            game_state.app_state = game_state::AppState::MainMenu;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    
                     if game_state.app_state == game_state::AppState::MainMenu {
                         if let winit::event::MouseButton::Left = button {
                             if state == winit::event::ElementState::Pressed {
@@ -409,16 +475,27 @@ fn run() -> Result<()> {
                     0.0
                 };
                 gpu_renderer.update_night_overlay(night_alpha);
+                
+                // Рендеринг меню паузы поверх игры (если игра на паузе)
+                if game_state.app_state == game_state::AppState::Paused {
+                    menu::draw_pause_menu(
+                        &mut gpu_renderer,
+                        game_state.width_i32,
+                        game_state.height_i32,
+                        &pause_menu,
+                        config.ui_scale_base,
+                    );
+                }
                     
-                    if let Err(err) = gpu_renderer.render() {
-                        eprintln!("gpu_renderer.render() failed: {err}");
-                        elwt.exit();
-                    }
+                if let Err(err) = gpu_renderer.render() {
+                    eprintln!("gpu_renderer.render() failed: {err}");
+                    elwt.exit();
+                }
                 }
                 _ => {}
             },
             Event::AboutToWait => {
-                // Обновляем состояние игры только если мы в игре
+                // Обновляем состояние игры только если мы в игре (не в меню и не на паузе)
                 if game_state.app_state == game_state::AppState::Playing {
                     let now = Instant::now();
                     let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;

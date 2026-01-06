@@ -134,6 +134,143 @@ impl MainMenu {
     }
 }
 
+/// Опции меню паузы
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseMenuOption {
+    Resume,
+    Settings,
+    QuitToMenu,
+}
+
+/// Состояние меню паузы
+pub struct PauseMenu {
+    pub selected_option: Option<PauseMenuOption>,
+}
+
+impl PauseMenu {
+    pub fn new() -> Self {
+        Self {
+            selected_option: None,
+        }
+    }
+    
+    /// Обработка наведения мыши
+    pub fn handle_hover(&mut self, x: i32, y: i32, width: i32, height: i32, base_scale: f32) {
+        let scale = crate::ui::ui_scale(height, base_scale) as f32;
+        let center_x = width as f32 / 2.0;
+        let start_y = height as f32 / 2.0 - 50.0 * scale;
+        let btn_height = 40.0 * scale;
+        let btn_spacing = 50.0 * scale;
+        
+        let options = [
+            PauseMenuOption::Resume,
+            PauseMenuOption::Settings,
+            PauseMenuOption::QuitToMenu,
+        ];
+        
+        let mut found_hover = false;
+        for (i, &option) in options.iter().enumerate() {
+            let btn_y = start_y + (i as f32 * btn_spacing);
+            let btn_x = center_x - 150.0 * scale;
+            let btn_w = 300.0 * scale;
+            
+            if x as f32 >= btn_x && x as f32 <= btn_x + btn_w &&
+               y as f32 >= btn_y && y as f32 <= btn_y + btn_height {
+                self.selected_option = Some(option);
+                found_hover = true;
+                break;
+            }
+        }
+        
+        if !found_hover {
+            self.selected_option = None;
+        }
+    }
+    
+    /// Обработка навигации по меню (клавиатура)
+    pub fn handle_key(&mut self, key: winit::keyboard::PhysicalKey) -> Option<PauseMenuAction> {
+        use winit::keyboard::{PhysicalKey, KeyCode};
+        
+        match key {
+            PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
+                let start_option = self.selected_option.unwrap_or(PauseMenuOption::Resume);
+                self.selected_option = Some(match start_option {
+                    PauseMenuOption::Resume => PauseMenuOption::QuitToMenu,
+                    PauseMenuOption::Settings => PauseMenuOption::Resume,
+                    PauseMenuOption::QuitToMenu => PauseMenuOption::Settings,
+                });
+                None
+            }
+            PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
+                let start_option = self.selected_option.unwrap_or(PauseMenuOption::Resume);
+                self.selected_option = Some(match start_option {
+                    PauseMenuOption::Resume => PauseMenuOption::Settings,
+                    PauseMenuOption::Settings => PauseMenuOption::QuitToMenu,
+                    PauseMenuOption::QuitToMenu => PauseMenuOption::Resume,
+                });
+                None
+            }
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Space) => {
+                if let Some(option) = self.selected_option {
+                    Some(option.into())
+                } else {
+                    Some(PauseMenuAction::Resume) // По умолчанию Resume
+                }
+            }
+            PhysicalKey::Code(KeyCode::Escape) => {
+                Some(PauseMenuAction::Resume)
+            }
+            _ => None,
+        }
+    }
+    
+    /// Обработка клика мыши
+    pub fn handle_click(&mut self, x: i32, y: i32, width: i32, height: i32, base_scale: f32) -> Option<PauseMenuAction> {
+        let scale = crate::ui::ui_scale(height, base_scale) as f32;
+        let center_x = width as f32 / 2.0;
+        let start_y = height as f32 / 2.0 - 50.0 * scale;
+        let btn_height = 40.0 * scale;
+        let btn_spacing = 50.0 * scale;
+        
+        let options = [
+            PauseMenuOption::Resume,
+            PauseMenuOption::Settings,
+            PauseMenuOption::QuitToMenu,
+        ];
+        
+        for (i, &option) in options.iter().enumerate() {
+            let btn_y = start_y + (i as f32 * btn_spacing);
+            let btn_x = center_x - 150.0 * scale;
+            let btn_w = 300.0 * scale;
+            
+            if x as f32 >= btn_x && x as f32 <= btn_x + btn_w &&
+               y as f32 >= btn_y && y as f32 <= btn_y + btn_height {
+                return Some(option.into());
+            }
+        }
+        
+        None
+    }
+}
+
+/// Действие, выбранное в меню паузы
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseMenuAction {
+    Resume,
+    Settings,
+    QuitToMenu,
+}
+
+impl From<PauseMenuOption> for PauseMenuAction {
+    fn from(option: PauseMenuOption) -> Self {
+        match option {
+            PauseMenuOption::Resume => PauseMenuAction::Resume,
+            PauseMenuOption::Settings => PauseMenuAction::Settings,
+            PauseMenuOption::QuitToMenu => PauseMenuAction::QuitToMenu,
+        }
+    }
+}
+
 /// Действие, выбранное в меню
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAction {
@@ -151,6 +288,73 @@ impl From<MenuOption> for MenuAction {
             MenuOption::Settings => MenuAction::Settings,
             MenuOption::Quit => MenuAction::Quit,
         }
+    }
+}
+
+/// Рендеринг меню паузы (оверлей поверх игры)
+pub fn draw_pause_menu(
+    gpu: &mut GpuRenderer,
+    width: i32,
+    height: i32,
+    menu: &PauseMenu,
+    base_scale: f32,
+) {
+    let scale = crate::ui::ui_scale(height, base_scale) as f32;
+    let center_x = width as f32 / 2.0;
+    let start_y = height as f32 / 2.0 - 50.0 * scale;
+    let btn_height = 40.0 * scale;
+    let btn_spacing = 50.0 * scale;
+    
+    // Полупрозрачный оверлей поверх игры
+    gpu.add_ui_rect(0.0, 0.0, width as f32, height as f32, [0.0, 0.0, 0.0, 0.7]);
+    
+    // Заголовок "PAUSED"
+    let title = b"PAUSED";
+    let title_scale = scale * 2.0;
+    // Ширина текста: каждый символ занимает 4.0 * px, где px = 2.0 * scale
+    // Для title_scale: px = 2.0 * title_scale, char_width = 4.0 * px = 8.0 * title_scale
+    let title_w = title.len() as f32 * 8.0 * title_scale;
+    let title_x = center_x - title_w / 2.0;
+    let title_y = start_y - 80.0 * scale;
+    gpu.draw_text(title_x, title_y, title, [1.0, 1.0, 0.8, 1.0], title_scale);
+    
+    // Опции меню
+    let options: &[(PauseMenuOption, &[u8])] = &[
+        (PauseMenuOption::Resume, b"Resume"),
+        (PauseMenuOption::Settings, b"Settings"),
+        (PauseMenuOption::QuitToMenu, b"Quit to Menu"),
+    ];
+    
+    for (i, (option, label)) in options.iter().enumerate() {
+        let btn_y = start_y + (i as f32 * btn_spacing);
+        let btn_x = center_x - 150.0 * scale;
+        let btn_w = 300.0 * scale;
+        
+        let is_selected = menu.selected_option == Some(*option);
+        
+        let bg_color = if is_selected {
+            [185.0/255.0, 140.0/255.0, 95.0/255.0, 220.0/255.0]
+        } else {
+            [140.0/255.0, 105.0/255.0, 75.0/255.0, 180.0/255.0]
+        };
+        
+        gpu.add_ui_rect(btn_x, btn_y, btn_w, btn_height, bg_color);
+        
+        let band = (2.0 * scale).max(2.0);
+        gpu.add_ui_rect(btn_x, btn_y, btn_w, band, [1.0, 1.0, 1.0, 0.27]);
+        gpu.add_ui_rect(btn_x, btn_y + btn_height - band, btn_w, band, [0.0, 0.0, 0.0, 0.23]);
+        
+        let text_w = label.len() as f32 * 4.0 * 2.0 * scale;
+        let text_x = btn_x + (btn_w - text_w) / 2.0;
+        let text_y = btn_y + (btn_height - 5.0 * 2.0 * scale) / 2.0;
+        
+        let text_color = if is_selected {
+            [1.0, 1.0, 0.9, 1.0]
+        } else {
+            [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0]
+        };
+        
+        gpu.draw_text(text_x, text_y, *label, text_color, scale as f32);
     }
 }
 

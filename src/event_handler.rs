@@ -24,6 +24,11 @@ pub fn handle_keyboard_input(
 ) -> bool {
     // true = событие обработано, не нужно дальше обрабатывать
     
+    // Не обрабатываем события клавиатуры, если игра на паузе (меню паузы обрабатывает их отдельно)
+    if game_state.app_state == crate::game_state::AppState::Paused {
+        return false;
+    }
+    
     if *state != ElementState::Pressed {
         return false;
     }
@@ -54,7 +59,7 @@ pub fn handle_keyboard_input(
     
     // Используем Command Pattern для обработки основных команд
     if let PhysicalKey::Code(key_code) = key {
-        // Escape: отменить выбор здания, закрыть окно исследований или выйти из игры
+        // Escape: отменить выбор здания, закрыть окно исследований или открыть меню паузы
         if key_code == KeyCode::Escape {
             // Закрыть окно исследований, если оно открыто
             if game_state.show_research_tree {
@@ -66,7 +71,12 @@ pub fn handle_keyboard_input(
                 game_state.selected_building = None;
                 return true;
             }
-            // Иначе - выход из игры
+            // Иначе - открыть меню паузы (если мы в игре)
+            if game_state.app_state == crate::game_state::AppState::Playing {
+                game_state.app_state = crate::game_state::AppState::Paused;
+                return true;
+            }
+            // Если не в игре - выход из игры
             let exit_cmd = ExitCommand;
             return exit_cmd.execute(game_state, camera, elwt, input, config, gpu_renderer);
         }
