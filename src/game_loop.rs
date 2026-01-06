@@ -19,18 +19,31 @@ pub const DAY_LENGTH_MS: f32 = 120_000.0;
 /// Главная функция обновления игрового состояния
 pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &crate::input::Config) {
     game_state.accumulator_ms += frame_ms;
-    game_state.water_anim_time += frame_ms;
     if frame_ms > 0.0 {
         game_state.fps_ema = game_state.fps_ema * 0.9 + (1000.0 / frame_ms) * 0.1;
     }
 
     let base_step_ms = config.base_step_ms;
-    let step_ms = (base_step_ms / game_state.speed_mult.max(0.0001)).max(1.0);
+    
+    // Вычисляем ускоренное время для визуальных эффектов
+    let accelerated_frame_ms = if !game_state.paused {
+        frame_ms * game_state.speed_mult
+    } else {
+        frame_ms
+    };
 
     if !game_state.paused {
-        while game_state.accumulator_ms >= step_ms {
+        // Используем базовый шаг для контроля частоты обновлений
+        let step_ms = base_step_ms;
+        // Ускоренное время для симуляции (граждане, время, производство)
+        let accelerated_step_ms = step_ms * game_state.speed_mult;
+        
+        // Ускоряем accumulator, чтобы шаги выполнялись чаще при ускорении
+        let mut accelerated_accumulator = game_state.accumulator_ms * game_state.speed_mult;
+        
+        while accelerated_accumulator >= step_ms {
             update_game_simulation(
-                step_ms,
+                accelerated_step_ms, // Передаем ускоренное время в симуляцию
                 &mut game_state.world_clock_ms,
                 &mut game_state.prev_is_day_flag,
                 &mut game_state.world,
@@ -49,20 +62,26 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
                 &mut game_state.research_system,
                 &mut game_state.notification_system,
             );
-            game_state.accumulator_ms -= step_ms;
-            if game_state.accumulator_ms > 10.0 * step_ms {
-                game_state.accumulator_ms = 0.0;
+            accelerated_accumulator -= step_ms;
+            if accelerated_accumulator > 10.0 * step_ms {
+                accelerated_accumulator = 0.0;
                 break;
             }
         }
+        
+        // Сохраняем обратно в accumulator
+        game_state.accumulator_ms = accelerated_accumulator / game_state.speed_mult;
     }
     
-    // Обновление уведомлений
+    // Обновление уведомлений (используем реальное время, чтобы они не исчезали слишком быстро)
     game_state.notification_system.update(frame_ms);
     
-    // Обновление погоды и светлячков
-    game_state.weather_system.update(frame_ms, &mut game_state.rng);
-    update_fireflies(game_state, frame_ms);
+    // Обновление погоды и светлячков (используем ускоренное время)
+    game_state.weather_system.update(accelerated_frame_ms, &mut game_state.rng);
+    update_fireflies(game_state, accelerated_frame_ms);
+    
+    // Обновление анимации воды (используем ускоренное время)
+    game_state.water_anim_time += accelerated_frame_ms;
     
     // Обновление музыки
     if let Some(ref mut music_manager) = game_state.music_manager {
