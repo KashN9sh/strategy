@@ -110,8 +110,12 @@ fn run() -> Result<()> {
                                     // Создаем новую игру
                                     let mut new_rng = StdRng::seed_from_u64(42);
                                     game_state = game_state::GameState::new(&mut new_rng, &config);
-                                    game_state.width_i32 = size.width as i32;
-                                    game_state.height_i32 = size.height as i32;
+                                    // Используем текущий размер окна
+                                    let current_size = window.inner_size();
+                                    game_state.width_i32 = current_size.width as i32;
+                                    game_state.height_i32 = current_size.height as i32;
+                                    // Обновляем размер в gpu_renderer
+                                    gpu_renderer.resize(current_size);
                                     atlas::load_textures(
                                         &mut game_state.atlas,
                                         &mut game_state.building_atlas,
@@ -133,8 +137,12 @@ fn run() -> Result<()> {
                                     if let Ok(save) = save::load_game() {
                                         let mut new_rng = StdRng::seed_from_u64(save.seed);
                                         game_state = game_state::GameState::new(&mut new_rng, &config);
-                                        game_state.width_i32 = size.width as i32;
-                                        game_state.height_i32 = size.height as i32;
+                                        // Используем текущий размер окна
+                                        let current_size = window.inner_size();
+                                        game_state.width_i32 = current_size.width as i32;
+                                        game_state.height_i32 = current_size.height as i32;
+                                        // Обновляем размер в gpu_renderer
+                                        gpu_renderer.resize(current_size);
                                         
                                         // Восстанавливаем состояние из сохранения
                                         game_state.seed = save.seed;
@@ -404,8 +412,12 @@ fn run() -> Result<()> {
                                         MenuAction::NewGame => {
                                             let mut new_rng = StdRng::seed_from_u64(42);
                                             game_state = game_state::GameState::new(&mut new_rng, &config);
-                                            game_state.width_i32 = size.width as i32;
-                                            game_state.height_i32 = size.height as i32;
+                                            // Используем текущий размер окна
+                                            let current_size = window.inner_size();
+                                            game_state.width_i32 = current_size.width as i32;
+                                            game_state.height_i32 = current_size.height as i32;
+                                            // Обновляем размер в gpu_renderer
+                                            gpu_renderer.resize(current_size);
                                             atlas::load_textures(
                                                 &mut game_state.atlas,
                                                 &mut game_state.building_atlas,
@@ -427,8 +439,12 @@ fn run() -> Result<()> {
                                             if let Ok(save) = save::load_game() {
                                                 let mut new_rng = StdRng::seed_from_u64(save.seed);
                                                 game_state = game_state::GameState::new(&mut new_rng, &config);
-                                                game_state.width_i32 = size.width as i32;
-                                                game_state.height_i32 = size.height as i32;
+                                                // Используем текущий размер окна
+                                                let current_size = window.inner_size();
+                                                game_state.width_i32 = current_size.width as i32;
+                                                game_state.height_i32 = current_size.height as i32;
+                                                // Обновляем размер в gpu_renderer
+                                                gpu_renderer.resize(current_size);
                                                 
                                                 // Восстанавливаем состояние из сохранения
                                                 game_state.seed = save.seed;
