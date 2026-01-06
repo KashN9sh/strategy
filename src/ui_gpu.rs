@@ -1947,16 +1947,17 @@ pub fn draw_quests_gpu(
     let x = pad;
     
     // Заголовок
-    gpu.draw_text(x, y, b"QUESTS", [1.0, 1.0, 0.8, 1.0], scale);
-    y += (16 * s) as f32 + gap;
+    let graphite_color = [0.1, 0.1, 0.1, 1.0];
+    let white_color = [1.0, 1.0, 1.0, 1.0];
     
-    let yellow_color = [1.0, 1.0, 0.8, 1.0];
+    gpu.draw_text_outlined(x, y, b"QUESTS", graphite_color, white_color, scale);
+    y += (16 * s) as f32 + gap;
     
     for quest in quests.iter().take(3) {
         let mut text_y = y;
         
         // Заголовок квеста
-        gpu.draw_text(x, text_y, quest.title.as_bytes(), yellow_color, scale * 0.9);
+        gpu.draw_text_outlined(x, text_y, quest.title.as_bytes(), graphite_color, white_color, scale * 0.9);
         text_y += (12 * s) as f32;
         
         // Прогресс
@@ -1975,12 +1976,12 @@ pub fn draw_quests_gpu(
             }
         };
         
-        gpu.draw_text(x, text_y, progress_text.as_bytes(), yellow_color, scale * 0.8);
+        gpu.draw_text_outlined(x, text_y, progress_text.as_bytes(), graphite_color, white_color, scale * 0.8);
         text_y += (10 * s) as f32;
         
         // Награда
         let reward_text = format!("Reward: {} gold", quest.reward_gold);
-        gpu.draw_text(x, text_y, reward_text.as_bytes(), yellow_color, scale * 0.7);
+        gpu.draw_text_outlined(x, text_y, reward_text.as_bytes(), graphite_color, white_color, scale * 0.7);
         
         y += quest_h + gap;
     }

@@ -2619,6 +2619,8 @@ impl GpuRenderer {
             b'X' => [1,0,1, 1,0,1, 0,1,0, 1,0,1, 1,0,1],
             b'Y' => [1,0,1, 1,0,1, 0,1,0, 0,1,0, 0,1,0],
             b'Z' => [1,1,1, 0,0,1, 0,1,0, 1,0,0, 1,1,1],
+            b'/' => [0,0,1, 0,0,1, 0,1,0, 1,0,0, 1,0,0],
+            b'%' => [1,1,0, 0,0,1, 0,1,0, 1,0,0, 0,1,1],
             _ => [0,0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0],
         }
     }
@@ -2688,6 +2690,30 @@ impl GpuRenderer {
             self.draw_glyph(current_x, y, ch, color, scale);
             current_x += char_width;
         }
+    }
+    
+    /// Рисует текст с обводкой (outline)
+    pub fn draw_text_outlined(&mut self, x: f32, y: f32, text: &[u8], outline_color: [f32; 4], fill_color: [f32; 4], scale: f32) {
+        let outline_offset = 1.0 * scale;
+        
+        // Рисуем обводку (8 направлений)
+        let offsets = [
+            (-outline_offset, -outline_offset),
+            (-outline_offset, 0.0),
+            (-outline_offset, outline_offset),
+            (0.0, -outline_offset),
+            (0.0, outline_offset),
+            (outline_offset, -outline_offset),
+            (outline_offset, 0.0),
+            (outline_offset, outline_offset),
+        ];
+        
+        for (dx, dy) in offsets.iter() {
+            self.draw_text(x + dx, y + dy, text, outline_color, scale);
+        }
+        
+        // Рисуем основной текст поверх
+        self.draw_text(x, y, text, fill_color, scale);
     }
     
     // Рисует кнопку (прямоугольник с текстом)
