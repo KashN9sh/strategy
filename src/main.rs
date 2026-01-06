@@ -129,8 +129,104 @@ fn run() -> Result<()> {
                                     game_state.app_state = game_state::AppState::Playing;
                                 }
                                 MenuAction::LoadGame => {
-                                    // TODO: Реализовать загрузку игры
-                                    eprintln!("Загрузка игры пока не реализована");
+                                    // Загружаем игру
+                                    if let Ok(save) = save::load_game() {
+                                        let mut new_rng = StdRng::seed_from_u64(save.seed);
+                                        game_state = game_state::GameState::new(&mut new_rng, &config);
+                                        game_state.width_i32 = size.width as i32;
+                                        game_state.height_i32 = size.height as i32;
+                                        
+                                        // Восстанавливаем состояние из сохранения
+                                        game_state.seed = save.seed;
+                                        game_state.world.reset_noise(save.seed);
+                                        game_state.buildings = save.to_buildings();
+                                        game_state.buildings_dirty = true;
+                                        game_state.resources = save.resources;
+                                        camera.pos = glam::Vec2::new(save.cam_x, save.cam_y);
+                                        camera.zoom = save.zoom;
+                                        
+                                        // Восстанавливаем граждан
+                                        game_state.citizens = save.citizens;
+                                        
+                                        // Восстанавливаем работы
+                                        game_state.jobs = save.jobs;
+                                        game_state.next_job_id = save.next_job_id;
+                                        
+                                        // Восстанавливаем поленья на земле
+                                        game_state.logs_on_ground = save.logs_on_ground;
+                                        
+                                        // Восстанавливаем склады
+                                        game_state.warehouses = save.warehouses;
+                                        
+                                        // Восстанавливаем население
+                                        game_state.population = save.population;
+                                        
+                                        // Восстанавливаем время игры
+                                        game_state.world_clock_ms = save.world_clock_ms;
+                                        
+                                        // Восстанавливаем экономические параметры
+                                        game_state.tax_rate = save.tax_rate;
+                                        game_state.speed_mult = save.speed_mult;
+                                        game_state.food_policy = save.food_policy;
+                                        
+                                        // Восстанавливаем занятые клетки
+                                        game_state.world.occupied.clear();
+                                        for b in &game_state.buildings {
+                                            game_state.world.occupy(b.pos);
+                                        }
+                                        
+                                        // Восстанавливаем деревья
+                                        game_state.world.trees.clear();
+                                        game_state.world.removed_trees.clear();
+                                        for t in &save.trees {
+                                            game_state.world.trees.insert((t.x, t.y), crate::world::Tree {
+                                                stage: t.stage,
+                                                age_ms: t.age_ms,
+                                            });
+                                        }
+                                        
+                                        // Восстанавливаем туман войны (разведанные тайлы)
+                                        game_state.world.explored_tiles.clear();
+                                        for &(x, y) in &save.explored_tiles {
+                                            game_state.world.explored_tiles.insert((x, y));
+                                        }
+                                        
+                                        // Восстанавливаем дороги
+                                        game_state.world.roads.clear();
+                                        for &(x, y) in &save.roads {
+                                            game_state.world.roads.insert((x, y));
+                                        }
+                                        
+                                        // Восстанавливаем системы исследований и уведомлений
+                                        if let Some(research_system) = save.research_system {
+                                            game_state.research_system = research_system;
+                                        }
+                                        if let Some(notification_system) = save.notification_system {
+                                            game_state.notification_system = notification_system;
+                                        }
+                                        
+                                        // Загружаем текстуры
+                                        atlas::load_textures(
+                                            &mut game_state.atlas,
+                                            &mut game_state.building_atlas,
+                                            &mut game_state.tree_atlas,
+                                            &mut game_state.props_atlas,
+                                        );
+                                        
+                                        // Инициализируем музыку
+                                        match music::MusicManager::new() {
+                                            Ok(music_manager) => {
+                                                game_state.music_manager = Some(music_manager);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Не удалось инициализировать музыку: {}", e);
+                                            }
+                                        }
+                                        
+                                        game_state.app_state = game_state::AppState::Playing;
+                                    } else {
+                                        eprintln!("Не удалось загрузить игру: файл save.json не найден или поврежден");
+                                    }
                                 }
                                 MenuAction::Settings => {
                                     // TODO: Реализовать настройки
@@ -149,6 +245,37 @@ fn run() -> Result<()> {
                             match action {
                                 PauseMenuAction::Resume => {
                                     game_state.app_state = game_state::AppState::Playing;
+                                }
+                                PauseMenuAction::SaveGame => {
+                                    // Сохраняем игру
+                                    let save_data = save::SaveData::from_runtime(
+                                        game_state.seed,
+                                        &game_state.resources,
+                                        &game_state.buildings,
+                                        camera.pos,
+                                        camera.zoom,
+                                        &game_state.world,
+                                        &game_state.research_system,
+                                        &game_state.notification_system,
+                                        &game_state.citizens,
+                                        &game_state.jobs,
+                                        game_state.next_job_id,
+                                        &game_state.logs_on_ground,
+                                        &game_state.warehouses,
+                                        game_state.population,
+                                        game_state.world_clock_ms,
+                                        game_state.tax_rate,
+                                        game_state.speed_mult,
+                                        game_state.food_policy,
+                                    );
+                                    match save::save_game(&save_data) {
+                                        Ok(_) => {
+                                            eprintln!("Игра успешно сохранена");
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Ошибка при сохранении игры: {}", e);
+                                        }
+                                    }
                                 }
                                 PauseMenuAction::Settings => {
                                     // TODO: Реализовать настройки
@@ -218,6 +345,37 @@ fn run() -> Result<()> {
                                         PauseMenuAction::Resume => {
                                             game_state.app_state = game_state::AppState::Playing;
                                         }
+                                        PauseMenuAction::SaveGame => {
+                                            // Сохраняем игру
+                                            let save_data = save::SaveData::from_runtime(
+                                                game_state.seed,
+                                                &game_state.resources,
+                                                &game_state.buildings,
+                                                camera.pos,
+                                                camera.zoom,
+                                                &game_state.world,
+                                                &game_state.research_system,
+                                                &game_state.notification_system,
+                                                &game_state.citizens,
+                                                &game_state.jobs,
+                                                game_state.next_job_id,
+                                                &game_state.logs_on_ground,
+                                                &game_state.warehouses,
+                                                game_state.population,
+                                                game_state.world_clock_ms,
+                                                game_state.tax_rate,
+                                                game_state.speed_mult,
+                                                game_state.food_policy,
+                                            );
+                                            match save::save_game(&save_data) {
+                                                Ok(_) => {
+                                                    eprintln!("Игра успешно сохранена");
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Ошибка при сохранении игры: {}", e);
+                                                }
+                                            }
+                                        }
                                         PauseMenuAction::Settings => {
                                             // TODO: Реализовать настройки
                                             eprintln!("Настройки пока не реализованы");
@@ -265,7 +423,104 @@ fn run() -> Result<()> {
                                             game_state.app_state = game_state::AppState::Playing;
                                         }
                                         MenuAction::LoadGame => {
-                                            eprintln!("Загрузка игры пока не реализована");
+                                            // Загружаем игру
+                                            if let Ok(save) = save::load_game() {
+                                                let mut new_rng = StdRng::seed_from_u64(save.seed);
+                                                game_state = game_state::GameState::new(&mut new_rng, &config);
+                                                game_state.width_i32 = size.width as i32;
+                                                game_state.height_i32 = size.height as i32;
+                                                
+                                                // Восстанавливаем состояние из сохранения
+                                                game_state.seed = save.seed;
+                                                game_state.world.reset_noise(save.seed);
+                                                game_state.buildings = save.to_buildings();
+                                                game_state.buildings_dirty = true;
+                                                game_state.resources = save.resources;
+                                                camera.pos = glam::Vec2::new(save.cam_x, save.cam_y);
+                                                camera.zoom = save.zoom;
+                                                
+                                                // Восстанавливаем граждан
+                                                game_state.citizens = save.citizens;
+                                                
+                                                // Восстанавливаем работы
+                                                game_state.jobs = save.jobs;
+                                                game_state.next_job_id = save.next_job_id;
+                                                
+                                                // Восстанавливаем поленья на земле
+                                                game_state.logs_on_ground = save.logs_on_ground;
+                                                
+                                                // Восстанавливаем склады
+                                                game_state.warehouses = save.warehouses;
+                                                
+                                                // Восстанавливаем население
+                                                game_state.population = save.population;
+                                                
+                                                // Восстанавливаем время игры
+                                                game_state.world_clock_ms = save.world_clock_ms;
+                                                
+                                                // Восстанавливаем экономические параметры
+                                                game_state.tax_rate = save.tax_rate;
+                                                game_state.speed_mult = save.speed_mult;
+                                                game_state.food_policy = save.food_policy;
+                                                
+                                                // Восстанавливаем занятые клетки
+                                                game_state.world.occupied.clear();
+                                                for b in &game_state.buildings {
+                                                    game_state.world.occupy(b.pos);
+                                                }
+                                                
+                                                // Восстанавливаем деревья
+                                                game_state.world.trees.clear();
+                                                game_state.world.removed_trees.clear();
+                                                for t in &save.trees {
+                                                    game_state.world.trees.insert((t.x, t.y), crate::world::Tree {
+                                                        stage: t.stage,
+                                                        age_ms: t.age_ms,
+                                                    });
+                                                }
+                                                
+                                                // Восстанавливаем туман войны (разведанные тайлы)
+                                                game_state.world.explored_tiles.clear();
+                                                for &(x, y) in &save.explored_tiles {
+                                                    game_state.world.explored_tiles.insert((x, y));
+                                                }
+                                                
+                                                // Восстанавливаем дороги
+                                                game_state.world.roads.clear();
+                                                for &(x, y) in &save.roads {
+                                                    game_state.world.roads.insert((x, y));
+                                                }
+                                                
+                                                // Восстанавливаем системы исследований и уведомлений
+                                                if let Some(research_system) = save.research_system {
+                                                    game_state.research_system = research_system;
+                                                }
+                                                if let Some(notification_system) = save.notification_system {
+                                                    game_state.notification_system = notification_system;
+                                                }
+                                                
+                                                // Загружаем текстуры
+                                                atlas::load_textures(
+                                                    &mut game_state.atlas,
+                                                    &mut game_state.building_atlas,
+                                                    &mut game_state.tree_atlas,
+                                                    &mut game_state.props_atlas,
+                                                );
+                                                
+                                                // Инициализируем музыку
+                                                match music::MusicManager::new() {
+                                                    Ok(music_manager) => {
+                                                        game_state.music_manager = Some(music_manager);
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("Не удалось инициализировать музыку: {}", e);
+                                                    }
+                                                }
+                                                
+                                                game_state.app_state = game_state::AppState::Playing;
+                                            } else {
+                                                eprintln!("Не удалось загрузить игру: файл save.json не найден или поврежден");
+                                            }
                                         }
                                         MenuAction::Settings => {
                                             eprintln!("Настройки пока не реализованы");

@@ -138,6 +138,7 @@ impl MainMenu {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauseMenuOption {
     Resume,
+    SaveGame,
     Settings,
     QuitToMenu,
 }
@@ -164,6 +165,7 @@ impl PauseMenu {
         
         let options = [
             PauseMenuOption::Resume,
+            PauseMenuOption::SaveGame,
             PauseMenuOption::Settings,
             PauseMenuOption::QuitToMenu,
         ];
@@ -196,7 +198,8 @@ impl PauseMenu {
                 let start_option = self.selected_option.unwrap_or(PauseMenuOption::Resume);
                 self.selected_option = Some(match start_option {
                     PauseMenuOption::Resume => PauseMenuOption::QuitToMenu,
-                    PauseMenuOption::Settings => PauseMenuOption::Resume,
+                    PauseMenuOption::SaveGame => PauseMenuOption::Resume,
+                    PauseMenuOption::Settings => PauseMenuOption::SaveGame,
                     PauseMenuOption::QuitToMenu => PauseMenuOption::Settings,
                 });
                 None
@@ -204,7 +207,8 @@ impl PauseMenu {
             PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
                 let start_option = self.selected_option.unwrap_or(PauseMenuOption::Resume);
                 self.selected_option = Some(match start_option {
-                    PauseMenuOption::Resume => PauseMenuOption::Settings,
+                    PauseMenuOption::Resume => PauseMenuOption::SaveGame,
+                    PauseMenuOption::SaveGame => PauseMenuOption::Settings,
                     PauseMenuOption::Settings => PauseMenuOption::QuitToMenu,
                     PauseMenuOption::QuitToMenu => PauseMenuOption::Resume,
                 });
@@ -234,6 +238,7 @@ impl PauseMenu {
         
         let options = [
             PauseMenuOption::Resume,
+            PauseMenuOption::SaveGame,
             PauseMenuOption::Settings,
             PauseMenuOption::QuitToMenu,
         ];
@@ -257,6 +262,7 @@ impl PauseMenu {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauseMenuAction {
     Resume,
+    SaveGame,
     Settings,
     QuitToMenu,
 }
@@ -265,6 +271,7 @@ impl From<PauseMenuOption> for PauseMenuAction {
     fn from(option: PauseMenuOption) -> Self {
         match option {
             PauseMenuOption::Resume => PauseMenuAction::Resume,
+            PauseMenuOption::SaveGame => PauseMenuAction::SaveGame,
             PauseMenuOption::Settings => PauseMenuAction::Settings,
             PauseMenuOption::QuitToMenu => PauseMenuAction::QuitToMenu,
         }
@@ -321,6 +328,7 @@ pub fn draw_pause_menu(
     // Опции меню
     let options: &[(PauseMenuOption, &[u8])] = &[
         (PauseMenuOption::Resume, b"Resume"),
+        (PauseMenuOption::SaveGame, b"Save Game"),
         (PauseMenuOption::Settings, b"Settings"),
         (PauseMenuOption::QuitToMenu, b"Quit to Menu"),
     ];

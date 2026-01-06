@@ -1,7 +1,7 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Building, BuildingKind, Resources};
+use crate::types::{Building, BuildingKind, Resources, Citizen, Job, WarehouseStore, LogItem, FoodPolicy};
 use crate::research::ResearchSystem;
 use crate::notifications::NotificationSystem;
 
@@ -18,6 +18,33 @@ pub struct SaveData {
     pub research_system: Option<ResearchSystem>,
     #[serde(default)]
     pub notification_system: Option<NotificationSystem>,
+    // Расширенные данные
+    #[serde(default)]
+    pub citizens: Vec<Citizen>,
+    #[serde(default)]
+    pub jobs: Vec<Job>,
+    #[serde(default)]
+    pub next_job_id: u64,
+    #[serde(default)]
+    pub logs_on_ground: Vec<LogItem>,
+    #[serde(default)]
+    pub warehouses: Vec<WarehouseStore>,
+    #[serde(default)]
+    pub population: i32,
+    #[serde(default)]
+    pub world_clock_ms: f32,
+    #[serde(default)]
+    pub tax_rate: f32,
+    #[serde(default)]
+    pub speed_mult: f32,
+    #[serde(default)]
+    pub food_policy: FoodPolicy,
+    // Туман войны (разведанные тайлы)
+    #[serde(default)]
+    pub explored_tiles: Vec<(i32, i32)>,
+    // Дороги
+    #[serde(default)]
+    pub roads: Vec<(i32, i32)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -50,6 +77,16 @@ impl SaveData {
         world: &crate::world::World,
         research_system: &ResearchSystem,
         notification_system: &NotificationSystem,
+        citizens: &Vec<Citizen>,
+        jobs: &Vec<Job>,
+        next_job_id: u64,
+        logs_on_ground: &Vec<LogItem>,
+        warehouses: &Vec<WarehouseStore>,
+        population: i32,
+        world_clock_ms: f32,
+        tax_rate: f32,
+        speed_mult: f32,
+        food_policy: FoodPolicy,
     ) -> Self {
         let buildings = buildings
             .iter()
@@ -66,6 +103,10 @@ impl SaveData {
         for (&(x, y), tr) in world.trees.iter() {
             trees.push(SaveTree { x, y, stage: tr.stage, age_ms: tr.age_ms });
         }
+        // Сохраняем разведанные тайлы (туман войны)
+        let explored_tiles: Vec<(i32, i32)> = world.explored_tiles.iter().copied().collect();
+        // Сохраняем дороги
+        let roads: Vec<(i32, i32)> = world.roads.iter().copied().collect();
         SaveData { 
             seed, 
             resources: *res, 
@@ -76,6 +117,18 @@ impl SaveData {
             trees,
             research_system: Some(research_system.clone()),
             notification_system: Some(notification_system.clone()),
+            citizens: citizens.clone(),
+            jobs: jobs.clone(),
+            next_job_id,
+            logs_on_ground: logs_on_ground.clone(),
+            warehouses: warehouses.clone(),
+            population,
+            world_clock_ms,
+            tax_rate,
+            speed_mult,
+            food_policy,
+            explored_tiles,
+            roads,
         }
     }
 

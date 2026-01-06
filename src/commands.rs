@@ -169,6 +169,16 @@ impl Command for SaveGameCommand {
             &game_state.world,
             &game_state.research_system,
             &game_state.notification_system,
+            &game_state.citizens,
+            &game_state.jobs,
+            game_state.next_job_id,
+            &game_state.logs_on_ground,
+            &game_state.warehouses,
+            game_state.population,
+            game_state.world_clock_ms,
+            game_state.tax_rate,
+            game_state.speed_mult,
+            game_state.food_policy,
         ));
         false
     }
@@ -192,17 +202,41 @@ impl Command for LoadGameCommand {
             game_state.world.reset_noise(game_state.seed);
             game_state.buildings = save.to_buildings();
             game_state.buildings_dirty = true;
-            game_state.citizens.clear();
-            game_state.population = 0;
             game_state.resources = save.resources;
             camera.pos = glam::Vec2::new(save.cam_x, save.cam_y);
             camera.zoom = save.zoom;
-            // восстановим отметку occupied
+            
+            // Восстанавливаем граждан
+            game_state.citizens = save.citizens;
+            
+            // Восстанавливаем работы
+            game_state.jobs = save.jobs;
+            game_state.next_job_id = save.next_job_id;
+            
+            // Восстанавливаем поленья на земле
+            game_state.logs_on_ground = save.logs_on_ground;
+            
+            // Восстанавливаем склады
+            game_state.warehouses = save.warehouses;
+            
+            // Восстанавливаем население
+            game_state.population = save.population;
+            
+            // Восстанавливаем время игры
+            game_state.world_clock_ms = save.world_clock_ms;
+            
+            // Восстанавливаем экономические параметры
+            game_state.tax_rate = save.tax_rate;
+            game_state.speed_mult = save.speed_mult;
+            game_state.food_policy = save.food_policy;
+            
+            // Восстанавливаем отметку occupied
             game_state.world.occupied.clear();
             for b in &game_state.buildings {
                 game_state.world.occupy(b.pos);
             }
-            // восстановим деревья
+            
+            // Восстанавливаем деревья
             game_state.world.trees.clear();
             game_state.world.removed_trees.clear();
             for t in &save.trees {
@@ -212,7 +246,19 @@ impl Command for LoadGameCommand {
                 });
             }
             
-            // восстановим системы исследований и уведомлений
+            // Восстанавливаем туман войны (разведанные тайлы)
+            game_state.world.explored_tiles.clear();
+            for &(x, y) in &save.explored_tiles {
+                game_state.world.explored_tiles.insert((x, y));
+            }
+            
+            // Восстанавливаем дороги
+            game_state.world.roads.clear();
+            for &(x, y) in &save.roads {
+                game_state.world.roads.insert((x, y));
+            }
+            
+            // Восстанавливаем системы исследований и уведомлений
             if let Some(research_system) = save.research_system {
                 game_state.research_system = research_system;
             } else {

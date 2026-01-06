@@ -90,7 +90,7 @@ pub fn building_cost(kind: BuildingKind) -> Resources {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Citizen {
     pub pos: IVec2,      // текущая клетка
     pub target: IVec2,   // цель (для будущего pathfinding)
@@ -122,19 +122,19 @@ pub struct Citizen {
     pub last_food_mask: u8,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JobKind { ChopWood { pos: IVec2 }, HaulWood { from: IVec2, to: IVec2 } }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Job { pub id: u64, pub kind: JobKind, pub taken: bool, pub done: bool }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogItem {
     pub pos: IVec2,
     pub carried: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WarehouseStore {
     pub pos: IVec2,
     pub wood: i32,
@@ -156,8 +156,9 @@ impl Default for WarehouseStore {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FoodPolicy {
+    #[default]
     Balanced,   // выбирать более доступный ресурс
     BreadFirst, // сначала хлеб
     FishFirst,  // сначала рыба
@@ -180,7 +181,7 @@ pub enum ResourceKind {
 
 // удалено: DepositKind (не используется)
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CitizenState {
     Idle,
     GoingToWork,
