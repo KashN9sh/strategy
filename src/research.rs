@@ -98,11 +98,11 @@ impl ResearchKind {
             },
             ResearchKind::StoneWorking => ResearchInfo {
                 name: "Stone Working",
-                description: "Unlocks quarry and clay pit",
-                days_required: 5,
-                cost: Resources { wood: 100, gold: 150, ..Default::default() },
-                prerequisites: &[ResearchKind::BasicForestry],
-                unlocks_buildings: &[BuildingKind::StoneQuarry, BuildingKind::ClayPit],
+                description: "Unlocks advanced stone and clay processing",
+                days_required: 0, // Базовое исследование, доступно с начала
+                cost: Resources::default(), // Без стоимости для базового исследования
+                prerequisites: &[], // Без пререквизитов, доступно с начала
+                unlocks_buildings: &[BuildingKind::StoneQuarry, BuildingKind::ClayPit], // Каменоломня и глиняный карьер доступны с начала
             },
             ResearchKind::BasicFarming => ResearchInfo {
                 name: "Basic Farming",
@@ -115,9 +115,9 @@ impl ResearchKind {
             ResearchKind::BasicFishing => ResearchInfo {
                 name: "Basic Fishing",
                 description: "Unlocks fishing hut",
-                days_required: 3,
-                cost: Resources { wood: 60, gold: 80, ..Default::default() },
-                prerequisites: &[ResearchKind::BasicForestry],
+                days_required: 0, // Базовое исследование, доступно с начала
+                cost: Resources::default(), // Без стоимости для базового исследования
+                prerequisites: &[], // Без пререквизитов, доступно с начала
                 unlocks_buildings: &[BuildingKind::Fishery],
             },
             
