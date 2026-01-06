@@ -81,6 +81,7 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
         frame_ms,
         &mut game_state.rng,
         &game_state.resources,
+        &game_state.warehouses,
         &game_state.buildings,
         game_state.population,
     );

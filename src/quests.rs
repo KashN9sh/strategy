@@ -60,15 +60,18 @@ impl QuestSystem {
     }
     
     /// Обновить систему квестов
-    pub fn update(&mut self, delta_ms: f32, rng: &mut impl Rng, resources: &Resources, buildings: &[crate::types::Building], population: i32) -> Vec<Quest> {
+    pub fn update(&mut self, delta_ms: f32, rng: &mut impl Rng, resources: &Resources, warehouses: &[crate::types::WarehouseStore], buildings: &[crate::types::Building], population: i32) -> Vec<Quest> {
         let mut completed_quests = Vec::new();
         
         // Обновляем таймер появления новых квестов
         self.next_quest_timer_ms -= delta_ms;
         
+        // Вычисляем общее количество ресурсов (включая склады)
+        let total_res = crate::types::total_resources(warehouses, resources);
+        
         // Генерируем новый квест, если пришло время и есть место (максимум 3 активных квеста)
         if self.next_quest_timer_ms <= 0.0 && self.active_quests.len() < 3 {
-            if let Some(new_quest) = Self::generate_random_quest(rng, self.next_quest_id, resources, buildings, population) {
+            if let Some(new_quest) = Self::generate_random_quest(rng, self.next_quest_id, &total_res, buildings, population) {
                 self.active_quests.push(new_quest);
                 self.next_quest_id += 1;
                 self.next_quest_timer_ms = self.next_quest_interval_ms;
@@ -84,16 +87,16 @@ impl QuestSystem {
             let is_completed = match &mut quest.kind {
                 QuestKind::CollectResource { resource_name, current_amount, target_amount } => {
                     let current = match resource_name.as_str() {
-                        "Wood" => resources.wood,
-                        "Stone" => resources.stone,
-                        "Clay" => resources.clay,
-                        "Bricks" => resources.bricks,
-                        "Wheat" => resources.wheat,
-                        "Flour" => resources.flour,
-                        "Bread" => resources.bread,
-                        "Fish" => resources.fish,
-                        "Iron Ore" => resources.iron_ore,
-                        "Iron Ingots" => resources.iron_ingots,
+                        "Wood" => total_res.wood,
+                        "Stone" => total_res.stone,
+                        "Clay" => total_res.clay,
+                        "Bricks" => total_res.bricks,
+                        "Wheat" => total_res.wheat,
+                        "Flour" => total_res.flour,
+                        "Bread" => total_res.bread,
+                        "Fish" => total_res.fish,
+                        "Iron Ore" => total_res.iron_ore,
+                        "Iron Ingots" => total_res.iron_ingots,
                         _ => 0,
                     };
                     *current_amount = current;
@@ -108,7 +111,7 @@ impl QuestSystem {
                     *current_population >= *target_population
                 }
                 QuestKind::CollectGold { current_amount, target_amount } => {
-                    *current_amount = resources.gold;
+                    *current_amount = total_res.gold;
                     *current_amount >= *target_amount
                 }
             };
@@ -130,7 +133,7 @@ impl QuestSystem {
     fn generate_random_quest(
         rng: &mut impl Rng,
         quest_id: u32,
-        resources: &Resources,
+        total_resources: &Resources,
         buildings: &[crate::types::Building],
         population: i32,
     ) -> Option<Quest> {
@@ -140,13 +143,13 @@ impl QuestSystem {
             0 => {
                 // Квест на сбор ресурса
                 let resources_list = vec![
-                    ("Wood", resources.wood),
-                    ("Stone", resources.stone),
-                    ("Clay", resources.clay),
-                    ("Bricks", resources.bricks),
-                    ("Wheat", resources.wheat),
-                    ("Bread", resources.bread),
-                    ("Fish", resources.fish),
+                    ("Wood", total_resources.wood),
+                    ("Stone", total_resources.stone),
+                    ("Clay", total_resources.clay),
+                    ("Bricks", total_resources.bricks),
+                    ("Wheat", total_resources.wheat),
+                    ("Bread", total_resources.bread),
+                    ("Fish", total_resources.fish),
                 ];
                 
                 let idx = rng.random_range(0..resources_list.len());
@@ -230,15 +233,15 @@ impl QuestSystem {
             }
             3 => {
                 // Квест на сбор золота
-                let target = resources.gold + rng.random_range(50..200);
-                let reward = (target - resources.gold) / 5;
+                let target = total_resources.gold + rng.random_range(50..200);
+                let reward = (target - total_resources.gold) / 5;
                 
-                Some(Quest {
-                    id: quest_id,
-                    kind: QuestKind::CollectGold {
-                        target_amount: target,
-                        current_amount: resources.gold,
-                    },
+                    Some(Quest {
+                        id: quest_id,
+                        kind: QuestKind::CollectGold {
+                            target_amount: target,
+                            current_amount: total_resources.gold,
+                        },
                     title: format!("Collect {} Gold", target),
                     description: format!("Accumulate {} gold coins", target),
                     reward_gold: reward.max(30),
