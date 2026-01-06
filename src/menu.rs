@@ -178,10 +178,11 @@ pub fn draw_main_menu(
     
     // Заголовок игры
     let title = b"Strategy Game";
-    let title_w = title.len() as f32 * 4.0 * 2.0 * scale;
+    let title_scale = scale * 2.5; // Увеличенный размер заголовка
+    let title_w = title.len() as f32 * 4.0 * 2.0 * title_scale;
     let title_x = center_x - title_w / 2.0;
-    let title_y = start_y - 80.0 * scale;
-    gpu.draw_text(title_x, title_y, title, [1.0, 1.0, 0.8, 1.0], scale * 1.5);
+    let title_y = height as f32 / 2.0 - 200.0 * scale; // Ближе к центру экрана
+    gpu.draw_text(title_x, title_y, title, [1.0, 1.0, 0.8, 1.0], title_scale);
     
     // Опции меню
     let options: &[(MenuOption, &[u8])] = &[
