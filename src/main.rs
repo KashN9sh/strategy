@@ -153,7 +153,15 @@ fn run() -> Result<()> {
                     // Обновляем позицию курсора для меню тоже
                     game_state.cursor_xy = IVec2::new(position.x as i32, position.y as i32);
                     
-                    if game_state.app_state == game_state::AppState::Playing {
+                    if game_state.app_state == game_state::AppState::MainMenu {
+                        main_menu.handle_hover(
+                            game_state.cursor_xy.x,
+                            game_state.cursor_xy.y,
+                            game_state.width_i32,
+                            game_state.height_i32,
+                            config.ui_scale_base,
+                        );
+                    } else if game_state.app_state == game_state::AppState::Playing {
                         event_handler::handle_cursor_moved(position, &mut game_state, &camera);
                     }
                 }

@@ -12,12 +12,43 @@ pub enum MenuOption {
 /// Состояние главного меню
 pub struct MainMenu {
     pub selected_option: MenuOption,
+    pub hovered_option: Option<MenuOption>,
 }
 
 impl MainMenu {
     pub fn new() -> Self {
         Self {
             selected_option: MenuOption::NewGame,
+            hovered_option: None,
+        }
+    }
+    
+    /// Обработка наведения мыши
+    pub fn handle_hover(&mut self, x: i32, y: i32, width: i32, height: i32, base_scale: f32) {
+        let scale = crate::ui::ui_scale(height, base_scale) as f32;
+        let center_x = width as f32 / 2.0;
+        let start_y = height as f32 / 2.0 - 100.0 * scale;
+        let btn_height = 40.0 * scale;
+        let btn_spacing = 50.0 * scale;
+        
+        let options = [
+            MenuOption::NewGame,
+            MenuOption::LoadGame,
+            MenuOption::Settings,
+            MenuOption::Quit,
+        ];
+        
+        self.hovered_option = None;
+        for (i, &option) in options.iter().enumerate() {
+            let btn_y = start_y + (i as f32 * btn_spacing);
+            let btn_x = center_x - 150.0 * scale;
+            let btn_w = 300.0 * scale;
+            
+            if x as f32 >= btn_x && x as f32 <= btn_x + btn_w &&
+               y as f32 >= btn_y && y as f32 <= btn_y + btn_height {
+                self.hovered_option = Some(option);
+                break;
+            }
         }
     }
     
@@ -142,7 +173,12 @@ pub fn draw_main_menu(
         let btn_x = center_x - 150.0 * scale;
         let btn_w = 300.0 * scale;
         
-        let is_selected = *option == menu.selected_option;
+        // Если мышь наведена на кнопку, подсвечиваем только её, иначе подсвечиваем выбранную клавиатурой
+        let is_selected = if let Some(hovered) = menu.hovered_option {
+            *option == hovered
+        } else {
+            *option == menu.selected_option
+        };
         
         // Фон кнопки
         let bg_color = if is_selected {
