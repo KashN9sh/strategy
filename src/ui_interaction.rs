@@ -219,7 +219,17 @@ pub fn handle_left_click(
         };
         let bw = ((label.len() as i32) * 4 * 2 * ui_s + 12).max(70); // та же формула, что в ui_gpu.rs
         if bx + bw > width_i32 - padb { break; }
-        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) { *selected_building = Some(bk); return true; }
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, bx, by2, bw, btn_h) {
+            // Проверяем разблокировку перед выбором здания (ResearchLab всегда разблокирована)
+            let is_unlocked = bk == BuildingKind::ResearchLab 
+                || research_system.is_building_unlocked(bk);
+            if is_unlocked {
+                *selected_building = Some(bk);
+                return true;
+            }
+            // Если здание не разблокировано, просто возвращаем true (не выбираем)
+            return true;
+        }
         bx += bw + 6 * ui_s;
     }
 

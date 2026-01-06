@@ -187,6 +187,8 @@ pub fn draw_ui_gpu(
     visible_min_ty: i32,
     visible_max_tx: i32,
     visible_max_ty: i32,
+    // Система исследований для проверки разблокировки зданий
+    research_system: &crate::research::ResearchSystem,
 ) {
     gpu.clear_ui();
     
@@ -409,7 +411,21 @@ pub fn draw_ui_gpu(
             if current_x + btn_w > fw as f32 - pad {
                 break;
             }
-            gpu.draw_button(current_x, build_y, btn_w, btn_h, label, selected == Some(*bk), btn_scale);
+            
+            // Проверяем разблокировку здания (ResearchLab всегда разблокирована)
+            let is_unlocked = *bk == BuildingKind::ResearchLab 
+                || research_system.is_building_unlocked(*bk);
+            
+            gpu.draw_button_disabled(
+                current_x, 
+                build_y, 
+                btn_w, 
+                btn_h, 
+                label, 
+                selected == Some(*bk), 
+                !is_unlocked, // disabled если не разблокировано
+                btn_scale
+            );
             current_x += btn_w + 6.0 * scale;
         }
     } else {

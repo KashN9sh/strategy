@@ -243,6 +243,7 @@ fn run() -> Result<()> {
                     min_ty,
                     max_tx,
                     max_ty,
+                    &game_state.research_system,
                 );
             } else {
                 gpu_renderer.clear_ui();

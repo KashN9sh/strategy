@@ -2621,8 +2621,16 @@ impl GpuRenderer {
     
     // Рисует кнопку (прямоугольник с текстом)
     pub fn draw_button(&mut self, x: f32, y: f32, w: f32, h: f32, text: &[u8], active: bool, scale: f32) {
+        self.draw_button_disabled(x, y, w, h, text, active, false, scale);
+    }
+    
+    // Рисует кнопку с поддержкой disabled состояния
+    pub fn draw_button_disabled(&mut self, x: f32, y: f32, w: f32, h: f32, text: &[u8], active: bool, disabled: bool, scale: f32) {
         // Цвета кнопки
-        let bg_color = if active { 
+        let bg_color = if disabled {
+            // Серый цвет для неактивных кнопок
+            [80.0/255.0, 80.0/255.0, 80.0/255.0, 150.0/255.0]
+        } else if active { 
             [185.0/255.0, 140.0/255.0, 95.0/255.0, 220.0/255.0] 
         } else { 
             [140.0/255.0, 105.0/255.0, 75.0/255.0, 180.0/255.0] 
@@ -2631,12 +2639,14 @@ impl GpuRenderer {
         // Фон кнопки
         self.add_ui_rect(x, y, w, h, bg_color);
         
-        // Верхний блик
-        let band = (2.0 * scale).max(2.0);
-        self.add_ui_rect(x, y, w, band, [1.0, 1.0, 1.0, 0.27]);
-        
-        // Нижняя тень
-        self.add_ui_rect(x, y + h - band, w, band, [0.0, 0.0, 0.0, 0.23]);
+        // Верхний блик (только если не disabled)
+        if !disabled {
+            let band = (2.0 * scale).max(2.0);
+            self.add_ui_rect(x, y, w, band, [1.0, 1.0, 1.0, 0.27]);
+            
+            // Нижняя тень
+            self.add_ui_rect(x, y + h - band, w, band, [0.0, 0.0, 0.0, 0.23]);
+        }
         
         // Текст по центру
         let px = 2.0 * scale;
@@ -2645,7 +2655,14 @@ impl GpuRenderer {
         let text_x = x + (w - text_w) / 2.0;
         let text_y = y + (h - text_h) / 2.0;
         
-        self.draw_text(text_x, text_y, text, [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0], scale);
+        // Цвет текста: серый для disabled, обычный для остальных
+        let text_color = if disabled {
+            [120.0/255.0, 120.0/255.0, 120.0/255.0, 1.0]
+        } else {
+            [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0]
+        };
+        
+        self.draw_text(text_x, text_y, text, text_color, scale);
     }
 
     // Подготовка структур (здания и деревья) для рендеринга с правильной сортировкой
