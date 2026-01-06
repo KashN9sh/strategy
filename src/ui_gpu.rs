@@ -1252,8 +1252,62 @@ pub fn draw_research_tree_gpu(
     let window_x = (fw as f32 - window_w) / 2.0;
     let window_y = (fh as f32 - window_h) / 2.0;
     
-    // Фон окна в стиле панелей интерфейса
-    gpu.draw_ui_panel(window_x, window_y, window_w, window_h);
+    // Фон окна: стилизация под деревянный ящик сверху
+    // Базовый цвет дерева
+    let wood_base = [0.45, 0.32, 0.22, 0.95];
+    // Тёмная окантовка (рамка ящика)
+    let wood_border = [0.25, 0.18, 0.12, 1.0];
+    // Светлые прожилки
+    let wood_light = [0.52, 0.38, 0.26, 0.95];
+    // Едва заметные линии между досками
+    
+    let border_thick = (10 * s) as f32;
+    
+    // Рамка
+    gpu.add_ui_rect(window_x, window_y, window_w, window_h, wood_border);
+    
+    // Внутренняя площадь (дерево)
+    let inner_x = window_x + border_thick;
+    let inner_y = window_y + border_thick;
+    let inner_w = window_w - border_thick * 2.0;
+    let inner_h = window_h - border_thick * 2.0;
+    gpu.add_ui_rect(inner_x, inner_y, inner_w, inner_h, wood_base);
+    
+    // Горизонтальные доски (имитация сверху: плоскость из нескольких досок, без явных швов)
+    let plank_h = (36 * s) as f32;
+    let mut plank_y = inner_y;
+    let mut toggle_light = false;
+    while plank_y < inner_y + inner_h - 1.0 {
+        let h = (plank_h).min(inner_y + inner_h - plank_y);
+        let color = if toggle_light { wood_light } else { wood_base };
+        gpu.add_ui_rect(inner_x, plank_y, inner_w, h, color);
+        plank_y += plank_h;
+        toggle_light = !toggle_light;
+    }
+    // Лёгкое затемнение поверх дерева для читаемости контента
+    gpu.add_ui_rect(inner_x, inner_y, inner_w, inner_h, [0.0, 0.0, 0.0, 0.08]);
+    
+    // Внутренняя тень по краям для глубины
+    let shadow = [0.0, 0.0, 0.0, 0.12];
+    let shadow_w = (8 * s) as f32;
+    gpu.add_ui_rect(inner_x, inner_y, inner_w, shadow_w, shadow); // top
+    gpu.add_ui_rect(inner_x, inner_y + inner_h - shadow_w, inner_w, shadow_w, shadow); // bottom
+    gpu.add_ui_rect(inner_x, inner_y, shadow_w, inner_h, shadow); // left
+    gpu.add_ui_rect(inner_x + inner_w - shadow_w, inner_y, shadow_w, inner_h, shadow); // right
+    
+    // Болты в углах (простые тёмные точки)
+    let bolt_size = (6 * s) as f32;
+    let bolt_off = border_thick * 0.5;
+    let bolt_col = [0.15, 0.12, 0.1, 1.0];
+    let bolts = [
+        (inner_x + bolt_off, inner_y + bolt_off),
+        (inner_x + inner_w - bolt_off - bolt_size, inner_y + bolt_off),
+        (inner_x + bolt_off, inner_y + inner_h - bolt_off - bolt_size),
+        (inner_x + inner_w - bolt_off - bolt_size, inner_y + inner_h - bolt_off - bolt_size),
+    ];
+    for (bx, by) in bolts {
+        gpu.add_ui_rect(bx, by, bolt_size, bolt_size, bolt_col);
+    }
     
     let pad = (16 * s) as f32;
     let title_height = (28 * s) as f32;
@@ -1452,26 +1506,26 @@ pub fn draw_research_tree_gpu(
             hovered_research = Some((research_kind, status, node_x, node_y + node_h));
         }
         
-        // Цвета в зависимости от статуса (в стиле интерфейса)
-        let (_bg_color, text_color, status_text) = match status {
+        // Цвета в зависимости от статуса
+        let (status_bg, text_color, status_text) = match status {
             ResearchStatus::Locked => (
-                [140.0/255.0, 105.0/255.0, 75.0/255.0, 0.5], // Серый как disabled кнопка
-                [0.5, 0.5, 0.5, 1.0],
+                [0.25, 0.25, 0.25, 0.85], // Серый
+                [1.0, 1.0, 1.0, 1.0],
                 "LOCKED",
             ),
             ResearchStatus::Available => (
-                [140.0/255.0, 105.0/255.0, 75.0/255.0, 0.9], // Обычный цвет кнопки
-                [220.0/255.0, 220.0/255.0, 220.0/255.0, 1.0],
+                [0.90, 0.78, 0.22, 0.90], // Жёлтый
+                [1.0, 1.0, 1.0, 1.0],
                 "READY",
             ),
             ResearchStatus::InProgress => (
-                [185.0/255.0, 140.0/255.0, 95.0/255.0, 0.95], // Активный цвет кнопки
-                [1.0, 1.0, 0.9, 1.0],
+                [0.30, 0.70, 0.32, 0.90], // Зелёный активный
+                [1.0, 1.0, 1.0, 1.0],
                 "ACTIVE",
             ),
             ResearchStatus::Completed => (
-                [140.0/255.0, 105.0/255.0, 75.0/255.0, 0.8], // Немного темнее
-                [0.9, 1.0, 0.9, 1.0],
+                [0.22, 0.60, 0.26, 0.95], // Зелёный завершённый
+                [1.0, 1.0, 1.0, 1.0],
                 "DONE",
             ),
         };
@@ -1480,8 +1534,19 @@ pub fn draw_research_tree_gpu(
         let is_active = status == ResearchStatus::Available || status == ResearchStatus::InProgress;
         let btn_h = node_h;
         
+        // Обводка/тень для читаемости на деревянном фоне
+        gpu.add_ui_rect(
+            node_x - 2.0,
+            node_y - 2.0,
+            node_w + 4.0,
+            node_h + 4.0,
+            [0.0, 0.0, 0.0, 0.35],
+        );
+        
         // Рисуем узел как кнопку
         gpu.draw_button(node_x, node_y, node_w, btn_h, b"", is_active && is_hovered, scale);
+        // Заливаем статусным цветом, чтобы оттенок был очевиден
+        gpu.add_ui_rect(node_x, node_y, node_w, btn_h, status_bg);
         
         // Если disabled (Locked), затемняем
         if status == ResearchStatus::Locked {
@@ -1641,8 +1706,8 @@ pub fn draw_research_tree_gpu(
         let tooltip_y = (cursor_y as f32 + 15.0).min(fh as f32 - tooltip_h - 10.0);
         
         // Фон тултипа в стиле интерфейса
-        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.8]);
-        gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.9]);
+        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.95]);
+        gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.15, 0.15, 0.15, 0.95]);
         
         let mut current_y = tooltip_y + tooltip_pad;
         
