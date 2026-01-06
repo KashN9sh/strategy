@@ -76,6 +76,23 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
     // Обновление уведомлений (используем реальное время, чтобы они не исчезали слишком быстро)
     game_state.notification_system.update(frame_ms);
     
+    // Обновление системы квестов
+    let completed_quests = game_state.quest_system.update(
+        frame_ms,
+        &mut game_state.rng,
+        &game_state.resources,
+        &game_state.buildings,
+        game_state.population,
+    );
+    
+    // Выдаем награды за выполненные квесты
+    for quest in completed_quests {
+        game_state.resources.gold += quest.reward_gold;
+        game_state.notification_system.add(NotificationKind::Info {
+            message: format!("Quest completed! +{} gold", quest.reward_gold),
+        });
+    }
+    
     // Обновление погоды и светлячков (используем ускоренное время)
     game_state.weather_system.update(accelerated_frame_ms, &mut game_state.rng);
     update_fireflies(game_state, accelerated_frame_ms);

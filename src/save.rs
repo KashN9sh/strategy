@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::types::{Building, BuildingKind, Resources, Citizen, Job, WarehouseStore, LogItem, FoodPolicy};
 use crate::research::ResearchSystem;
 use crate::notifications::NotificationSystem;
+use crate::quests::QuestSystem;
 
 #[derive(Serialize, Deserialize)]
 pub struct SaveData {
@@ -18,6 +19,8 @@ pub struct SaveData {
     pub research_system: Option<ResearchSystem>,
     #[serde(default)]
     pub notification_system: Option<NotificationSystem>,
+    #[serde(default)]
+    pub quest_system: Option<QuestSystem>,
     // Расширенные данные
     #[serde(default)]
     pub citizens: Vec<Citizen>,
@@ -77,6 +80,7 @@ impl SaveData {
         world: &crate::world::World,
         research_system: &ResearchSystem,
         notification_system: &NotificationSystem,
+        quest_system: &QuestSystem,
         citizens: &Vec<Citizen>,
         jobs: &Vec<Job>,
         next_job_id: u64,
@@ -117,6 +121,7 @@ impl SaveData {
             trees,
             research_system: Some(research_system.clone()),
             notification_system: Some(notification_system.clone()),
+            quest_system: Some(quest_system.clone()),
             citizens: citizens.clone(),
             jobs: jobs.clone(),
             next_job_id,

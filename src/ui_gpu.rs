@@ -1922,3 +1922,67 @@ pub fn draw_notifications_gpu(
     }
 }
 
+/// Рисование панели квестов
+pub fn draw_quests_gpu(
+    gpu: &mut GpuRenderer,
+    _fw: i32,
+    fh: i32,
+    quests: &[crate::quests::Quest],
+    base_scale_k: f32,
+) {
+    if quests.is_empty() {
+        return;
+    }
+    
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    
+    let pad = (8 * s) as f32;
+    let quest_h = (60 * s) as f32;
+    let gap = (6 * s) as f32;
+    
+    // Панель квестов в левом верхнем углу, под верхней панелью UI
+    let top_panel_h = ui::top_panel_height(s) as f32;
+    let mut y = top_panel_h + pad;
+    let x = pad;
+    
+    // Заголовок
+    gpu.draw_text(x, y, b"QUESTS", [1.0, 1.0, 0.8, 1.0], scale);
+    y += (16 * s) as f32 + gap;
+    
+    let yellow_color = [1.0, 1.0, 0.8, 1.0];
+    
+    for quest in quests.iter().take(3) {
+        let mut text_y = y;
+        
+        // Заголовок квеста
+        gpu.draw_text(x, text_y, quest.title.as_bytes(), yellow_color, scale * 0.9);
+        text_y += (12 * s) as f32;
+        
+        // Прогресс
+        let progress_text = match &quest.kind {
+            crate::quests::QuestKind::CollectResource { current_amount, target_amount, .. } => {
+                format!("{}/{}", current_amount, target_amount)
+            }
+            crate::quests::QuestKind::BuildBuildings { current_count, target_count, .. } => {
+                format!("{}/{}", current_count, target_count)
+            }
+            crate::quests::QuestKind::ReachPopulation { current_population, target_population } => {
+                format!("{}/{}", current_population, target_population)
+            }
+            crate::quests::QuestKind::CollectGold { current_amount, target_amount } => {
+                format!("{}/{}", current_amount, target_amount)
+            }
+        };
+        
+        gpu.draw_text(x, text_y, progress_text.as_bytes(), yellow_color, scale * 0.8);
+        text_y += (10 * s) as f32;
+        
+        // Награда
+        let reward_text = format!("Reward: {} gold", quest.reward_gold);
+        gpu.draw_text(x, text_y, reward_text.as_bytes(), yellow_color, scale * 0.7);
+        
+        y += quest_h + gap;
+    }
+}
+

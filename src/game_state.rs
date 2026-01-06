@@ -12,6 +12,7 @@ use crate::input::Config;
 use crate::music::MusicManager;
 use crate::research::ResearchSystem;
 use crate::notifications::NotificationSystem;
+use crate::quests::QuestSystem;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
 
@@ -110,6 +111,7 @@ pub struct GameState {
     pub music_manager: Option<MusicManager>,
     pub research_system: ResearchSystem,
     pub notification_system: NotificationSystem,
+    pub quest_system: QuestSystem,
     
     // === Размеры окна ===
     pub width_i32: i32,
@@ -226,6 +228,7 @@ impl GameState {
             music_manager: None, // Инициализируется в main.rs после создания GameState
             research_system: ResearchSystem::new(),
             notification_system: NotificationSystem::new(),
+            quest_system: QuestSystem::new(),
             
             // Размеры
             width_i32: 1280,

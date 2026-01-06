@@ -29,6 +29,7 @@ mod commands;
 mod music;
 mod research;
 mod notifications;
+mod quests;
 mod menu;
 use gpu_renderer::GpuRenderer;
 use menu::{MainMenu, MenuAction};
@@ -212,6 +213,9 @@ fn run() -> Result<()> {
                                         if let Some(notification_system) = save.notification_system {
                                             game_state.notification_system = notification_system;
                                         }
+                                        if let Some(quest_system) = save.quest_system {
+                                            game_state.quest_system = quest_system;
+                                        }
                                         
                                         // Загружаем текстуры
                                         atlas::load_textures(
@@ -265,6 +269,7 @@ fn run() -> Result<()> {
                                         &game_state.world,
                                         &game_state.research_system,
                                         &game_state.notification_system,
+                                        &game_state.quest_system,
                                         &game_state.citizens,
                                         &game_state.jobs,
                                         game_state.next_job_id,
@@ -366,6 +371,7 @@ fn run() -> Result<()> {
                                                 &game_state.world,
                                                 &game_state.research_system,
                                                 &game_state.notification_system,
+                                                &game_state.quest_system,
                                                 &game_state.citizens,
                                                 &game_state.jobs,
                                                 game_state.next_job_id,
@@ -730,6 +736,15 @@ fn run() -> Result<()> {
                         game_state.research_tree_scroll,
                     );
                 }
+                
+                // Рендеринг квестов
+                ui_gpu::draw_quests_gpu(
+                    &mut gpu_renderer,
+                    game_state.width_i32,
+                    game_state.height_i32,
+                    &game_state.quest_system.active_quests,
+                    config.ui_scale_base,
+                );
                 
                 // Рендеринг уведомлений
                 ui_gpu::draw_notifications_gpu(
