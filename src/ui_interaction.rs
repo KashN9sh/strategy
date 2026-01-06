@@ -539,7 +539,7 @@ pub fn get_hovered_button(
 /// Определяет, на какой ресурс наведен курсор (для тултипов)
 pub fn get_hovered_resource(
     cursor_xy: IVec2,
-    _width_i32: i32,
+    width_i32: i32,
     height_i32: i32,
     config: &Config,
     resources: &Resources,
@@ -552,6 +552,7 @@ pub fn get_hovered_resource(
     citizens_sleeping: i32,
     citizens_hauling: i32,
     citizens_fetching: i32,
+    weather_label: &[u8], // Добавляем параметр для проверки наведения на погоду
 ) -> Option<&'static str> {
     let ui_s = ui::ui_scale(height_i32, config.ui_scale_base);
     let panel_height = ui::top_panel_height(ui_s);
@@ -634,6 +635,27 @@ pub fn get_hovered_resource(
             }
             x += icon_size + 4.0;
             x += (amount.max(0) as u32).to_string().len() as f32 * 4.0 * 2.0 * (ui_s as f32) + gap;
+        }
+        
+        // Проверяем виджет погоды (справа в первой строке)
+        let mut right_x = width_i32 as f32 - pad;
+        
+        // FPS (самый правый) - пропускаем
+        let fps_text_w = (3.0 * 4.0 * 2.0 * (ui_s as f32)) + 80.0;
+        right_x -= fps_text_w;
+        
+        // Speed - пропускаем
+        let speed_text_w = (1.0 * 4.0 * 2.0 * (ui_s as f32)) + 30.0 + gap;
+        right_x -= speed_text_w;
+        
+        // Weather (слева от Speed)
+        let weather_text_w = weather_label.len() as f32 * 4.0 * 2.0 * (ui_s as f32);
+        let weather_area_w = icon_size + 4.0 + weather_text_w;
+        let weather_area_x = right_x - weather_area_w;
+        
+        // Проверяем наведение на область погоды (иконка + текст)
+        if ui::point_in_rect(cursor_xy.x, cursor_xy.y, weather_area_x as i32, row1_y as i32, weather_area_w as i32, icon_size as i32) {
+            return Some("Weather");
         }
     }
     

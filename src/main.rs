@@ -187,6 +187,7 @@ fn run() -> Result<()> {
                                 sleeping,
                                 hauling,
                                 fetching,
+                                wlabel, // Передаем метку погоды для проверки наведения
                             )
                         } else {
                             None
@@ -221,6 +222,7 @@ fn run() -> Result<()> {
                     game_state.food_policy,
                     wlabel,
                     wcol_f32,
+                    game_state.weather_system.current(), // Текущая погода для тултипа
                     &mut game_state.world,
                     &game_state.buildings,
                     camera.pos.x,

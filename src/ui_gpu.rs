@@ -160,6 +160,7 @@ pub fn draw_ui_gpu(
     food_policy: FoodPolicy,
     weather_label: &[u8],
     weather_icon_col: [f32; 4],
+    current_weather: crate::types::WeatherKind, // Текущая погода для тултипа
     // Данные для миникарты
     world: &mut crate::world::World,
     buildings: &[crate::types::Building],
@@ -586,25 +587,37 @@ pub fn draw_ui_gpu(
             );
         }
     } else if let Some(resource_name) = hovered_resource {
-        draw_resource_tooltip(
-            gpu,
-            cursor_x,
-            cursor_y,
-            resource_name,
-            resources,
-            total_wood,
-            population,
-            avg_happiness,
-            tax_rate,
-            citizens_idle,
-            citizens_working,
-            citizens_sleeping,
-            citizens_hauling,
-            citizens_fetching,
-            scale,
-            fw as f32,
-            fh as f32,
-        );
+        if resource_name == "Weather" {
+            draw_weather_tooltip(
+                gpu,
+                cursor_x,
+                cursor_y,
+                current_weather,
+                scale,
+                fw as f32,
+                fh as f32,
+            );
+        } else {
+            draw_resource_tooltip(
+                gpu,
+                cursor_x,
+                cursor_y,
+                resource_name,
+                resources,
+                total_wood,
+                population,
+                avg_happiness,
+                tax_rate,
+                citizens_idle,
+                citizens_working,
+                citizens_sleeping,
+                citizens_hauling,
+                citizens_fetching,
+                scale,
+                fw as f32,
+                fh as f32,
+            );
+        }
     }
     
     // Тултип отладки биома
@@ -878,6 +891,135 @@ pub fn draw_button_tooltip(
     if let Some(ref cost) = cost_opt {
         text_y += pad * 0.5;
         draw_resources_list(gpu, tooltip_x + pad, text_y, cost, scale, available_resources);
+    }
+}
+
+/// Рендеринг тултипа для погоды с бафами/дебафами
+pub fn draw_weather_tooltip(
+    gpu: &mut GpuRenderer,
+    x: f32,
+    y: f32,
+    weather: crate::types::WeatherKind,
+    scale: f32,
+    screen_width: f32,
+    _screen_height: f32,
+) {
+    use crate::types::{BuildingKind, WeatherKind};
+    use crate::game::production_weather_wmul;
+    
+    let s = scale as i32;
+    let pad = (4 * s) as f32;
+    let line_height = (12 * s) as f32;
+    
+    // Название погоды
+    let (weather_name, weather_desc) = match weather {
+        WeatherKind::Clear => ("Clear", "Normal weather conditions."),
+        WeatherKind::Rain => ("Rain", "Rainy weather affects production."),
+        WeatherKind::Fog => ("Fog", "Foggy weather reduces visibility."),
+        WeatherKind::Snow => ("Snow", "Snowy weather slows down production."),
+    };
+    
+    // Собираем список зданий с их модификаторами
+    let buildings_list = [
+        BuildingKind::Lumberjack,
+        BuildingKind::Forester,
+        BuildingKind::StoneQuarry,
+        BuildingKind::ClayPit,
+        BuildingKind::IronMine,
+        BuildingKind::WheatField,
+        BuildingKind::Mill,
+        BuildingKind::Bakery,
+        BuildingKind::Kiln,
+        BuildingKind::Smelter,
+        BuildingKind::Fishery,
+    ];
+    
+    let mut effects: Vec<(&str, f32)> = Vec::new();
+    for &bk in buildings_list.iter() {
+        let multiplier = production_weather_wmul(weather, bk);
+        if multiplier != 1.0 {
+            let building_name = match bk {
+                BuildingKind::Lumberjack => "Lumberjack",
+                BuildingKind::Forester => "Forester",
+                BuildingKind::StoneQuarry => "Quarry",
+                BuildingKind::ClayPit => "Clay Pit",
+                BuildingKind::IronMine => "Iron Mine",
+                BuildingKind::WheatField => "Wheat Field",
+                BuildingKind::Mill => "Mill",
+                BuildingKind::Bakery => "Bakery",
+                BuildingKind::Kiln => "Kiln",
+                BuildingKind::Smelter => "Smelter",
+                BuildingKind::Fishery => "Fishery",
+                _ => "",
+            };
+            if !building_name.is_empty() {
+                effects.push((building_name, multiplier));
+            }
+        }
+    }
+    
+    // Вычисляем размер тултипа
+    let name_w = weather_name.len() as f32 * 4.0 * 2.0 * scale;
+    let desc_w = weather_desc.len() as f32 * 4.0 * 2.0 * scale;
+    
+    // Максимальная ширина для эффектов
+    let mut max_effect_w: f32 = 0.0;
+    for (name, mult) in effects.iter() {
+        let mult_text = if *mult < 1.0 {
+            format!("+{}%", ((1.0 - mult) * 100.0).round() as i32)
+        } else {
+            format!("-{}%", ((mult - 1.0) * 100.0).round() as i32)
+        };
+        let effect_w = (name.len() + mult_text.len() + 2) as f32 * 4.0 * 2.0 * scale;
+        max_effect_w = max_effect_w.max(effect_w);
+    }
+    
+    let tooltip_w = [name_w, desc_w, max_effect_w].iter().fold(0.0_f32, |a, &b| a.max(b)) + pad * 2.0;
+    let tooltip_h = line_height * (2.0 + if effects.is_empty() { 1.0 } else { effects.len() as f32 }) + pad * 2.0;
+    
+    // Позиционируем тултип рядом с курсором (с проверкой границ экрана)
+    let tooltip_x = (x + 20.0).min(screen_width - tooltip_w - 10.0);
+    let tooltip_y = (y - tooltip_h - 10.0).max(10.0);
+    
+    // Фон тултипа
+    gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.1, 0.1, 0.1, 0.9]);
+    gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.8]);
+    
+    // Текст тултипа
+    let mut text_y = tooltip_y + pad;
+    
+    // Название погоды
+    gpu.draw_text(tooltip_x + pad, text_y, weather_name.as_bytes(), [1.0, 1.0, 1.0, 1.0], scale);
+    text_y += line_height;
+    
+    // Описание
+    gpu.draw_text(tooltip_x + pad, text_y, weather_desc.as_bytes(), [0.8, 0.8, 0.8, 1.0], scale);
+    text_y += line_height;
+    
+    // Эффекты на производство
+    if !effects.is_empty() {
+        text_y += pad * 0.5;
+        for (name, mult) in effects.iter() {
+            let mult_text = if *mult < 1.0 {
+                format!("+{}%", ((1.0 - mult) * 100.0).round() as i32)
+            } else {
+                format!("-{}%", ((mult - 1.0) * 100.0).round() as i32)
+            };
+            
+            // Цвет: зеленый для бафов (< 1.0), красный для дебафов (> 1.0)
+            let effect_color = if *mult < 1.0 {
+                [0.3, 1.0, 0.3, 1.0] // зеленый для ускорения
+            } else {
+                [1.0, 0.3, 0.3, 1.0] // красный для замедления
+            };
+            
+            let effect_line = format!("{}: {}", name, mult_text);
+            gpu.draw_text(tooltip_x + pad, text_y, effect_line.as_bytes(), effect_color, scale);
+            text_y += line_height;
+        }
+    } else {
+        // Если нет эффектов (Clear)
+        gpu.draw_text(tooltip_x + pad, text_y, b"No production effects", [0.7, 0.7, 0.7, 1.0], scale);
     }
 }
 
