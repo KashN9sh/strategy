@@ -232,6 +232,8 @@ fn run() -> Result<()> {
                             game_state.height_i32,
                             &main_menu,
                             config.ui_scale_base,
+                            game_state.cursor_xy.x,
+                            game_state.cursor_xy.y,
                         );
                         if let Err(err) = gpu_renderer.render() {
                             eprintln!("gpu_renderer.render() failed: {err}");

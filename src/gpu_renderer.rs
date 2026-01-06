@@ -435,6 +435,40 @@ pub struct UIPropsInstance {
     pub padding: [u32; 3], // выравнивание до 16 байт
 }
 
+// Идентификатор слоя фона меню
+#[derive(Clone, Copy, Debug)]
+pub enum MenuBackgroundLayer {
+    Sky,
+    FarMountains,
+    GrassyMountains,
+    Hill,
+    CloudsMid,
+    CloudsMidT,
+    CloudsFront,
+    CloudsFrontT,
+}
+
+// Структура для текстур фона главного меню
+pub struct MenuBackgroundTextures {
+    pub sky_texture: wgpu::Texture,
+    pub sky_bind_group: wgpu::BindGroup,
+    pub far_mountains_texture: wgpu::Texture,
+    pub far_mountains_bind_group: wgpu::BindGroup,
+    pub grassy_mountains_texture: wgpu::Texture,
+    pub grassy_mountains_bind_group: wgpu::BindGroup,
+    pub hill_texture: wgpu::Texture,
+    pub hill_bind_group: wgpu::BindGroup,
+    pub clouds_mid_texture: wgpu::Texture,
+    pub clouds_mid_bind_group: wgpu::BindGroup,
+    pub clouds_mid_t_texture: wgpu::Texture,
+    pub clouds_mid_t_bind_group: wgpu::BindGroup,
+    pub clouds_front_texture: wgpu::Texture,
+    pub clouds_front_bind_group: wgpu::BindGroup,
+    pub clouds_front_t_texture: wgpu::Texture,
+    pub clouds_front_t_bind_group: wgpu::BindGroup,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+}
+
 impl LightInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 7] = [
         // model_matrix
@@ -656,6 +690,7 @@ pub struct GpuRenderer {
     fog_render_pipeline: wgpu::RenderPipeline, // Для тумана войны
     ui_rect_render_pipeline: wgpu::RenderPipeline,
     ui_props_render_pipeline: wgpu::RenderPipeline, // Pipeline для UI спрайтов из props.png
+    menu_background_render_pipeline: Option<wgpu::RenderPipeline>, // Pipeline для полноразмерных текстур фона меню
     
     // Буферы
     tile_vertex_buffer: wgpu::Buffer,
@@ -704,6 +739,11 @@ pub struct GpuRenderer {
     minimap_instances: Vec<UIRect>,
     ui_props_instances: Vec<UIPropsInstance>, // UI спрайты из props.png
     tooltip_props_start_index: usize, // Индекс, где начинаются иконки тултипов в ui_props_instances
+    menu_background_instances: Vec<(MenuBackgroundLayer, UIPropsInstance)>, // Инстансы для фона меню (слой + инстанс)
+    
+    // Текстуры фона главного меню
+    menu_background_textures: Option<MenuBackgroundTextures>,
+    
     tile_instance_buffer: wgpu::Buffer,
     building_instance_buffer: wgpu::Buffer,
     citizen_instance_buffer: wgpu::Buffer,
@@ -1996,6 +2036,7 @@ impl GpuRenderer {
             fog_render_pipeline,
             ui_rect_render_pipeline,
             ui_props_render_pipeline,
+            menu_background_render_pipeline: None,
             tile_vertex_buffer,
             tile_index_buffer,
             building_vertex_buffer,
@@ -2041,8 +2082,10 @@ impl GpuRenderer {
             ui_rect_buffer,
             minimap_buffer,
             ui_props_instances: Vec::new(),
+            menu_background_instances: Vec::new(),
             ui_props_instance_buffer,
             props_texture_bind_group,
+            menu_background_textures: None,
             ui_clip_rect: None,
         })
     }
@@ -2382,6 +2425,7 @@ impl GpuRenderer {
         self.ui_props_instances.clear();
         self.tooltip_props_start_index = 0;
         self.minimap_instances.clear();
+        self.menu_background_instances.clear();
     }
     
     // Запоминает текущий размер ui_rects как начало тултипов
@@ -3450,6 +3494,19 @@ impl GpuRenderer {
             );
         }
         
+        // Обновляем буфер фона меню ДО начала render pass
+        // Создаем временный буфер для инстансов фона меню
+        if !self.menu_background_instances.is_empty() {
+            let instances: Vec<UIPropsInstance> = self.menu_background_instances.iter().map(|(_, inst)| *inst).collect();
+            // Используем тот же буфер, но записываем после обычных UI props
+            let offset = (std::mem::size_of::<UIPropsInstance>() * self.ui_props_instances.len()) as wgpu::BufferAddress;
+            self.queue.write_buffer(
+                &self.ui_props_instance_buffer,
+                offset,
+                bytemuck::cast_slice(&instances)
+            );
+        }
+        
         // Обновляем буфер поленьев ДО начала render pass
         if !self.log_instances.is_empty() {
             self.queue.write_buffer(
@@ -3596,7 +3653,38 @@ impl GpuRenderer {
                 }
             }
             
-            // Порядок рендеринга: прямоугольники -> иконки -> миникарта -> тултипы
+            // Порядок рендеринга: фон меню -> прямоугольники -> иконки -> миникарта -> тултипы
+            
+            // 0. Рендерим фон меню (если есть)
+            if !self.menu_background_instances.is_empty() {
+                if let Some(ref textures) = self.menu_background_textures {
+                    let ui_props_count = self.ui_props_instances.len();
+                    let mut instance_offset = 0;
+                    for (layer, _) in &self.menu_background_instances {
+                        // Получаем bind_group для текущего слоя
+                        let bind_group = match layer {
+                            MenuBackgroundLayer::Sky => &textures.sky_bind_group,
+                            MenuBackgroundLayer::FarMountains => &textures.far_mountains_bind_group,
+                            MenuBackgroundLayer::GrassyMountains => &textures.grassy_mountains_bind_group,
+                            MenuBackgroundLayer::Hill => &textures.hill_bind_group,
+                            MenuBackgroundLayer::CloudsMid => &textures.clouds_mid_bind_group,
+                            MenuBackgroundLayer::CloudsMidT => &textures.clouds_mid_t_bind_group,
+                            MenuBackgroundLayer::CloudsFront => &textures.clouds_front_bind_group,
+                            MenuBackgroundLayer::CloudsFrontT => &textures.clouds_front_t_bind_group,
+                        };
+                        
+                        render_pass.set_pipeline(&self.ui_props_render_pipeline);
+                        render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                        render_pass.set_bind_group(1, bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                        let offset = (std::mem::size_of::<UIPropsInstance>() * (ui_props_count + instance_offset)) as wgpu::BufferAddress;
+                        render_pass.set_vertex_buffer(1, self.ui_props_instance_buffer.slice(offset..));
+                        render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        render_pass.draw_indexed(0..6, 0, 0..1);
+                        instance_offset += 1;
+                    }
+                }
+            }
             
             // 1. Рендерим UI прямоугольники (панели, кнопки) БЕЗ тултипов
             if self.tooltip_start_index > 0 && self.tooltip_start_index <= self.ui_rects.len() {
@@ -3749,6 +3837,202 @@ impl GpuRenderer {
         }
         
         Ok(())
+    }
+    
+    /// Загрузить текстуры фона главного меню (ленивая загрузка)
+    pub fn ensure_menu_background_textures(&mut self) {
+        if self.menu_background_textures.is_some() {
+            return;
+        }
+        
+        // Используем тот же bind group layout, что и для props (они идентичны)
+        // Это нужно для совместимости с ui_props_render_pipeline
+        // Создаем временный layout для создания bind groups (он будет идентичен props_bind_group_layout)
+        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Menu Background Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        
+        // Вспомогательная функция для загрузки текстуры
+        let load_texture = |bytes: &[u8], name: &str| -> (wgpu::Texture, wgpu::BindGroup) {
+            let image = image::load_from_memory(bytes).expect(&format!("Failed to load {}", name));
+            let rgba = image.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(name),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("{} Bind Group", name)),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+            
+            (texture, bind_group)
+        };
+        
+        // Загружаем все текстуры фона меню
+        let (sky_texture, sky_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/sky_fc.png"),
+            "Sky"
+        );
+        let (far_mountains_texture, far_mountains_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/far_mountains_fc.png"),
+            "Far Mountains"
+        );
+        let (grassy_mountains_texture, grassy_mountains_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/grassy_mountains_fc.png"),
+            "Grassy Mountains"
+        );
+        let (hill_texture, hill_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/hill.png"),
+            "Hill"
+        );
+        let (clouds_mid_texture, clouds_mid_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/clouds_mid_fc.png"),
+            "Clouds Mid"
+        );
+        let (clouds_mid_t_texture, clouds_mid_t_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/clouds_mid_t_fc.png"),
+            "Clouds Mid T"
+        );
+        let (clouds_front_texture, clouds_front_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/clouds_front_fc.png"),
+            "Clouds Front"
+        );
+        let (clouds_front_t_texture, clouds_front_t_bind_group) = load_texture(
+            include_bytes!("../assets/main_menu/clouds_front_t_fc.png"),
+            "Clouds Front T"
+        );
+        
+        self.menu_background_textures = Some(MenuBackgroundTextures {
+            sky_texture,
+            sky_bind_group,
+            far_mountains_texture,
+            far_mountains_bind_group,
+            grassy_mountains_texture,
+            grassy_mountains_bind_group,
+            hill_texture,
+            hill_bind_group,
+            clouds_mid_texture,
+            clouds_mid_bind_group,
+            clouds_mid_t_texture,
+            clouds_mid_t_bind_group,
+            clouds_front_texture,
+            clouds_front_bind_group,
+            clouds_front_t_texture,
+            clouds_front_t_bind_group,
+            bind_group_layout,
+        });
+    }
+    
+    /// Рендерить слой фона меню с заданным смещением
+    pub fn draw_menu_background_layer(
+        &mut self,
+        layer: MenuBackgroundLayer,
+        offset_x: f32,
+        offset_y: f32,
+        width: f32,
+        height: f32,
+    ) {
+        // Используем существующую систему UI props для рендеринга полноразмерных текстур
+        // Создаем матрицу трансформации с учетом смещения параллакса
+        use glam::{Mat4, Vec3};
+        
+        // Квад имеет координаты от -0.5 до 0.5, поэтому:
+        // 1. Масштабируем на размер экрана (width x height)
+        // 2. Транслируем так, чтобы квад начинался с (0, 0) и покрывал весь экран
+        // Порядок операций: сначала масштабирование, потом трансляция
+        // Это означает: translation * scale * vertex
+        // После масштабирования квад становится размером width x height с центром в (0, 0)
+        // Транслируем так, чтобы его левый верхний угол был в (offset_x, offset_y)
+        let model_matrix = Mat4::from_translation(Vec3::new(
+            width * 0.5 + offset_x,
+            height * 0.5 + offset_y,
+            0.0,
+        )) * Mat4::from_scale(Vec3::new(width, height, 1.0));
+        
+        // Создаем инстанс для полноразмерной текстуры
+        // Используем props_id = 0xFFFFFFFF как маркер для полноразмерной текстуры
+        // (в шейдере нужно будет обработать этот случай)
+        let instance = UIPropsInstance {
+            model_matrix: model_matrix.to_cols_array_2d(),
+            props_id: 0xFFFFFFFF, // Специальный ID для полноразмерной текстуры
+            tint_color: [1.0, 1.0, 1.0, 1.0],
+            padding: [0; 3],
+        };
+        
+        // Сохраняем идентификатор слоя и инстанс для рендеринга
+        self.menu_background_instances.push((layer, instance));
     }
     
     pub fn prepare_logs(

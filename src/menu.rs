@@ -161,15 +161,20 @@ pub fn draw_main_menu(
     height: i32,
     menu: &MainMenu,
     base_scale: f32,
+    cursor_x: i32,
+    cursor_y: i32,
 ) {
+    // Рендерим параллакс-фон
+    draw_menu_background(gpu, width, height, cursor_x, cursor_y);
+    
     let scale = crate::ui::ui_scale(height, base_scale) as f32;
     let center_x = width as f32 / 2.0;
     let start_y = height as f32 / 2.0 - 100.0 * scale;
     let btn_height = 40.0 * scale;
     let btn_spacing = 50.0 * scale;
     
-    // Фон меню (полупрозрачный черный)
-    gpu.add_ui_rect(0.0, 0.0, width as f32, height as f32, [0.0, 0.0, 0.0, 0.8]);
+    // Полупрозрачный оверлей поверх фона для лучшей читаемости
+    // gpu.add_ui_rect(0.0, 0.0, width as f32, height as f32, [0.0, 0.0, 0.0, 0.3]);
     
     // Заголовок игры
     let title = b"Strategy Game";
@@ -223,5 +228,109 @@ pub fn draw_main_menu(
         
         gpu.draw_text(text_x, text_y, *label, text_color, scale as f32);
     }
+}
+
+/// Рендеринг параллакс-фона главного меню
+fn draw_menu_background(
+    gpu: &mut GpuRenderer,
+    width: i32,
+    height: i32,
+    cursor_x: i32,
+    cursor_y: i32,
+) {
+    // Загружаем текстуры фона при первом использовании
+    gpu.ensure_menu_background_textures();
+    
+    // Вычисляем смещение параллакса на основе позиции курсора
+    // Нормализуем позицию курсора к диапазону -1.0..1.0
+    let parallax_x = (cursor_x as f32 / width as f32 - 0.5) * 2.0;
+    let parallax_y = (cursor_y as f32 / height as f32 - 0.5) * 2.0;
+    
+    // Коэффициенты параллакса для разных слоев (дальние слои двигаются медленнее)
+    let parallax_factors = [
+        (0.0, 0.0),      // sky - не двигается
+        (0.1, 0.1),      // far_mountains
+        (0.2, 0.2),      // grassy_mountains
+        (0.3, 0.3),      // hill
+        (0.4, 0.4),      // clouds_mid
+        (0.5, 0.5),      // clouds_mid_t
+        (0.6, 0.6),      // clouds_front
+        (0.7, 0.7),      // clouds_front_t
+    ];
+    
+    // Максимальное смещение в пикселях
+    let max_offset = 50.0;
+    
+    // Рендерим слои от дальних к ближним: Sky -> FarMountains -> GrassyMountains -> CloudsMid -> Hill -> CloudsFront
+    use crate::gpu_renderer::MenuBackgroundLayer;
+    
+    let w = width as f32;
+    let h = height as f32;
+    
+    // Sky (самый дальний слой, не двигается)
+    let offset_x = parallax_x * parallax_factors[0].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[0].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::Sky,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
+    
+    // FarMountains (дальний слой)
+    let offset_x = parallax_x * parallax_factors[1].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[1].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::FarMountains,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
+    
+    // GrassyMountains (дальний слой)
+    let offset_x = parallax_x * parallax_factors[2].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[2].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::GrassyMountains,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
+    
+    // CloudsMid (средний слой)
+    let offset_x = parallax_x * parallax_factors[4].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[4].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::CloudsMid,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
+    
+    // Hill (ближний слой)
+    let offset_x = parallax_x * parallax_factors[3].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[3].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::Hill,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
+    
+    // CloudsFront (самый ближний слой, перед всеми)
+    let offset_x = parallax_x * parallax_factors[6].0 * max_offset;
+    let offset_y = parallax_y * parallax_factors[6].1 * max_offset;
+    gpu.draw_menu_background_layer(
+        MenuBackgroundLayer::CloudsFront,
+        -offset_x,
+        -offset_y,
+        w,
+        h,
+    );
 }
 
