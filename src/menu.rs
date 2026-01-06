@@ -261,15 +261,27 @@ fn draw_menu_background(
     // Максимальное смещение в пикселях
     let max_offset = 50.0;
     
+    // Максимальный коэффициент параллакса (для самого быстрого слоя)
+    let max_parallax_factor = 0.7; // CloudsFront
+    
+    // Увеличиваем размер слоев, чтобы покрыть экран даже при максимальном смещении параллакса
+    // Максимальное смещение = max_offset * max_parallax_factor в каждую сторону
+    let padding = max_offset * max_parallax_factor * 2.0; // *2 для обеих сторон
+    let w = width as f32 + padding;
+    let h = height as f32 + padding;
+    
+    // Смещение для центрирования увеличенной текстуры на экране
+    // Текстура увеличена на padding, поэтому нужно сместить её влево и вверх на padding/2
+    // Поскольку мы передаем -offset_x в функцию, нужно положительное значение для смещения влево
+    let center_offset_x = padding * 0.5;
+    let center_offset_y = padding * 0.5;
+    
     // Рендерим слои от дальних к ближним: Sky -> FarMountains -> GrassyMountains -> CloudsMid -> Hill -> CloudsFront
     use crate::gpu_renderer::MenuBackgroundLayer;
     
-    let w = width as f32;
-    let h = height as f32;
-    
     // Sky (самый дальний слой, не двигается)
-    let offset_x = parallax_x * parallax_factors[0].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[0].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[0].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[0].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::Sky,
         -offset_x,
@@ -279,8 +291,8 @@ fn draw_menu_background(
     );
     
     // FarMountains (дальний слой)
-    let offset_x = parallax_x * parallax_factors[1].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[1].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[1].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[1].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::FarMountains,
         -offset_x,
@@ -290,8 +302,8 @@ fn draw_menu_background(
     );
     
     // GrassyMountains (дальний слой)
-    let offset_x = parallax_x * parallax_factors[2].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[2].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[2].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[2].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::GrassyMountains,
         -offset_x,
@@ -301,8 +313,8 @@ fn draw_menu_background(
     );
     
     // CloudsMid (средний слой)
-    let offset_x = parallax_x * parallax_factors[4].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[4].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[4].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[4].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::CloudsMid,
         -offset_x,
@@ -312,8 +324,8 @@ fn draw_menu_background(
     );
     
     // Hill (ближний слой)
-    let offset_x = parallax_x * parallax_factors[3].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[3].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[3].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[3].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::Hill,
         -offset_x,
@@ -323,8 +335,8 @@ fn draw_menu_background(
     );
     
     // CloudsFront (самый ближний слой, перед всеми)
-    let offset_x = parallax_x * parallax_factors[6].0 * max_offset;
-    let offset_y = parallax_y * parallax_factors[6].1 * max_offset;
+    let offset_x = center_offset_x + parallax_x * parallax_factors[6].0 * max_offset;
+    let offset_y = center_offset_y + parallax_y * parallax_factors[6].1 * max_offset;
     gpu.draw_menu_background_layer(
         MenuBackgroundLayer::CloudsFront,
         -offset_x,
