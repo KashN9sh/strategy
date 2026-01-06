@@ -11,15 +11,13 @@ pub enum MenuOption {
 
 /// Состояние главного меню
 pub struct MainMenu {
-    pub selected_option: MenuOption,
-    pub hovered_option: Option<MenuOption>,
+    pub selected_option: Option<MenuOption>, // Единый буфер выделения для клавиатуры и мыши
 }
 
 impl MainMenu {
     pub fn new() -> Self {
         Self {
-            selected_option: MenuOption::NewGame,
-            hovered_option: None,
+            selected_option: None, // Начинаем без выделения
         }
     }
     
@@ -38,7 +36,8 @@ impl MainMenu {
             MenuOption::Quit,
         ];
         
-        self.hovered_option = None;
+        // При наведении мыши обновляем единый буфер выделения
+        let mut found_hover = false;
         for (i, &option) in options.iter().enumerate() {
             let btn_y = start_y + (i as f32 * btn_spacing);
             let btn_x = center_x - 150.0 * scale;
@@ -46,9 +45,15 @@ impl MainMenu {
             
             if x as f32 >= btn_x && x as f32 <= btn_x + btn_w &&
                y as f32 >= btn_y && y as f32 <= btn_y + btn_height {
-                self.hovered_option = Some(option);
+                self.selected_option = Some(option);
+                found_hover = true;
                 break;
             }
+        }
+        
+        // Если мышь не на кнопке, убираем выделение
+        if !found_hover {
+            self.selected_option = None;
         }
     }
     
@@ -58,25 +63,38 @@ impl MainMenu {
         
         match key {
             PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-                self.selected_option = match self.selected_option {
+                // При навигации клавиатурой используем текущее выделение как начальную точку
+                // Если выделения нет, начинаем с первой опции
+                let start_option = self.selected_option.unwrap_or(MenuOption::NewGame);
+                // Обновляем selected_option на основе текущей позиции
+                self.selected_option = Some(match start_option {
                     MenuOption::NewGame => MenuOption::Quit,
                     MenuOption::LoadGame => MenuOption::NewGame,
                     MenuOption::Settings => MenuOption::LoadGame,
                     MenuOption::Quit => MenuOption::Settings,
-                };
+                });
                 None
             }
             PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
-                self.selected_option = match self.selected_option {
+                // При навигации клавиатурой используем текущее выделение как начальную точку
+                // Если выделения нет, начинаем с первой опции
+                let start_option = self.selected_option.unwrap_or(MenuOption::NewGame);
+                // Обновляем selected_option на основе текущей позиции
+                self.selected_option = Some(match start_option {
                     MenuOption::NewGame => MenuOption::LoadGame,
                     MenuOption::LoadGame => MenuOption::Settings,
                     MenuOption::Settings => MenuOption::Quit,
                     MenuOption::Quit => MenuOption::NewGame,
-                };
+                });
                 None
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Space) => {
-                Some(self.selected_option.into())
+                // При выборе используем текущее выделение
+                if let Some(option) = self.selected_option {
+                    Some(option.into())
+                } else {
+                    None
+                }
             }
             PhysicalKey::Code(KeyCode::Escape) => {
                 Some(MenuAction::Quit)
@@ -107,7 +125,7 @@ impl MainMenu {
             
             if x as f32 >= btn_x && x as f32 <= btn_x + btn_w &&
                y as f32 >= btn_y && y as f32 <= btn_y + btn_height {
-                self.selected_option = option;
+                // При клике мыши используем текущее выделение (которое уже установлено при наведении)
                 return Some(option.into());
             }
         }
@@ -173,12 +191,8 @@ pub fn draw_main_menu(
         let btn_x = center_x - 150.0 * scale;
         let btn_w = 300.0 * scale;
         
-        // Если мышь наведена на кнопку, подсвечиваем только её, иначе подсвечиваем выбранную клавиатурой
-        let is_selected = if let Some(hovered) = menu.hovered_option {
-            *option == hovered
-        } else {
-            *option == menu.selected_option
-        };
+        // Подсвечиваем кнопку, если она выделена (единый буфер для клавиатуры и мыши)
+        let is_selected = menu.selected_option == Some(*option);
         
         // Фон кнопки
         let bg_color = if is_selected {
