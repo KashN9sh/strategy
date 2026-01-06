@@ -1359,7 +1359,15 @@ pub fn draw_research_tree_gpu(
             max_row = row;
         }
     }
-    let total_tree_height = (max_row as f32 + 1.0) * (node_h + gap_y);
+    // Высота дерева: позиция верхней границы последнего узла + высота узла
+    // Позиция последнего узла: max_row * (node_h + gap_y)
+    // Нижняя граница последнего узла: max_row * (node_h + gap_y) + node_h
+    // Общая высота от tree_start_y: max_row * (node_h + gap_y) + node_h
+    let total_tree_height = max_row as f32 * (node_h + gap_y) + node_h;
+    // Максимальный скролл
+    let max_scroll = (total_tree_height - tree_area_height).max(0.0);
+    // Клампим входной scroll_offset, чтобы не выходил за пределы
+    let scroll_offset = scroll_offset.clamp(0.0, max_scroll);
     
     let mut hovered_research = None;
     

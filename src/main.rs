@@ -561,7 +561,7 @@ fn run() -> Result<()> {
                     event_handler::handle_resize(new_size, &mut game_state, &mut gpu_renderer);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    event_handler::handle_mouse_wheel(delta, &mut camera, &mut game_state);
+                    event_handler::handle_mouse_wheel(delta, &mut camera, &mut game_state, config.ui_scale_base);
                 }
                 WindowEvent::RedrawRequested => {
                     // Рендеринг главного меню

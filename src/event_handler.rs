@@ -309,6 +309,7 @@ pub fn handle_mouse_wheel(
     delta: MouseScrollDelta,
     camera: &mut Camera,
     game_state: &mut GameState,
+    base_scale_k: f32,
 ) {
     // Если открыто окно исследований, скроллим его
     if game_state.show_research_tree {
@@ -317,26 +318,44 @@ pub fn handle_mouse_wheel(
             MouseScrollDelta::PixelDelta(p) => p.y as f32,
         };
         
-        game_state.research_tree_scroll = (game_state.research_tree_scroll - scroll_amount).max(0.0);
-        
         // Вычисляем максимальный скролл (это должно соответствовать логике в draw_research_tree_gpu)
+        let window_w = (game_state.width_i32 as f32 * 0.9).max(900.0);
         let window_h = (game_state.height_i32 as f32 * 0.85).max(650.0);
-        let s = crate::ui::ui_scale(game_state.height_i32, 1.0);
+        let window_x = (game_state.width_i32 as f32 - window_w) / 2.0;
+        let window_y = (game_state.height_i32 as f32 - window_h) / 2.0;
+        let s = crate::ui::ui_scale(game_state.height_i32, base_scale_k);
         let pad = (16 * s) as f32;
         let node_h = (80 * s) as f32;
         let gap_y = (45 * s) as f32;
-        let max_row = 4; // Максимальный ряд в дереве
-        let total_tree_height = (max_row as f32 + 1.0) * (node_h + gap_y);
         
-        // Вычисляем высоту области дерева
+        // Вычисляем максимальный ряд динамически (как в draw_research_tree_gpu)
+        use crate::research::ResearchKind;
+        let mut max_row = 0;
+        for &research_kind in ResearchKind::all() {
+            let (_, row) = research_kind.tree_position();
+            if row > max_row {
+                max_row = row;
+            }
+        }
+        // Высота дерева: позиция верхней границы последнего узла + высота узла
+        // Позиция последнего узла: max_row * (node_h + gap_y)
+        // Нижняя граница последнего узла: max_row * (node_h + gap_y) + node_h
+        let total_tree_height = max_row as f32 * (node_h + gap_y) + node_h;
+        
+        // Вычисляем высоту области дерева (точно как в draw_research_tree_gpu)
         let title_height = (28 * s) as f32;
-        let info_y = pad + title_height + pad + 12.0;
+        let info_y = window_y + pad + title_height + pad + 12.0;
         let tree_start_y = info_y + (40 * s) as f32;
-        let tree_area_height = window_h - tree_start_y - pad * 2.0;
+        let tree_area_top = tree_start_y;
+        let tree_area_bottom = window_y + window_h - pad * 2.0;
+        let tree_area_height = tree_area_bottom - tree_area_top;
         
         let max_scroll = (total_tree_height - tree_area_height).max(0.0);
         
-        game_state.research_tree_scroll = game_state.research_tree_scroll.min(max_scroll);
+        // Обновляем скролл с ограничениями
+        game_state.research_tree_scroll = (game_state.research_tree_scroll - scroll_amount)
+            .max(0.0)
+            .min(max_scroll);
     } else {
         // Иначе зумируем камеру
         let factor = match delta {
