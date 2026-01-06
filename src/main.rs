@@ -29,11 +29,14 @@ mod commands;
 mod music;
 mod research;
 mod notifications;
+mod menu;
 use gpu_renderer::GpuRenderer;
+use menu::{MainMenu, MenuAction};
 use std::time::Instant;
 use rand::{rngs::StdRng, SeedableRng};
 use std::sync::atomic::{AtomicI32, Ordering};
 use winit::dpi::LogicalSize;
+use glam::IVec2;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
@@ -65,6 +68,7 @@ fn run() -> Result<()> {
     let mut camera = camera::Camera::new(Vec2::new(0.0, 0.0), 2.0);
     let mut rng_init = StdRng::seed_from_u64(42);
     let mut game_state = game_state::GameState::new(&mut rng_init, &config);
+    let mut main_menu = MainMenu::new();
     
     // Загрузить все текстуры
     atlas::load_textures(
@@ -92,6 +96,46 @@ fn run() -> Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => elwt.exit(),
                 WindowEvent::KeyboardInput { event, .. } => {
+                    // Обработка меню
+                    if game_state.app_state == game_state::AppState::MainMenu {
+                        if let Some(action) = main_menu.handle_key(event.physical_key) {
+                            match action {
+                                MenuAction::NewGame => {
+                                    // Создаем новую игру
+                                    let mut new_rng = StdRng::seed_from_u64(42);
+                                    game_state = game_state::GameState::new(&mut new_rng, &config);
+                                    game_state.width_i32 = size.width as i32;
+                                    game_state.height_i32 = size.height as i32;
+                                    atlas::load_textures(
+                                        &mut game_state.atlas,
+                                        &mut game_state.building_atlas,
+                                        &mut game_state.tree_atlas,
+                                        &mut game_state.props_atlas,
+                                    );
+                                    match music::MusicManager::new() {
+                                        Ok(music_manager) => {
+                                            game_state.music_manager = Some(music_manager);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Не удалось инициализировать музыку: {}", e);
+                                        }
+                                    }
+                                    game_state.app_state = game_state::AppState::Playing;
+                                }
+                                MenuAction::LoadGame => {
+                                    // TODO: Реализовать загрузку игры
+                                    eprintln!("Загрузка игры пока не реализована");
+                                }
+                                MenuAction::Settings => {
+                                    // TODO: Реализовать настройки
+                                    eprintln!("Настройки пока не реализованы");
+                                }
+                                MenuAction::Quit => elwt.exit(),
+                            }
+                        }
+                        return;
+                    }
+                    
                     if event_handler::handle_keyboard_input(
                         event.physical_key,
                         &event.state,
@@ -106,9 +150,60 @@ fn run() -> Result<()> {
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    event_handler::handle_cursor_moved(position, &mut game_state, &camera);
+                    // Обновляем позицию курсора для меню тоже
+                    game_state.cursor_xy = IVec2::new(position.x as i32, position.y as i32);
+                    
+                    if game_state.app_state == game_state::AppState::Playing {
+                        event_handler::handle_cursor_moved(position, &mut game_state, &camera);
+                    }
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
+                    if game_state.app_state == game_state::AppState::MainMenu {
+                        if let winit::event::MouseButton::Left = button {
+                            if state == winit::event::ElementState::Pressed {
+                                if let Some(action) = main_menu.handle_click(
+                                    game_state.cursor_xy.x,
+                                    game_state.cursor_xy.y,
+                                    game_state.width_i32,
+                                    game_state.height_i32,
+                                    config.ui_scale_base,
+                                ) {
+                                    match action {
+                                        MenuAction::NewGame => {
+                                            let mut new_rng = StdRng::seed_from_u64(42);
+                                            game_state = game_state::GameState::new(&mut new_rng, &config);
+                                            game_state.width_i32 = size.width as i32;
+                                            game_state.height_i32 = size.height as i32;
+                                            atlas::load_textures(
+                                                &mut game_state.atlas,
+                                                &mut game_state.building_atlas,
+                                                &mut game_state.tree_atlas,
+                                                &mut game_state.props_atlas,
+                                            );
+                                            match music::MusicManager::new() {
+                                                Ok(music_manager) => {
+                                                    game_state.music_manager = Some(music_manager);
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Не удалось инициализировать музыку: {}", e);
+                                                }
+                                            }
+                                            game_state.app_state = game_state::AppState::Playing;
+                                        }
+                                        MenuAction::LoadGame => {
+                                            eprintln!("Загрузка игры пока не реализована");
+                                        }
+                                        MenuAction::Settings => {
+                                            eprintln!("Настройки пока не реализованы");
+                                        }
+                                        MenuAction::Quit => elwt.exit(),
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    
                     if event_handler::handle_mouse_input(button, state, &mut game_state, &config, &mut gpu_renderer) {
                         return;
                     }
@@ -120,6 +215,23 @@ fn run() -> Result<()> {
                     event_handler::handle_mouse_wheel(delta, &mut camera, &mut game_state);
                 }
                 WindowEvent::RedrawRequested => {
+                    // Рендеринг главного меню
+                    if game_state.app_state == game_state::AppState::MainMenu {
+                        gpu_renderer.clear_ui();
+                        menu::draw_main_menu(
+                            &mut gpu_renderer,
+                            game_state.width_i32,
+                            game_state.height_i32,
+                            &main_menu,
+                            config.ui_scale_base,
+                        );
+                        if let Err(err) = gpu_renderer.render() {
+                            eprintln!("gpu_renderer.render() failed: {err}");
+                            elwt.exit();
+                        }
+                        return;
+                    }
+                    
                     if MINIMAP_CELL_PX.load(Ordering::Relaxed) == 0 {
                         let s0 = ui::ui_scale(game_state.height_i32, config.ui_scale_base);
                         MINIMAP_CELL_PX.store(3 * s0, Ordering::Relaxed);
@@ -296,12 +408,15 @@ fn run() -> Result<()> {
                 _ => {}
             },
             Event::AboutToWait => {
-                let now = Instant::now();
-                let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;
-                game_state.last_frame = now;
-                let frame_ms = frame_ms.min(250.0);
-                
-                game_loop::update_game_state(&mut game_state, frame_ms, &config);
+                // Обновляем состояние игры только если мы в игре
+                if game_state.app_state == game_state::AppState::Playing {
+                    let now = Instant::now();
+                    let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;
+                    game_state.last_frame = now;
+                    let frame_ms = frame_ms.min(250.0);
+                    
+                    game_loop::update_game_state(&mut game_state, frame_ms, &config);
+                }
 
                 window.request_redraw();
             }

@@ -24,8 +24,17 @@ pub struct Firefly {
     pub life_s: f32,
 }
 
+/// Состояние приложения
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppState {
+    MainMenu,
+    Playing,
+}
+
 /// Полное состояние игры
 pub struct GameState {
+    // === Состояние приложения ===
+    pub app_state: AppState,
     // === Игровое состояние ===
     pub resources: Resources,
     pub buildings: Vec<Building>,
@@ -133,6 +142,9 @@ impl GameState {
         };
         
         Self {
+            // Состояние приложения
+            app_state: AppState::MainMenu,
+            
             // Игровое состояние
             resources: Resources {
                 wood: 60,

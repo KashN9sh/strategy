@@ -2381,6 +2381,7 @@ impl GpuRenderer {
         self.tooltip_start_index = 0;
         self.ui_props_instances.clear();
         self.tooltip_props_start_index = 0;
+        self.minimap_instances.clear();
     }
     
     // Запоминает текущий размер ui_rects как начало тултипов
