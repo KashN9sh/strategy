@@ -1938,8 +1938,7 @@ pub fn draw_quests_gpu(
     let scale = s as f32;
     
     let pad = (8 * s) as f32;
-    let quest_h = (60 * s) as f32;
-    let gap = (6 * s) as f32;
+    let gap = (5 * s) as f32;
     
     // Панель квестов в левом верхнем углу, под верхней панелью UI
     let top_panel_h = ui::top_panel_height(s) as f32;
@@ -1950,17 +1949,19 @@ pub fn draw_quests_gpu(
     let graphite_color = [0.1, 0.1, 0.1, 1.0];
     let white_color = [1.0, 1.0, 1.0, 1.0];
     
-    gpu.draw_text_outlined(x, y, b"QUESTS", graphite_color, white_color, scale);
-    y += (16 * s) as f32 + gap;
+    gpu.draw_text_outlined(x, y, b"QUESTS:", graphite_color, white_color, scale);
+    y += (14 * s) as f32 + gap;
     
     for quest in quests.iter().take(3) {
         let mut text_y = y;
+        let tab_offset = (16 * s) as f32; // Отступ для вложенной информации (2 таба)
         
-        // Заголовок квеста
-        gpu.draw_text_outlined(x, text_y, quest.title.as_bytes(), graphite_color, white_color, scale * 0.9);
+        // Заголовок квеста с символом *
+        let quest_title = format!("* {}", quest.title);
+        gpu.draw_text_outlined(x, text_y, quest_title.as_bytes(), graphite_color, white_color, scale * 0.9);
         text_y += (12 * s) as f32;
         
-        // Прогресс
+        // Прогресс (с отступом)
         let progress_text = match &quest.kind {
             crate::quests::QuestKind::CollectResource { current_amount, target_amount, .. } => {
                 format!("{}/{}", current_amount, target_amount)
@@ -1976,14 +1977,16 @@ pub fn draw_quests_gpu(
             }
         };
         
-        gpu.draw_text_outlined(x, text_y, progress_text.as_bytes(), graphite_color, white_color, scale * 0.8);
+        gpu.draw_text_outlined(x + tab_offset, text_y, progress_text.as_bytes(), graphite_color, white_color, scale * 0.8);
         text_y += (10 * s) as f32;
         
-        // Награда
+        // Награда (с отступом)
         let reward_text = format!("Reward: {} gold", quest.reward_gold);
-        gpu.draw_text_outlined(x, text_y, reward_text.as_bytes(), graphite_color, white_color, scale * 0.7);
+        gpu.draw_text_outlined(x + tab_offset, text_y, reward_text.as_bytes(), graphite_color, white_color, scale * 0.7);
+        text_y += (10 * s) as f32; // Высота строки награды
         
-        y += quest_h + gap;
+        // Обновляем y для следующего квеста
+        y = text_y + gap;
     }
 }
 
