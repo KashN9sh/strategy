@@ -2537,6 +2537,11 @@ impl GpuRenderer {
     pub fn draw_ui_props_icon(&mut self, x: f32, y: f32, size: f32, props_index: u32) {
         use glam::{Mat4, Vec3};
         
+        // Учитываем клиппинг UI: не добавляем инстанс, если он вне видимой области
+        if !self.is_rect_visible(x, y, size, size) {
+            return;
+        }
+        
         // Создаем матрицу трансформации для спрайта в экранных координатах
         let model_matrix = Mat4::from_scale_rotation_translation(
             Vec3::new(size, size, 1.0),

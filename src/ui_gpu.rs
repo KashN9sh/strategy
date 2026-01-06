@@ -1435,6 +1435,11 @@ pub fn draw_research_tree_gpu(
         let node_x = tree_area_left + (col as f32) * (node_w + gap_x);
         let node_y = tree_start_y + (row as f32) * (node_h + gap_y) - scroll_offset;
         
+        // Пропускаем узлы, которые целиком вне области дерева (для иконок нет клиппинга)
+        if node_y + node_h < tree_area_top || node_y > tree_area_bottom {
+            continue;
+        }
+        
         let is_hovered = cursor_x >= node_x as i32 && cursor_x < (node_x + node_w) as i32
             && cursor_y >= node_y as i32 && cursor_y < (node_y + node_h) as i32;
         
@@ -1529,6 +1534,8 @@ pub fn draw_research_tree_gpu(
     
     // Компактный тултип для наведенного исследования
     if let Some((kind, status, _x, _y)) = hovered_research {
+        // Разделяем тултипы от остального UI, чтобы иконки из дерева не перекрывали тултип
+        gpu.start_tooltips();
         let info = kind.info();
         
         let tooltip_pad = (6 * s) as f32;
