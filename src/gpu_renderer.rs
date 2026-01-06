@@ -2433,6 +2433,15 @@ impl GpuRenderer {
         self.tooltip_start_index = self.ui_rects.len();
         self.tooltip_props_start_index = self.ui_props_instances.len();
     }
+
+    // Гарантирует, что граница между обычным UI и тултипами проставлена.
+    // Без вызова start_tooltips тултипные прямоугольники/иконки могут
+    // оказаться под миникартой и верхними иконками.
+    pub fn ensure_tooltip_layer(&mut self) {
+        if self.tooltip_start_index == 0 && self.tooltip_props_start_index == 0 {
+            self.start_tooltips();
+        }
+    }
     
     // Установить область клиппинга для UI элементов
     pub fn set_clip_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {

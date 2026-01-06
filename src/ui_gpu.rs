@@ -537,7 +537,7 @@ pub fn draw_ui_gpu(
     );
     
     // === ТУЛТИПЫ ===
-    // Запоминаем текущий размер ui_rects как начало тултипов
+    // Запоминаем текущий размер ui_rects как начало тултипов (дополнительно страхуемся ensure внутри самих тултипов)
     gpu.start_tooltips();
     
     if let Some(building) = hovered_building {
@@ -675,6 +675,7 @@ pub fn draw_building_tooltip(
     _screen_height: f32,
     _available_resources: Option<&Resources>, // Не используется для построенных зданий, только для кнопок строительства
 ) {
+    gpu.ensure_tooltip_layer();
     use crate::types::building_cost;
     
     let s = scale as i32;
@@ -769,6 +770,7 @@ pub fn draw_button_tooltip(
     _screen_height: f32,
     available_resources: Option<&Resources>,
 ) {
+    gpu.ensure_tooltip_layer();
     use crate::types::{building_cost, BuildingKind};
     
     let s = scale as i32;
@@ -904,6 +906,7 @@ pub fn draw_weather_tooltip(
     screen_width: f32,
     _screen_height: f32,
 ) {
+    gpu.ensure_tooltip_layer();
     use crate::types::{BuildingKind, WeatherKind};
     use crate::game::production_weather_wmul;
     
@@ -1043,6 +1046,7 @@ pub fn draw_resource_tooltip(
     screen_width: f32,
     _screen_height: f32,
 ) {
+    gpu.ensure_tooltip_layer();
     let s = scale as i32;
     let pad = (4 * s) as f32;
     let line_height = (12 * s) as f32;
@@ -1175,6 +1179,7 @@ pub fn draw_biome_debug_tooltip(
     screen_width: f32,
     _screen_height: f32,
 ) {
+    gpu.ensure_tooltip_layer();
     let pad = 8.0 * scale;
     let line_height = 16.0 * scale;
     
@@ -1535,7 +1540,7 @@ pub fn draw_research_tree_gpu(
     // Компактный тултип для наведенного исследования
     if let Some((kind, status, _x, _y)) = hovered_research {
         // Разделяем тултипы от остального UI, чтобы иконки из дерева не перекрывали тултип
-        gpu.start_tooltips();
+        gpu.ensure_tooltip_layer();
         let info = kind.info();
         
         let tooltip_pad = (6 * s) as f32;
