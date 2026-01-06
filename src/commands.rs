@@ -160,7 +160,7 @@ impl Command for SaveGameCommand {
         _config: &Config,
         _gpu_renderer: &mut GpuRenderer,
     ) -> bool {
-        let _ = save::save_game(&save::SaveData::from_runtime(
+        match save::save_game(&save::SaveData::from_runtime(
             game_state.seed,
             &game_state.resources,
             &game_state.buildings,
@@ -179,7 +179,22 @@ impl Command for SaveGameCommand {
             game_state.tax_rate,
             game_state.speed_mult,
             game_state.food_policy,
-        ));
+        )) {
+            Ok(_) => {
+                game_state.notification_system.add(
+                    crate::notifications::NotificationKind::Info {
+                        message: "Game saved".to_string(),
+                    }
+                );
+            }
+            Err(e) => {
+                game_state.notification_system.add(
+                    crate::notifications::NotificationKind::Warning {
+                        message: format!("Save error: {}", e),
+                    }
+                );
+            }
+        }
         false
     }
 }

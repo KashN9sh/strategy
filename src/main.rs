@@ -279,9 +279,11 @@ fn run() -> Result<()> {
                                     match save::save_game(&save_data) {
                                         Ok(_) => {
                                             eprintln!("Игра успешно сохранена");
+                                            pause_menu.set_save_message("Game saved!".to_string());
                                         }
                                         Err(e) => {
                                             eprintln!("Ошибка при сохранении игры: {}", e);
+                                            pause_menu.set_save_message(format!("Save error: {}", e));
                                         }
                                     }
                                 }
@@ -378,9 +380,11 @@ fn run() -> Result<()> {
                                             match save::save_game(&save_data) {
                                                 Ok(_) => {
                                                     eprintln!("Игра успешно сохранена");
+                                                    pause_menu.set_save_message("Game saved!".to_string());
                                                 }
                                                 Err(e) => {
                                                     eprintln!("Ошибка при сохранении игры: {}", e);
+                                                    pause_menu.set_save_message(format!("Save error: {}", e));
                                                 }
                                             }
                                         }
@@ -766,14 +770,19 @@ fn run() -> Result<()> {
                 _ => {}
             },
             Event::AboutToWait => {
+                let now = Instant::now();
+                let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;
+                game_state.last_frame = now;
+                let frame_ms = frame_ms.min(250.0);
+                
                 // Обновляем состояние игры только если мы в игре (не в меню и не на паузе)
                 if game_state.app_state == game_state::AppState::Playing {
-                    let now = Instant::now();
-                    let frame_ms = (now - game_state.last_frame).as_secs_f32() * 1000.0;
-                    game_state.last_frame = now;
-                    let frame_ms = frame_ms.min(250.0);
-                    
                     game_loop::update_game_state(&mut game_state, frame_ms, &config);
+                }
+                
+                // Обновляем таймер сообщения в меню паузы
+                if game_state.app_state == game_state::AppState::Paused {
+                    pause_menu.update(frame_ms);
                 }
 
                 window.request_redraw();

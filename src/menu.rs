@@ -146,12 +146,32 @@ pub enum PauseMenuOption {
 /// Состояние меню паузы
 pub struct PauseMenu {
     pub selected_option: Option<PauseMenuOption>,
+    pub save_message: Option<String>, // Сообщение о сохранении (показывается временно)
+    pub save_message_timer: f32, // Таймер для исчезновения сообщения
 }
 
 impl PauseMenu {
     pub fn new() -> Self {
         Self {
             selected_option: None,
+            save_message: None,
+            save_message_timer: 0.0,
+        }
+    }
+    
+    /// Установить сообщение о сохранении
+    pub fn set_save_message(&mut self, message: String) {
+        self.save_message = Some(message);
+        self.save_message_timer = 3000.0; // 3 секунды
+    }
+    
+    /// Обновить таймер сообщения
+    pub fn update(&mut self, delta_ms: f32) {
+        if self.save_message.is_some() {
+            self.save_message_timer -= delta_ms;
+            if self.save_message_timer <= 0.0 {
+                self.save_message = None;
+            }
         }
     }
     
@@ -363,6 +383,19 @@ pub fn draw_pause_menu(
         };
         
         gpu.draw_text(text_x, text_y, *label, text_color, scale as f32);
+    }
+    
+    // Отображаем сообщение о сохранении, если есть
+    if let Some(ref message) = menu.save_message {
+        let alpha = (menu.save_message_timer / 1000.0).min(1.0); // Fade out в последнюю секунду
+        let msg_text = message.as_bytes();
+        let msg_scale = scale * 1.2;
+        let msg_w = msg_text.len() as f32 * 4.0 * 2.0 * msg_scale;
+        let msg_x = center_x - msg_w / 2.0;
+        let msg_y = start_y + (options.len() as f32 * btn_spacing) + 30.0 * scale;
+        
+        // Текст сообщения без фона
+        gpu.draw_text(msg_x, msg_y, msg_text, [1.0, 1.0, 0.8, alpha], msg_scale);
     }
 }
 
