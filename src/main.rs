@@ -709,6 +709,7 @@ fn run() -> Result<()> {
                     max_tx,
                     max_ty,
                     &game_state.research_system,
+                    game_state.show_research_tree, // Передаем флаг открытия дерева исследований
                 );
             } else {
                 gpu_renderer.clear_ui();

@@ -736,9 +736,11 @@ pub struct GpuRenderer {
     fog_instances: Vec<FogInstance>, // Туманы войны
     ui_rects: Vec<UIRect>,
     tooltip_start_index: usize, // Индекс, где начинаются тултипы в ui_rects
+    research_tree_start_index: usize, // Индекс, где начинается окно дерева исследований в ui_rects
     minimap_instances: Vec<UIRect>,
     ui_props_instances: Vec<UIPropsInstance>, // UI спрайты из props.png
     tooltip_props_start_index: usize, // Индекс, где начинаются иконки тултипов в ui_props_instances
+    research_tree_props_start_index: usize, // Индекс, где начинаются иконки дерева исследований в ui_props_instances
     menu_background_instances: Vec<(MenuBackgroundLayer, UIPropsInstance)>, // Инстансы для фона меню (слой + инстанс)
     
     // Текстуры фона главного меню
@@ -2069,7 +2071,9 @@ impl GpuRenderer {
             fog_instances: Vec::new(),
             ui_rects: Vec::new(),
             tooltip_start_index: 0,
+            research_tree_start_index: 0,
             tooltip_props_start_index: 0,
+            research_tree_props_start_index: 0,
             minimap_instances: Vec::new(),
             tile_instance_buffer,
             building_instance_buffer,
@@ -2422,10 +2426,18 @@ impl GpuRenderer {
     pub fn clear_ui(&mut self) {
         self.ui_rects.clear();
         self.tooltip_start_index = 0;
+        self.research_tree_start_index = 0;
         self.ui_props_instances.clear();
         self.tooltip_props_start_index = 0;
+        self.research_tree_props_start_index = 0;
         self.minimap_instances.clear();
         self.menu_background_instances.clear();
+    }
+    
+    // Запоминает текущий размер ui_rects как начало окна дерева исследований
+    pub fn start_research_tree(&mut self) {
+        self.research_tree_start_index = self.ui_rects.len();
+        self.research_tree_props_start_index = self.ui_props_instances.len();
     }
     
     // Запоминает текущий размер ui_rects как начало тултипов
@@ -3700,26 +3712,34 @@ impl GpuRenderer {
                 }
             }
             
-            // 1. Рендерим UI прямоугольники (панели, кнопки) БЕЗ тултипов
-            if self.tooltip_start_index > 0 && self.tooltip_start_index <= self.ui_rects.len() {
+            // 1. Рендерим обычный UI (верхний UI) - до окна дерева исследований
+            let ui_end = if self.research_tree_start_index > 0 {
+                self.research_tree_start_index
+            } else if self.tooltip_start_index > 0 {
+                self.tooltip_start_index
+            } else {
+                self.ui_rects.len()
+            };
+            
+            if ui_end > 0 {
                 render_pass.set_pipeline(&self.ui_rect_render_pipeline);
                 render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..6, 0, 0..self.tooltip_start_index as u32);
-            } else if !self.ui_rects.is_empty() {
-                // Если нет тултипов, рендерим все ui_rects
-                render_pass.set_pipeline(&self.ui_rect_render_pipeline);
-                render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
-                render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(..));
-                render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..6, 0, 0..self.ui_rects.len() as u32);
+                render_pass.draw_indexed(0..6, 0, 0..ui_end as u32);
             }
             
-            // 2. Рендерим UI спрайты из props.png (иконки) - только обычные, не тултипы
-            if self.tooltip_props_start_index > 0 {
+            // 2. Рендерим иконки обычного UI - до окна дерева исследований
+            let props_end = if self.research_tree_props_start_index > 0 {
+                self.research_tree_props_start_index
+            } else if self.tooltip_props_start_index > 0 {
+                self.tooltip_props_start_index
+            } else {
+                self.ui_props_instances.len()
+            };
+            
+            if props_end > 0 {
                 if let Some(ref props_bind_group) = self.props_texture_bind_group {
                     render_pass.set_pipeline(&self.ui_props_render_pipeline);
                     render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -3727,11 +3747,11 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.ui_props_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.tooltip_props_start_index as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..props_end as u32);
                 }
             }
             
-            // 3. Рендерим миникарту
+            // 3. Рендерим миникарту (под окном дерева исследований)
             if !self.minimap_instances.is_empty() {
                 render_pass.set_pipeline(&self.ui_rect_render_pipeline);
                 render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -3741,7 +3761,48 @@ impl GpuRenderer {
                 render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
             }
             
-            // 4. Рендерим тултипы последними, поверх всего
+            // 4. Рендерим окно дерева исследований (поверх миникарты)
+            if self.research_tree_start_index > 0 && self.research_tree_start_index < self.ui_rects.len() {
+                let tree_end = if self.tooltip_start_index > self.research_tree_start_index {
+                    self.tooltip_start_index
+                } else {
+                    self.ui_rects.len()
+                };
+                let tree_count = tree_end - self.research_tree_start_index;
+                if tree_count > 0 {
+                    render_pass.set_pipeline(&self.ui_rect_render_pipeline);
+                    render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                    let tree_offset = (std::mem::size_of::<UIRect>() * self.research_tree_start_index) as wgpu::BufferAddress;
+                    render_pass.set_vertex_buffer(1, self.ui_rect_buffer.slice(tree_offset..));
+                    render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..tree_count as u32);
+                }
+            }
+            
+            // 5. Рендерим иконки дерева исследований (поверх миникарты)
+            if self.research_tree_props_start_index > 0 && self.research_tree_props_start_index < self.ui_props_instances.len() {
+                let tree_props_end = if self.tooltip_props_start_index > self.research_tree_props_start_index {
+                    self.tooltip_props_start_index
+                } else {
+                    self.ui_props_instances.len()
+                };
+                let tree_props_count = tree_props_end - self.research_tree_props_start_index;
+                if tree_props_count > 0 {
+                    if let Some(ref props_bind_group) = self.props_texture_bind_group {
+                        render_pass.set_pipeline(&self.ui_props_render_pipeline);
+                        render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                        render_pass.set_bind_group(1, props_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                        let tree_props_offset = (std::mem::size_of::<UIPropsInstance>() * self.research_tree_props_start_index) as wgpu::BufferAddress;
+                        render_pass.set_vertex_buffer(1, self.ui_props_instance_buffer.slice(tree_props_offset..));
+                        render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        render_pass.draw_indexed(0..6, 0, 0..tree_props_count as u32);
+                    }
+                }
+            }
+            
+            // 6. Рендерим тултипы последними, поверх всего
             if self.tooltip_start_index < self.ui_rects.len() {
                 let tooltip_count = self.ui_rects.len() - self.tooltip_start_index;
                 // Обновляем буфер для тултипов ДО начала render pass (уже сделано выше)
@@ -3756,7 +3817,7 @@ impl GpuRenderer {
                 render_pass.draw_indexed(0..6, 0, 0..tooltip_count as u32);
             }
             
-            // 5. Рендерим иконки тултипов поверх тултипов
+            // 7. Рендерим иконки тултипов поверх тултипов
             if self.tooltip_props_start_index < self.ui_props_instances.len() {
                 let tooltip_props_count = self.ui_props_instances.len() - self.tooltip_props_start_index;
                 if let Some(ref props_bind_group) = self.props_texture_bind_group {

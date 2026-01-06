@@ -190,6 +190,8 @@ pub fn draw_ui_gpu(
     visible_max_ty: i32,
     // Система исследований для проверки разблокировки зданий
     research_system: &crate::research::ResearchSystem,
+    // Флаг открытия дерева исследований (чтобы не вызывать start_tooltips если дерево открыто)
+    show_research_tree: bool,
 ) {
     gpu.clear_ui();
     
@@ -537,8 +539,11 @@ pub fn draw_ui_gpu(
     );
     
     // === ТУЛТИПЫ ===
-    // Запоминаем текущий размер ui_rects как начало тултипов (дополнительно страхуемся ensure внутри самих тултипов)
-    gpu.start_tooltips();
+    // Запоминаем текущий размер ui_rects как начало тултипов
+    // НЕ вызываем start_tooltips() если открыто дерево исследований - там это сделают после узлов
+    if !show_research_tree {
+        gpu.start_tooltips();
+    }
     
     if let Some(building) = hovered_building {
         // Показываем тултип здания только на вкладке Build
@@ -1240,6 +1245,10 @@ pub fn draw_research_tree_gpu(
 ) -> Option<crate::research::ResearchKind> {
     use crate::research::{ResearchKind, ResearchStatus};
     
+    // Фиксируем границу: все элементы до этого момента - обычный UI,
+    // все элементы после - окно дерева исследований
+    gpu.start_research_tree();
+    
     let s = ui::ui_scale(fh, base_scale_k);
     let scale = s as f32;
     
@@ -1602,10 +1611,12 @@ pub fn draw_research_tree_gpu(
     // Очищаем область клиппинга перед рисованием тултипов и скроллбара
     gpu.clear_clip_rect();
     
+    // Фиксируем границу слоёв ВСЕГДА: все иконки узлов уже нарисованы,
+    // теперь тултипы будут рисоваться поверх них
+    gpu.start_tooltips();
+    
     // Компактный тултип для наведенного исследования
     if let Some((kind, status, _x, _y)) = hovered_research {
-        // Разделяем тултипы от остального UI, чтобы иконки из дерева не перекрывали тултип
-        gpu.ensure_tooltip_layer();
         let info = kind.info();
         
         let tooltip_pad = (6 * s) as f32;
@@ -1706,8 +1717,8 @@ pub fn draw_research_tree_gpu(
         let tooltip_y = (cursor_y as f32 + 15.0).min(fh as f32 - tooltip_h - 10.0);
         
         // Фон тултипа в стиле интерфейса
-        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.95]);
-        gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.15, 0.15, 0.15, 0.95]);
+        gpu.add_ui_rect(tooltip_x, tooltip_y, tooltip_w, tooltip_h, [0.0, 0.0, 0.0, 0.8]);
+        gpu.add_ui_rect(tooltip_x + 1.0, tooltip_y + 1.0, tooltip_w - 2.0, tooltip_h - 2.0, [0.2, 0.2, 0.2, 0.9]);
         
         let mut current_y = tooltip_y + tooltip_pad;
         
