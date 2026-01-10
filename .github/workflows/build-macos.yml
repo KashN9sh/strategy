@@ -1,0 +1,119 @@
+name: Build macOS Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-darwin
+    
+    - name: Install cargo-bundle
+      run: |
+        cargo install cargo-bundle --version 0.8.0
+    
+    - name: Install create-dmg
+      run: |
+        brew install create-dmg
+    
+    - name: Build game
+      run: |
+        cargo build --release --target aarch64-apple-darwin
+    
+    - name: Create app bundle
+      run: |
+        mkdir -p "target/release/bundle/osx/Cozy Kingdom.app/Contents/MacOS"
+        mkdir -p "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources"
+        
+        cp "target/aarch64-apple-darwin/release/strategy" "target/release/bundle/osx/Cozy Kingdom.app/Contents/MacOS/Cozy Kingdom"
+        chmod +x "target/release/bundle/osx/Cozy Kingdom.app/Contents/MacOS/Cozy Kingdom"
+        
+        cp -r assets "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources/"
+        cp -r shaders "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources/"
+        
+        if [ -f config.toml ]; then
+          cp config.toml "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources/"
+        fi
+    
+    - name: Create Info.plist
+      run: |
+        cat > "target/release/bundle/osx/Cozy Kingdom.app/Contents/Info.plist" << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>Cozy Kingdom</string>
+            <key>CFBundleIconFile</key>
+            <string>Cozy Kingdom</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.yourcompany.cozykingdom</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Cozy Kingdom</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.13</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+    
+    - name: Add icon if exists
+      run: |
+        if [ -f "Cozy Kingdom.icns" ]; then
+          cp "Cozy Kingdom.icns" "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources/"
+        fi
+    
+    - name: Create DMG
+      run: |
+        create-dmg \
+          --volname "Cozy Kingdom" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "Cozy Kingdom.app" 200 190 \
+          --hide-extension "Cozy Kingdom.app" \
+          --app-drop-link 600 185 \
+          "Cozy Kingdom.dmg" \
+          "target/release/bundle/osx/"
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-installer
+        path: |
+          Cozy Kingdom.dmg
+          target/release/bundle/osx/Cozy Kingdom.app
