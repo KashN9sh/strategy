@@ -422,7 +422,7 @@ pub fn draw_main_menu(
     // gpu.add_ui_rect(0.0, 0.0, width as f32, height as f32, [0.0, 0.0, 0.0, 0.3]);
     
     // Заголовок игры
-    let title = b"Strategy Game";
+    let title = b"Cozy Kingdom";
     let title_scale = scale * 2.5; // Увеличенный размер заголовка
     let title_w = title.len() as f32 * 4.0 * 2.0 * title_scale;
     let title_x = center_x - title_w / 2.0;

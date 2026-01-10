@@ -54,7 +54,7 @@ fn run() -> Result<()> {
     use std::sync::Arc;
     let event_loop = EventLoop::new()?;
     let window = Arc::new(WindowBuilder::new()
-        .with_title("Strategy Isometric Prototype")
+        .with_title("Cozy Kingdom")
         .with_inner_size(LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?);
 
