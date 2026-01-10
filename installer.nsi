@@ -25,7 +25,7 @@ RequestExecutionLevel admin
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "LICENSE"
+!insertmacro MUI_PAGE_LICENSE "Cozy Kingdom Portable\LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -47,14 +47,14 @@ Section "Game Files" SecGame
     SetOutPath "$INSTDIR"
     
     ; Copy executable
-    File "${APP_EXE}"
+    File "Cozy Kingdom Portable\${APP_EXE}"
     
     ; Copy resources
     SetOutPath "$INSTDIR\assets"
-    File /r /x "*.aseprite" "assets\*.*"
+    File /r /x "*.aseprite" "Cozy Kingdom Portable\assets\*.*"
     
     SetOutPath "$INSTDIR\shaders"
-    File /r "shaders\*.*"
+    File /r "Cozy Kingdom Portable\shaders\*.*"
     
     ; Create uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
