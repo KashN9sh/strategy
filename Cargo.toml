@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 default-run = "strategy"
 description = "Cozy Kingdom - A cozy medieval strategy game"
+authors = ["Korolev Roman <kash244@yandex.ru>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/KashN9sh/strategy"
 
 [dependencies]
 anyhow = "1.0.98"

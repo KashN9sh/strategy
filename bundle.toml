@@ -1,0 +1,14 @@
+# Конфигурация для cargo-bundle
+
+[macos]
+minimum_system_version = "10.13"
+bundle_name = "Cozy Kingdom"
+bundle_identifier = "com.yourcompany.cozykingdom"
+copyright = "Copyright © 2024"
+
+[windows]
+console = false
+license = "LICENSE"
+
+# Ресурсы, которые нужно скопировать
+# cargo-bundle автоматически копирует папку assets/ если она в корне проекта
