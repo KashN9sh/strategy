@@ -97,6 +97,14 @@ jobs:
           cp "Cozy Kingdom.icns" "target/release/bundle/osx/Cozy Kingdom.app/Contents/Resources/"
         fi
     
+    - name: Ad-hoc sign app (to reduce Gatekeeper issues)
+      run: |
+        codesign --deep --force --sign "-" "target/release/bundle/osx/Cozy Kingdom.app" || echo "Ad-hoc signing failed, but continuing..."
+    
+    - name: Remove quarantine attribute
+      run: |
+        xattr -cr "target/release/bundle/osx/Cozy Kingdom.app"
+    
     - name: Create DMG
       run: |
         create-dmg \
@@ -109,6 +117,10 @@ jobs:
           --app-drop-link 600 185 \
           "Cozy Kingdom.dmg" \
           "target/release/bundle/osx/"
+    
+    - name: Remove quarantine from DMG
+      run: |
+        xattr -cr "Cozy Kingdom.dmg" || true
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
