@@ -542,7 +542,7 @@ pub fn draw_ui_gpu(
     // Запоминаем текущий размер ui_rects как начало тултипов
     // НЕ вызываем start_tooltips() если открыто дерево исследований - там это сделают после узлов
     if !show_research_tree {
-        gpu.start_tooltips();
+    gpu.start_tooltips();
     }
     
     if let Some(building) = hovered_building {
@@ -603,25 +603,25 @@ pub fn draw_ui_gpu(
                 fh as f32,
             );
         } else {
-            draw_resource_tooltip(
-                gpu,
-                cursor_x,
-                cursor_y,
-                resource_name,
-                resources,
-                total_wood,
-                population,
-                avg_happiness,
-                tax_rate,
-                citizens_idle,
-                citizens_working,
-                citizens_sleeping,
-                citizens_hauling,
-                citizens_fetching,
-                scale,
-                fw as f32,
-                fh as f32,
-            );
+        draw_resource_tooltip(
+            gpu,
+            cursor_x,
+            cursor_y,
+            resource_name,
+            resources,
+            total_wood,
+            population,
+            avg_happiness,
+            tax_rate,
+            citizens_idle,
+            citizens_working,
+            citizens_sleeping,
+            citizens_hauling,
+            citizens_fetching,
+            scale,
+            fw as f32,
+            fh as f32,
+        );
         }
     }
     

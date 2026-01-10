@@ -153,13 +153,17 @@ impl SaveData {
 }
 
 pub fn save_game(data: &SaveData) -> anyhow::Result<()> {
+    use crate::resource_path;
     let txt = serde_json::to_string_pretty(data)?;
-    std::fs::write("save.json", txt)?;
+    let save_path = resource_path::user_data_dir().join("save.json");
+    std::fs::write(&save_path, txt)?;
     Ok(())
 }
 
 pub fn load_game() -> anyhow::Result<SaveData> {
-    let txt = std::fs::read_to_string("save.json")?;
+    use crate::resource_path;
+    let save_path = resource_path::user_data_dir().join("save.json");
+    let txt = std::fs::read_to_string(&save_path)?;
     let data: SaveData = serde_json::from_str(&txt)?;
     Ok(data)
 }

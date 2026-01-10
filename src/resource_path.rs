@@ -48,3 +48,29 @@ pub fn assets_path() -> PathBuf {
 pub fn shaders_path() -> PathBuf {
     resource_base_path().join("shaders")
 }
+
+/// Получить директорию для сохранения данных пользователя
+/// 
+/// Для macOS: ~/Library/Application Support/Cozy Kingdom/
+/// Для других систем: ~/.cozy-kingdom/ или текущая директория
+pub fn user_data_dir() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            let app_support = PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("Cozy Kingdom");
+            // Создаем директорию если её нет
+            if let Err(_) = std::fs::create_dir_all(&app_support) {
+                // Если не удалось создать, используем текущую директорию
+                return PathBuf::from(".");
+            }
+            return app_support;
+        }
+    }
+    
+    // Для других систем или если HOME не найден
+    // Используем текущую директорию
+    PathBuf::from(".")
+}

@@ -69,7 +69,15 @@ pub fn defaults() -> (input::Config, input::InputConfig) {
 
 pub fn load_or_create(path: &str) -> Result<(input::Config, input::InputConfig)> {
     use crate::resource_path;
-    let config_path = resource_path::resource_path(path);
+    // Сначала пробуем загрузить из пользовательской директории
+    let user_config_path = resource_path::user_data_dir().join(path);
+    let config_path = if user_config_path.exists() {
+        user_config_path
+    } else {
+        // Если нет в пользовательской директории, пробуем из ресурсов (для первого запуска)
+        resource_path::resource_path(path)
+    };
+    
     if config_path.exists() {
         let data = fs::read_to_string(&config_path)?;
         #[derive(Deserialize)]
@@ -125,7 +133,10 @@ pub fn load_or_create(path: &str) -> Result<(input::Config, input::InputConfig)>
             input: &'a input::InputConfig,
         }
         let toml_text = toml::to_string_pretty(&FileCfg { config: &config, input: &input })?;
-        fs::write(path, toml_text)?;
+        // Сохраняем в пользовательскую директорию, а не в bundle
+        use crate::resource_path;
+        let user_config_path = resource_path::user_data_dir().join("config.toml");
+        fs::write(&user_config_path, toml_text)?;
         Ok((config, input))
     }
 }
