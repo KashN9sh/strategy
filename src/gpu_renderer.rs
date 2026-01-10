@@ -3873,7 +3873,9 @@ impl GpuRenderer {
     
     pub fn load_faces_texture(&mut self) -> Result<()> {
         // Загружаем текстуру лиц из faces.png
-        if let Ok(img) = image::open("assets/faces.png") {
+        use crate::resource_path;
+        let faces_path = resource_path::resource_path("assets/faces.png");
+        if let Ok(img) = image::open(&faces_path) {
             let img = img.to_rgba8();
             let (width, height) = img.dimensions();
             

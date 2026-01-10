@@ -68,8 +68,10 @@ pub fn defaults() -> (input::Config, input::InputConfig) {
 }
 
 pub fn load_or_create(path: &str) -> Result<(input::Config, input::InputConfig)> {
-    if Path::new(path).exists() {
-        let data = fs::read_to_string(path)?;
+    use crate::resource_path;
+    let config_path = resource_path::resource_path(path);
+    if config_path.exists() {
+        let data = fs::read_to_string(&config_path)?;
         #[derive(Deserialize)]
         struct FileCfg {
             config: input::Config,

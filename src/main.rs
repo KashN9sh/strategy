@@ -31,6 +31,7 @@ mod research;
 mod notifications;
 mod quests;
 mod menu;
+mod resource_path;
 use gpu_renderer::GpuRenderer;
 use menu::{MainMenu, MenuAction};
 use std::time::Instant;

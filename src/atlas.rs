@@ -188,7 +188,9 @@ pub fn load_textures(
     props_atlas: &mut Option<PropsAtlas>,
 ) {
     // Загрузка тайлов из spritesheet.png или tiles.png
-    if let Ok(img) = image::open("assets/spritesheet.png") {
+    use crate::resource_path;
+    let spritesheet_path = resource_path::resource_path("assets/spritesheet.png");
+    if let Ok(img) = image::open(&spritesheet_path) {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         let cell_w = 32u32;
@@ -251,8 +253,10 @@ pub fn load_textures(
         atlas.grass_variants = grass_variants_raw;
         atlas.clay_variants = clay_variants_raw;
         atlas.water_edges = water_edges_raw;
-    } else if let Ok(img) = image::open("assets/tiles.png") {
-        let img = img.to_rgba8();
+    } else {
+        let tiles_path = resource_path::resource_path("assets/tiles.png");
+        if let Ok(img) = image::open(&tiles_path) {
+            let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         let tile_w = (iw / 6) as i32;
         let tile_h = ih as i32;
@@ -275,11 +279,13 @@ pub fn load_textures(
         atlas.base_water = slice_rgba(2);
         atlas.base_clay = slice_rgba(3);
         atlas.base_stone = slice_rgba(4);
-        atlas.base_iron = slice_rgba(5);
+            atlas.base_iron = slice_rgba(5);
+        }
     }
 
     // Загрузка зданий
-    if let Ok(img) = image::open("assets/buildings.png") {
+    let buildings_path = resource_path::resource_path("assets/buildings.png");
+    if let Ok(img) = image::open(&buildings_path) {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         let base_w = if atlas.base_loaded {
@@ -308,7 +314,8 @@ pub fn load_textures(
     }
 
     // Загрузка деревьев
-    if let Ok(img) = image::open("assets/trees.png") {
+    let trees_path = resource_path::resource_path("assets/trees.png");
+    if let Ok(img) = image::open(&trees_path) {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         let base_w = if atlas.base_loaded {
@@ -336,7 +343,8 @@ pub fn load_textures(
     }
 
     // Загрузка пропсов и UI элементов
-    if let Ok(img) = image::open("assets/props.png") {
+    let props_path = resource_path::resource_path("assets/props.png");
+    if let Ok(img) = image::open(&props_path) {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();
         

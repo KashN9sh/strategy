@@ -22,7 +22,8 @@ impl MusicManager {
         let sink = Sink::try_new(&stream_handle)?;
         
         // Найти все треки в папке assets/tracks
-        let tracks_dir = Path::new("assets/tracks");
+        use crate::resource_path;
+        let tracks_dir = resource_path::resource_path("assets/tracks");
         let mut tracks = Vec::new();
         
         if tracks_dir.exists() {
@@ -166,7 +167,8 @@ impl MusicManager {
     
     /// Перезагрузить список треков
     fn reload_tracks(&mut self) -> Result<()> {
-        let tracks_dir = Path::new("assets/tracks");
+        use crate::resource_path;
+        let tracks_dir = resource_path::resource_path("assets/tracks");
         let mut tracks = Vec::new();
         
         if tracks_dir.exists() {
