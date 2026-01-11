@@ -82,7 +82,7 @@ jobs:
     
     - name: Setup Butler
       run: |
-        $butlerUrl = "https://broth.itch.ovh/butler/windows-amd64/LATEST/archive/default"
+        $butlerUrl = "https://broth.itch.zone/butler/windows-amd64/LATEST/archive/default"
         Invoke-WebRequest -Uri $butlerUrl -OutFile butler.zip
         Expand-Archive -Path butler.zip -DestinationPath . -Force
         Move-Item butler.exe butler.exe.bak
