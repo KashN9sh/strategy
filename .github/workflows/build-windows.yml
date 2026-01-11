@@ -81,9 +81,14 @@ jobs:
           Cozy Kingdom Portable.zip
     
     - name: Setup Butler
-      uses: game-ci/butler@v1
-      with:
-        butler-version: latest
+      run: |
+        $butlerUrl = "https://broth.itch.ovh/butler/windows-amd64/LATEST/archive/default"
+        Invoke-WebRequest -Uri $butlerUrl -OutFile butler.zip
+        Expand-Archive -Path butler.zip -DestinationPath . -Force
+        Move-Item butler.exe butler.exe.bak
+        Get-ChildItem -Filter "butler*.exe" | ForEach-Object { Move-Item $_.FullName butler.exe }
+        $env:PATH = "$PWD;$env:PATH"
+        echo "$PWD" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     
     - name: Push to itch.io (Windows Installer)
       env:
