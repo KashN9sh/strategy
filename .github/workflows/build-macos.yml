@@ -127,3 +127,14 @@ jobs:
       with:
         name: macos-installer
         path: Cozy Kingdom.dmg
+    
+    - name: Setup Butler
+      uses: game-ci/butler@v1
+      with:
+        butler-version: latest
+    
+    - name: Push to itch.io (macOS)
+      env:
+        BUTLER_CREDENTIALS: ${{ secrets.ITCH_API_KEY }}
+      run: |
+        butler push "Cozy Kingdom.dmg" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:mac" --userversion "${{ github.ref_name }}"

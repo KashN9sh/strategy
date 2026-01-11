@@ -79,3 +79,20 @@ jobs:
         path: |
           Cozy Kingdom Setup.exe
           Cozy Kingdom Portable.zip
+    
+    - name: Setup Butler
+      uses: game-ci/butler@v1
+      with:
+        butler-version: latest
+    
+    - name: Push to itch.io (Windows Installer)
+      env:
+        BUTLER_CREDENTIALS: ${{ secrets.ITCH_API_KEY }}
+      run: |
+        butler push "Cozy Kingdom Setup.exe" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows" --userversion "${{ github.ref_name }}"
+    
+    - name: Push to itch.io (Windows Portable)
+      env:
+        BUTLER_CREDENTIALS: ${{ secrets.ITCH_API_KEY }}
+      run: |
+        butler push "Cozy Kingdom Portable.zip" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows-portable" --userversion "${{ github.ref_name }}"
