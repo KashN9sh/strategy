@@ -5,13 +5,24 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_run:
+    workflows: ["Version Bump and Tag"]
+    types:
+      - completed
+    branches:
+      - main
+      - master
 
 jobs:
   build:
     runs-on: macos-latest
+    # Запускаем только если version-bump завершился успешно или это push тега
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Нужно для получения всех тегов
     
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -141,6 +152,17 @@ jobs:
         if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref_name }}" =~ ^v[0-9] ]]; then
           # Используем тег, если это push тега
           VERSION="${{ github.ref_name }}"
+        elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+          # Получаем последний тег, если запущено через workflow_run
+          git fetch --tags
+          VERSION=$(git describe --tags --abbrev=0)
+          if [ -z "$VERSION" ]; then
+            # Если тегов нет, используем версию из Cargo.toml
+            VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v$VERSION"
+            fi
+          fi
         else
           # Получаем версию из Cargo.toml
           VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
