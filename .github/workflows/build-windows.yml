@@ -85,10 +85,16 @@ jobs:
         $butlerUrl = "https://broth.itch.zone/butler/windows-amd64/LATEST/archive/default"
         Invoke-WebRequest -Uri $butlerUrl -OutFile butler.zip
         Expand-Archive -Path butler.zip -DestinationPath . -Force
-        Move-Item butler.exe butler.exe.bak -ErrorAction SilentlyContinue
-        Get-ChildItem -Filter "butler*.exe" | ForEach-Object { Move-Item $_.FullName butler.exe }
-        $butlerPath = (Resolve-Path butler.exe).Path
-        Write-Host "Butler installed at: $butlerPath"
+        # Находим butler.exe рекурсивно (может быть в подпапке)
+        $butlerExe = Get-ChildItem -Recurse -Filter "butler.exe" | Select-Object -First 1
+        if ($butlerExe) {
+          # Перемещаем в корень рабочей директории
+          Move-Item $butlerExe.FullName ".\butler.exe" -Force
+          Write-Host "Butler found and moved to: $PWD\butler.exe"
+        } else {
+          Write-Error "butler.exe not found after extraction"
+          exit 1
+        }
     
     - name: Push to itch.io (Windows Installer)
       env:
