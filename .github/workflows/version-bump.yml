@@ -1,0 +1,104 @@
+name: Version Bump and Tag
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    # Игнорируем коммиты, которые созданы этим workflow (чтобы избежать бесконечного цикла)
+    paths-ignore:
+      - 'Cargo.toml'
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Запускаем только если коммит не содержит [skip version] или [no version]
+    if: "!contains(github.event.head_commit.message, '[skip version]') && !contains(github.event.head_commit.message, '[no version]')"
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: true
+    
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+    
+    - name: Read current version
+      id: version
+      run: |
+        VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+        echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $VERSION"
+    
+    - name: Determine version bump type
+      id: bump
+      run: |
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+        CURRENT_VERSION="${{ steps.version.outputs.current_version }}"
+        
+        # Определяем тип изменения из сообщения коммита
+        if echo "$COMMIT_MSG" | grep -qiE "\[major\]|breaking|major"; then
+          BUMP_TYPE="major"
+        elif echo "$COMMIT_MSG" | grep -qiE "\[minor\]|feat|feature|minor"; then
+          BUMP_TYPE="minor"
+        else
+          BUMP_TYPE="patch"
+        fi
+        
+        echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+        
+        # Парсим версию (формат: MAJOR.MINOR.PATCH)
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+        
+        case $BUMP_TYPE in
+          major)
+            NEW_MAJOR=$((MAJOR + 1))
+            NEW_VERSION="$NEW_MAJOR.0.0"
+            ;;
+          minor)
+            NEW_MINOR=$((MINOR + 1))
+            NEW_VERSION="$MAJOR.$NEW_MINOR.0"
+            ;;
+          patch)
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+            ;;
+        esac
+        
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Bump type: $BUMP_TYPE"
+        echo "New version: $NEW_VERSION"
+    
+    - name: Update Cargo.toml version
+      run: |
+        NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+        # Обновляем версию в Cargo.toml (Linux синтаксис)
+        sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+        echo "Updated Cargo.toml to version $NEW_VERSION"
+    
+    - name: Create version commit
+      run: |
+        NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+        git add Cargo.toml
+        git commit -m "chore: bump version to $NEW_VERSION [skip version]" || exit 0
+        git push origin HEAD:${{ github.ref_name }} || exit 0
+    
+    - name: Create and push tag
+      run: |
+        NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+        TAG="v$NEW_VERSION"
+        
+        # Проверяем, существует ли тег
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          echo "Tag $TAG already exists, skipping..."
+          exit 0
+        fi
+        
+        git tag -a "$TAG" -m "Release $NEW_VERSION"
+        git push origin "$TAG"

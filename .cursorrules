@@ -1,0 +1,62 @@
+# Cursor Rules for Cozy Kingdom Project
+
+## Commit Message Guidelines
+
+When generating commit messages, follow these rules:
+
+### Format
+Use conventional commits format: `<type>: <description>`
+
+### Types and Version Bumping
+
+1. **MAJOR version** (1.0.0 → 2.0.0) - Breaking changes:
+   - Use `breaking:` prefix for breaking changes
+   - Or add `[major]` tag at the end
+   - Examples:
+     - `breaking: changed save file format`
+     - `refactor: redesigned API [major]`
+
+2. **MINOR version** (1.0.0 → 1.1.0) - New features:
+   - Use `feat:` or `feature:` prefix for new features
+   - Or add `[minor]` tag at the end
+   - Examples:
+     - `feat: added tutorial system`
+     - `feature: new building types`
+     - `fix: improved performance [minor]`
+
+3. **PATCH version** (1.0.0 → 1.0.1) - Bug fixes and minor changes:
+   - Use `fix:` for bug fixes
+   - Use `docs:` for documentation
+   - Use `refactor:` for code refactoring
+   - Use `style:` for formatting
+   - Use `test:` for tests
+   - Use `chore:` for maintenance tasks
+   - Examples:
+     - `fix: corrected tutorial text overflow`
+     - `docs: updated README`
+     - `refactor: cleaned up UI code`
+
+### Special Cases
+
+- To skip version bump, add `[skip version]` or `[no version]`:
+  - `docs: updated comments [skip version]`
+  - `chore: formatting [no version]`
+
+### Language
+
+- Write commit messages in English
+- Keep descriptions concise but clear
+- Use imperative mood (e.g., "add" not "added", "fix" not "fixed")
+
+### Examples
+
+✅ Good:
+- `feat: added automatic version bumping workflow`
+- `fix: tutorial panel now moves to corner correctly`
+- `breaking: changed resource storage system [major]`
+- `refactor: improved UI rendering performance`
+
+❌ Bad:
+- `updated code` (no type, unclear)
+- `fixed bug` (too vague)
+- `added feature` (should be `feat:`)
