@@ -48,14 +48,6 @@ jobs:
       run: |
         cargo build --release --target x86_64-pc-windows-msvc
     
-    - name: Prepare files
-      run: |
-        mkdir "Cozy Kingdom Portable"
-        copy "target\x86_64-pc-windows-msvc\release\strategy.exe" "Cozy Kingdom Portable\Cozy Kingdom.exe"
-        xcopy /E /I assets "Cozy Kingdom Portable\assets"
-        xcopy /E /I shaders "Cozy Kingdom Portable\shaders"
-        copy LICENSE "Cozy Kingdom Portable\LICENSE"
-    
     - name: Build NSIS installer
       run: |
         $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
@@ -76,9 +68,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: windows-installer
-        path: |
-          Cozy Kingdom Setup.exe
-          Cozy Kingdom Portable.zip
+        path: Cozy Kingdom Setup.exe
     
     - name: Setup Butler
       run: |
@@ -101,9 +91,3 @@ jobs:
         BUTLER_API_KEY: ${{ secrets.ITCH_API_KEY }}
       run: |
         .\butler.exe push "Cozy Kingdom Setup.exe" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows" --userversion "${{ github.ref_name }}"
-    
-    - name: Push to itch.io (Windows Portable)
-      env:
-        BUTLER_API_KEY: ${{ secrets.ITCH_API_KEY }}
-      run: |
-        .\butler.exe push "Cozy Kingdom Portable.zip" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows-portable" --userversion "${{ github.ref_name }}"
