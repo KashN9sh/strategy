@@ -80,32 +80,66 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Поэтому инвертируем Y координату
         atlas_uv = vec2<f32>(in.uv.x, 1.0 - in.uv.y);
     } else {
-    // props.png имеет сетку 5x4 спрайтов (5 колонок, 4 строки)
-    // Каждый спрайт 16x16 пикселей, текстура 80x64 пикселей
-    let sprites_per_row = 5.0;
-    let sprites_per_col = 4.0;
-    
-    // Размер одного спрайта в UV координатах (0..1)
-    let sprite_size_u = 1.0 / sprites_per_row; // 1.0 / 5.0 = 0.2
-    let sprite_size_v = 1.0 / sprites_per_col; // 1.0 / 4.0 = 0.25
-    
-    // Вычисляем позицию спрайта в сетке (колонка и строка)
-    let sprite_col = f32(in.props_id % 5u);
-    let sprite_row = f32(in.props_id / 5u);
-    
-    // Вычисляем UV координаты для конкретного спрайта
-    // in.uv идет от 0 до 1 для всего квада, масштабируем до размера одного спрайта в атласе
-    // Базовые координаты спрайта в атласе (0..1)
-    let base_u = sprite_col * sprite_size_u;
-    let base_v = sprite_row * sprite_size_v;
-    
-    // Добавляем смещение внутри спрайта
-    // В вершинах in.uv.y идет от 1 (верх) до 0 (низ), а в текстурах V=0 вверху
-    // Поэтому используем (1.0 - in.uv.y) для правильной инверсии
-        atlas_uv = vec2<f32>(
-        base_u + in.uv.x * sprite_size_u,
-        base_v + (1.0 - in.uv.y) * sprite_size_v
-    );
+        // Проверяем, это font atlas (сетка 16x16) или props.png (сетка 5x4)
+        // Font atlas использует индексы 0-255, props.png использует индексы 0-19
+        // Если props_id >= 20, это font atlas
+        if (in.props_id >= 20u) {
+            // Font atlas имеет сетку 16x16 спрайтов (16 колонок, 16 строк)
+            // Каждый спрайт 4x6 пикселей, текстура 64x96 пикселей
+            let sprites_per_row = 16.0;
+            let sprites_per_col = 16.0;
+            
+            // Размер одного спрайта в UV координатах (0..1)
+            let sprite_size_u = 1.0 / sprites_per_row; // 1.0 / 16.0
+            let sprite_size_v = 1.0 / sprites_per_col; // 1.0 / 16.0
+            
+            // Вычисляем позицию спрайта в сетке (колонка и строка)
+            // Используем props_id напрямую как индекс в font atlas
+            let font_index = in.props_id - 20u; // Смещаем на 20, чтобы отличить от props
+            let sprite_col = f32(font_index % 16u);
+            let sprite_row = f32(font_index / 16u);
+            
+            // Вычисляем UV координаты для конкретного спрайта
+            let base_u = sprite_col * sprite_size_u;
+            let base_v = sprite_row * sprite_size_v;
+            
+            // Добавляем смещение внутри спрайта
+            // Глиф занимает 3x5 пикселей из ячейки 4x6, поэтому масштабируем UV
+            // Глиф начинается в левом верхнем углу ячейки
+            let glyph_u_scale = 3.0 / 4.0; // Глиф 3 пикселя из 4
+            let glyph_v_scale = 5.0 / 6.0; // Глиф 5 пикселей из 6
+            atlas_uv = vec2<f32>(
+                base_u + in.uv.x * sprite_size_u * glyph_u_scale,
+                base_v + (1.0 - in.uv.y) * sprite_size_v * glyph_v_scale
+            );
+        } else {
+            // props.png имеет сетку 5x4 спрайтов (5 колонок, 4 строки)
+            // Каждый спрайт 16x16 пикселей, текстура 80x64 пикселей
+            let sprites_per_row = 5.0;
+            let sprites_per_col = 4.0;
+            
+            // Размер одного спрайта в UV координатах (0..1)
+            let sprite_size_u = 1.0 / sprites_per_row; // 1.0 / 5.0 = 0.2
+            let sprite_size_v = 1.0 / sprites_per_col; // 1.0 / 4.0 = 0.25
+            
+            // Вычисляем позицию спрайта в сетке (колонка и строка)
+            let sprite_col = f32(in.props_id % 5u);
+            let sprite_row = f32(in.props_id / 5u);
+            
+            // Вычисляем UV координаты для конкретного спрайта
+            // in.uv идет от 0 до 1 для всего квада, масштабируем до размера одного спрайта в атласе
+            // Базовые координаты спрайта в атласе (0..1)
+            let base_u = sprite_col * sprite_size_u;
+            let base_v = sprite_row * sprite_size_v;
+            
+            // Добавляем смещение внутри спрайта
+            // В вершинах in.uv.y идет от 1 (верх) до 0 (низ), а в текстурах V=0 вверху
+            // Поэтому используем (1.0 - in.uv.y) для правильной инверсии
+            atlas_uv = vec2<f32>(
+                base_u + in.uv.x * sprite_size_u,
+                base_v + (1.0 - in.uv.y) * sprite_size_v
+            );
+        }
     }
     
     // Сэмплируем текстуру

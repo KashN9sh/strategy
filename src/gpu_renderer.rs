@@ -741,6 +741,8 @@ pub struct GpuRenderer {
     ui_props_instances: Vec<UIPropsInstance>, // UI спрайты из props.png
     tooltip_props_start_index: usize, // Индекс, где начинаются иконки тултипов в ui_props_instances
     research_tree_props_start_index: usize, // Индекс, где начинаются иконки дерева исследований в ui_props_instances
+    font_instances: Vec<UIPropsInstance>, // Глифы из font atlas
+    tooltip_font_start_index: usize, // Индекс, где начинается текст тултипов в font_instances
     menu_background_instances: Vec<(MenuBackgroundLayer, UIPropsInstance)>, // Инстансы для фона меню (слой + инстанс)
     
     // Текстуры фона главного меню
@@ -757,7 +759,10 @@ pub struct GpuRenderer {
     ui_rect_buffer: wgpu::Buffer,
     minimap_buffer: wgpu::Buffer,
     ui_props_instance_buffer: wgpu::Buffer,
+    font_instance_buffer: wgpu::Buffer, // Буфер для font instances
     props_texture_bind_group: Option<wgpu::BindGroup>, // Bind group для props текстуры
+    font_texture_bind_group: Option<wgpu::BindGroup>, // Bind group для font текстуры
+    font_char_to_index: [u32; 256], // Маппинг символов на индексы в font atlas
     
     // Клиппинг для UI (x, y, width, height)
     ui_clip_rect: Option<(f32, f32, f32, f32)>,
@@ -1154,6 +1159,131 @@ impl GpuRenderer {
             ],
         }));
         
+        // Создаём bitmap font atlas
+        // Размер глифа: 3x5 пикселей, но мы создадим 4x6 для удобства (с отступом)
+        const GLYPH_WIDTH: u32 = 4;
+        const GLYPH_HEIGHT: u32 = 6;
+        const CHARS_PER_ROW: u32 = 16; // 16 символов в строке
+        const NUM_ROWS: u32 = 16; // 16 строк
+        const FONT_ATLAS_WIDTH: u32 = GLYPH_WIDTH * CHARS_PER_ROW;
+        const FONT_ATLAS_HEIGHT: u32 = GLYPH_HEIGHT * NUM_ROWS;
+        
+        let mut font_atlas_data = vec![0u8; (FONT_ATLAS_WIDTH * FONT_ATLAS_HEIGHT * 4) as usize];
+        
+        // Маппинг символов на индексы в атласе
+        // Используем 0xFFFFFFFF для "не найден", чтобы индекс 0 был валидным
+        let mut font_char_to_index = [0xFFFFFFFFu32; 256];
+        let mut current_index = 0u32;
+        
+        // Функция для добавления глифа в атлас
+        let mut add_glyph = |ch: u8, pattern: [u8; 15]| {
+            if current_index >= (CHARS_PER_ROW * NUM_ROWS) {
+                return;
+            }
+            
+            let row = current_index / CHARS_PER_ROW;
+            let col = current_index % CHARS_PER_ROW;
+            let start_x = col * GLYPH_WIDTH;
+            let start_y = row * GLYPH_HEIGHT;
+            
+            // Рисуем глиф в атласе (масштабируем 3x5 до 4x6 для лучшей читаемости)
+            for py in 0..5 {
+                for px in 0..3 {
+                    if pattern[py * 3 + px] == 1 {
+                        // Рисуем пиксель (белый цвет)
+                        let x = start_x + px as u32;
+                        let y = start_y + py as u32;
+                        let idx = ((y * FONT_ATLAS_WIDTH + x) * 4) as usize;
+                        if idx + 3 < font_atlas_data.len() {
+                            font_atlas_data[idx] = 255; // R
+                            font_atlas_data[idx + 1] = 255; // G
+                            font_atlas_data[idx + 2] = 255; // B
+                            font_atlas_data[idx + 3] = 255; // A
+                        }
+                    }
+                }
+            }
+            
+            font_char_to_index[ch as usize] = current_index;
+            
+            // Также маппим нижний регистр на тот же индекс (если это буква)
+            if ch.is_ascii_uppercase() {
+                font_char_to_index[ch.to_ascii_lowercase() as usize] = current_index;
+            }
+            
+            current_index += 1;
+        };
+        
+        // Добавляем все символы в атлас
+        let chars = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?'\":/%* ";
+        for &ch in chars.iter() {
+            let pattern = Self::get_glyph_pattern(ch);
+            add_glyph(ch, pattern);
+        }
+        
+        // Создаём текстуру шрифта
+        let font_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Font Atlas Texture"),
+            size: wgpu::Extent3d {
+                width: FONT_ATLAS_WIDTH,
+                height: FONT_ATLAS_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &font_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &font_atlas_data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * FONT_ATLAS_WIDTH),
+                rows_per_image: Some(FONT_ATLAS_HEIGHT),
+            },
+            wgpu::Extent3d {
+                width: FONT_ATLAS_WIDTH,
+                height: FONT_ATLAS_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        let font_view = font_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let font_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        
+        // Создаём bind group для font текстуры (используем тот же layout, что и для props)
+        let font_texture_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Font Bind Group"),
+            layout: &props_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&font_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&font_sampler),
+                },
+            ],
+        }));
+        
         let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -1471,6 +1601,13 @@ impl GpuRenderer {
         
         let ui_props_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("UI Props Instance Buffer"),
+            size: (std::mem::size_of::<UIPropsInstance>() * max_instances) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        
+        let font_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Font Instance Buffer"),
             size: (std::mem::size_of::<UIPropsInstance>() * max_instances) as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -2074,6 +2211,7 @@ impl GpuRenderer {
             research_tree_start_index: 0,
             tooltip_props_start_index: 0,
             research_tree_props_start_index: 0,
+            tooltip_font_start_index: 0,
             minimap_instances: Vec::new(),
             tile_instance_buffer,
             building_instance_buffer,
@@ -2086,9 +2224,13 @@ impl GpuRenderer {
             ui_rect_buffer,
             minimap_buffer,
             ui_props_instances: Vec::new(),
+            font_instances: Vec::new(),
             menu_background_instances: Vec::new(),
             ui_props_instance_buffer,
+            font_instance_buffer,
             props_texture_bind_group,
+            font_texture_bind_group,
+            font_char_to_index,
             menu_background_textures: None,
             ui_clip_rect: None,
         })
@@ -2357,13 +2499,46 @@ impl GpuRenderer {
             }
         }
         
+        // Обрезаем массив до размера буфера перед записью (защита от переполнения)
+        // Это критически важно - массив может превысить лимит из-за race condition или ошибок в проверках
+        let original_len = self.tile_instances.len();
+        let write_count = original_len.min(10000);
+        self.tile_instances.truncate(write_count);
         
         // Загружаем данные инстансов в буфер
-        if !self.tile_instances.is_empty() {
+        // Используем прямой подход с созданием вектора байтов с явным ограничением размера
+        if write_count > 0 {
+            // Создаем slice с ограниченным размером
+            let instances_slice = &self.tile_instances[..write_count];
+            
+            // Преобразуем в байты
+            let bytes: &[u8] = bytemuck::cast_slice(instances_slice);
+            
+            // Вычисляем максимальный размер буфера в байтах
+            let max_buffer_bytes = (10000 * std::mem::size_of::<TileInstance>()) as usize;
+            
+            // Ограничиваем размер данных до размера буфера
+            // Создаем новый вектор байтов с явным ограничением размера для гарантии
+            // ВАЖНО: всегда ограничиваем до max_buffer_bytes, даже если bytes.len() меньше
+            let safe_bytes_vec: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
+            
+            // Записываем в буфер только безопасное количество байтов
             self.queue.write_buffer(
                 &self.tile_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.tile_instances)
+                &safe_bytes_vec
+            );
+        } else {
+            // Если нет данных, очищаем буфер (записываем пустой слайс)
+            // Это гарантирует, что старые данные не останутся в буфере
+            let empty: &[u8] = &[];
+            self.queue.write_buffer(
+                &self.tile_instance_buffer,
+                0,
+                empty
             );
         }
     }
@@ -2412,15 +2587,45 @@ impl GpuRenderer {
             }
         }
         
+        // Обрезаем массив до размера буфера перед записью (защита от переполнения)
+        let fog_original_len = self.fog_instances.len();
+        let fog_write_count = fog_original_len.min(10000);
+        self.fog_instances.truncate(fog_write_count);
+        
         // Загружаем данные инстансов в буфер
-        if !self.fog_instances.is_empty() {
-            self.queue.write_buffer(
-                &self.fog_instance_buffer,
-                0,
-                bytemuck::cast_slice(&self.fog_instances)
-            );
+        if fog_write_count > 0 {
+            // Создаем slice с ограниченным размером
+            let fog_slice = &self.fog_instances[..fog_write_count];
+            
+            // Преобразуем в байты
+            let fog_bytes: &[u8] = bytemuck::cast_slice(fog_slice);
+            
+            // Вычисляем максимальный размер буфера в байтах
+            let max_fog_buffer_bytes = (10000 * std::mem::size_of::<FogInstance>()) as usize;
+            
+            // Ограничиваем размер данных до размера буфера
+            // Создаем новый вектор байтов с явным ограничением размера для гарантии
+            // ВАЖНО: всегда ограничиваем до max_fog_buffer_bytes, даже если fog_bytes.len() меньше
+            let safe_fog_bytes_vec: Vec<u8> = {
+                let len = fog_bytes.len().min(max_fog_buffer_bytes);
+                fog_bytes[..len].to_vec()
+            };
+            
+                self.queue.write_buffer(
+                    &self.fog_instance_buffer,
+                    0,
+                    &safe_fog_bytes_vec
+                );
+            } else {
+                // Если нет данных, очищаем буфер
+                let empty: &[u8] = &[];
+                self.queue.write_buffer(
+                    &self.fog_instance_buffer,
+                    0,
+                    empty
+                );
+            }
         }
-    }
     
     // Функции для UI рендеринга
     pub fn clear_ui(&mut self) {
@@ -2428,6 +2633,8 @@ impl GpuRenderer {
         self.tooltip_start_index = 0;
         self.research_tree_start_index = 0;
         self.ui_props_instances.clear();
+        self.font_instances.clear();
+        self.tooltip_font_start_index = 0;
         self.tooltip_props_start_index = 0;
         self.research_tree_props_start_index = 0;
         self.minimap_instances.clear();
@@ -2444,13 +2651,14 @@ impl GpuRenderer {
     pub fn start_tooltips(&mut self) {
         self.tooltip_start_index = self.ui_rects.len();
         self.tooltip_props_start_index = self.ui_props_instances.len();
+        self.tooltip_font_start_index = self.font_instances.len();
     }
 
     // Гарантирует, что граница между обычным UI и тултипами проставлена.
     // Без вызова start_tooltips тултипные прямоугольники/иконки могут
     // оказаться под миникартой и верхними иконками.
     pub fn ensure_tooltip_layer(&mut self) {
-        if self.tooltip_start_index == 0 && self.tooltip_props_start_index == 0 {
+        if self.tooltip_start_index == 0 && self.tooltip_props_start_index == 0 && self.tooltip_font_start_index == 0 {
             self.start_tooltips();
         }
     }
@@ -2638,7 +2846,7 @@ impl GpuRenderer {
         }
     }
     
-    // Рисует один глиф bitmap шрифта 3x5
+    // Рисует один глиф bitmap шрифта 3x5 используя font atlas
     fn draw_glyph(&mut self, x: f32, y: f32, ch: u8, color: [f32; 4], scale: f32) {
         let px = 2.0 * scale; // размер одного пикселя глифа
         let glyph_width = 3.0 * px;
@@ -2649,17 +2857,39 @@ impl GpuRenderer {
             return;
         }
         
-        let pattern = Self::get_glyph_pattern(ch);
+        // Используем font atlas вместо множества прямоугольников
+        // Получаем индекс символа в font atlas
+        let font_index = self.font_char_to_index[ch as usize];
         
-        for row in 0..5 {
-            for col in 0..3 {
-                if pattern[row * 3 + col] == 1 {
-                    let gx = x + col as f32 * px;
-                    let gy = y + row as f32 * px;
-                    self.add_ui_rect(gx, gy, px, px, color);
-                }
-            }
+        // Если символ не найден в атласе (0xFFFFFFFF означает "не найден"), пропускаем
+        if font_index == 0xFFFFFFFF {
+            return;
         }
+        
+        // Для пробела пропускаем (не рисуем ничего)
+        if ch == b' ' {
+            return;
+        }
+        
+        // Используем font atlas - один инстанс вместо множества прямоугольников
+        use glam::{Mat4, Vec3};
+        
+        // Создаем матрицу трансформации для глифа
+        // Используем реальные размеры глифа (glyph_width x glyph_height), а не квадрат
+        let model_matrix = Mat4::from_scale_rotation_translation(
+            Vec3::new(glyph_width, glyph_height, 1.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(x + glyph_width * 0.5, y + glyph_height * 0.5, 0.0), // центрируем
+        );
+        
+        let instance = UIPropsInstance {
+            model_matrix: model_matrix.to_cols_array_2d(),
+            props_id: font_index + 20, // Смещаем на 20, чтобы отличить от props (0-19) в шейдере
+            tint_color: color, // Применяем цвет к глифу
+            padding: [0; 3],
+        };
+        
+        self.font_instances.push(instance);
     }
     
     // Рисует число (как draw_number в CPU версии)
@@ -2930,10 +3160,18 @@ impl GpuRenderer {
         
         // Обновляем буфер инстансов зданий
         if !self.building_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<BuildingInstance>()) as usize;
+            let write_count = self.building_instances.len().min(10000);
+            let slice = &self.building_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.building_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.building_instances)
+                &safe_bytes
             );
         }
     }
@@ -3024,10 +3262,18 @@ impl GpuRenderer {
         
         // Обновляем буфер инстансов граждан
         if !self.citizen_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<CitizenInstance>()) as usize;
+            let write_count = self.citizen_instances.len().min(10000);
+            let slice = &self.citizen_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.citizen_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.citizen_instances)
+                &safe_bytes
             );
         }
     }
@@ -3120,10 +3366,18 @@ impl GpuRenderer {
         
         // Обновляем буфер инстансов предпросмотра зданий
         if !self.building_preview_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<BuildingInstance>()) as usize;
+            let write_count = self.building_preview_instances.len().min(10000);
+            let slice = &self.building_preview_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.building_preview_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.building_preview_instances)
+                &safe_bytes
             );
         }
     }
@@ -3514,10 +3768,18 @@ impl GpuRenderer {
         
         // Обновляем буфер инстансов предпросмотра дорог
         if !self.road_preview_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<RoadInstance>()) as usize;
+            let write_count = self.road_preview_instances.len().min(10000);
+            let slice = &self.road_preview_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.road_preview_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.road_preview_instances)
+                &safe_bytes
             );
         }
     }
@@ -3534,28 +3796,72 @@ impl GpuRenderer {
         // Обновляем UI буфер ДО начала render pass
         // Записываем все ui_rects в буфер (и обычные элементы, и тултипы)
         if !self.ui_rects.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<UIRect>()) as usize;
+            let write_count = self.ui_rects.len().min(10000);
+            let slice = &self.ui_rects[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.ui_rect_buffer,
                 0,
-                bytemuck::cast_slice(&self.ui_rects)
+                &safe_bytes
             );
         }
         
         // Обновляем буфер миникарты ДО начала render pass
         if !self.minimap_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<UIRect>()) as usize;
+            let write_count = self.minimap_instances.len().min(10000);
+            let slice = &self.minimap_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.minimap_buffer,
                 0,
-                bytemuck::cast_slice(&self.minimap_instances)
+                &safe_bytes
+            );
+        }
+        
+        // Обновляем буфер font instances ДО начала render pass
+        if !self.font_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<UIPropsInstance>()) as usize;
+            let write_count = self.font_instances.len().min(10000);
+            let slice = &self.font_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
+            self.queue.write_buffer(
+                &self.font_instance_buffer,
+                0,
+                &safe_bytes
             );
         }
         
         // Обновляем буфер UI спрайтов ДО начала render pass
         if !self.ui_props_instances.is_empty() {
+            // Защита от переполнения буфера
+            let max_ui_props_buffer_bytes = (10000 * std::mem::size_of::<UIPropsInstance>()) as usize;
+            let ui_props_write_count = self.ui_props_instances.len().min(10000);
+            let ui_props_slice = &self.ui_props_instances[..ui_props_write_count];
+            let ui_props_bytes: &[u8] = bytemuck::cast_slice(ui_props_slice);
+            // ВАЖНО: всегда ограничиваем до max_ui_props_buffer_bytes, даже если bytes.len() меньше
+            let safe_ui_props_bytes_vec: Vec<u8> = {
+                let len = ui_props_bytes.len().min(max_ui_props_buffer_bytes);
+                ui_props_bytes[..len].to_vec()
+            };
+            
             self.queue.write_buffer(
                 &self.ui_props_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.ui_props_instances)
+                &safe_ui_props_bytes_vec
             );
         }
         
@@ -3564,29 +3870,64 @@ impl GpuRenderer {
         if !self.menu_background_instances.is_empty() {
             let instances: Vec<UIPropsInstance> = self.menu_background_instances.iter().map(|(_, inst)| *inst).collect();
             // Используем тот же буфер, но записываем после обычных UI props
-            let offset = (std::mem::size_of::<UIPropsInstance>() * self.ui_props_instances.len()) as wgpu::BufferAddress;
-            self.queue.write_buffer(
-                &self.ui_props_instance_buffer,
-                offset,
-                bytemuck::cast_slice(&instances)
-            );
+            let max_ui_props_buffer_bytes = (10000 * std::mem::size_of::<UIPropsInstance>()) as usize;
+            let ui_props_size = (std::mem::size_of::<UIPropsInstance>() * self.ui_props_instances.len().min(10000)) as usize;
+            let available_space = max_ui_props_buffer_bytes.saturating_sub(ui_props_size);
+            
+            // Ограничиваем количество инстансов фона меню, чтобы они поместились в оставшееся пространство
+            let max_menu_instances = available_space / std::mem::size_of::<UIPropsInstance>();
+            let menu_write_count = instances.len().min(max_menu_instances);
+            let menu_slice = &instances[..menu_write_count];
+            
+            let offset = ui_props_size as wgpu::BufferAddress;
+            let menu_bytes: &[u8] = bytemuck::cast_slice(menu_slice);
+            // ВАЖНО: всегда ограничиваем до доступного пространства
+            let max_menu_bytes = max_ui_props_buffer_bytes.saturating_sub(offset as usize);
+            let safe_menu_bytes_vec: Vec<u8> = {
+                let len = menu_bytes.len().min(max_menu_bytes);
+                menu_bytes[..len].to_vec()
+            };
+            
+            if !safe_menu_bytes_vec.is_empty() {
+                self.queue.write_buffer(
+                    &self.ui_props_instance_buffer,
+                    offset,
+                    &safe_menu_bytes_vec
+                );
+            }
         }
         
         // Обновляем буфер поленьев ДО начала render pass
         if !self.log_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<LogInstance>()) as usize;
+            let write_count = self.log_instances.len().min(10000);
+            let slice = &self.log_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.log_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.log_instances)
+                &safe_bytes
             );
         }
         
         // Обновляем буфер ночного освещения ДО начала render pass
         if !self.light_instances.is_empty() {
+            let max_buffer_bytes = (10000 * std::mem::size_of::<LightInstance>()) as usize;
+            let write_count = self.light_instances.len().min(10000);
+            let slice = &self.light_instances[..write_count];
+            let bytes: &[u8] = bytemuck::cast_slice(slice);
+            let safe_bytes: Vec<u8> = {
+                let len = bytes.len().min(max_buffer_bytes);
+                bytes[..len].to_vec()
+            };
             self.queue.write_buffer(
                 &self.light_instance_buffer,
                 0,
-                bytemuck::cast_slice(&self.light_instances)
+                &safe_bytes
             );
         }
         
@@ -3621,7 +3962,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.tile_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.tile_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.tile_instances.len().min(10000)) as u32);
                 }
             }
             
@@ -3634,7 +3975,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.log_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.log_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.log_instances.len().min(10000)) as u32);
                 }
             }
             
@@ -3649,7 +3990,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.building_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.building_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.building_instances.len().min(10000)) as u32);
                 }
                 
                 // Рендерим граждан с эмоциями (используем отдельный pipeline)
@@ -3661,7 +4002,7 @@ impl GpuRenderer {
                         render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
                         render_pass.set_vertex_buffer(1, self.citizen_instance_buffer.slice(..));
                         render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                        render_pass.draw_indexed(0..6, 0, 0..self.citizen_instances.len() as u32);
+                        render_pass.draw_indexed(0..6, 0, 0..(self.citizen_instances.len().min(10000)) as u32);
                     }
                 }
                 
@@ -3673,7 +4014,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..)); // используем тот же quad
                     render_pass.set_vertex_buffer(1, self.road_preview_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.road_preview_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.road_preview_instances.len().min(10000)) as u32);
                 }
                 
                 // Рендерим предпросмотр зданий (поверх всего остального)
@@ -3684,7 +4025,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.building_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.building_preview_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.building_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.building_preview_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.building_preview_instances.len().min(10000)) as u32);
                 }
             }
             
@@ -3702,7 +4043,7 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..)); // Используем квадратную модель вместо прямоугольной
                 render_pass.set_vertex_buffer(1, self.light_instance_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..6, 0, 0..self.light_instances.len() as u32);
+                render_pass.draw_indexed(0..6, 0, 0..(self.light_instances.len().min(10000)) as u32);
             }
 
             // Рендерим туман войны в самом конце, поверх всего остального
@@ -3714,7 +4055,7 @@ impl GpuRenderer {
                     render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, self.fog_instance_buffer.slice(..));
                     render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    render_pass.draw_indexed(0..6, 0, 0..self.fog_instances.len() as u32);
+                    render_pass.draw_indexed(0..6, 0, 0..(self.fog_instances.len().min(10000)) as u32);
                 }
             }
             
@@ -3752,12 +4093,13 @@ impl GpuRenderer {
             }
             
             // 1. Рендерим обычный UI (верхний UI) - до окна дерева исследований
+            let ui_rects_len = self.ui_rects.len().min(10000);
             let ui_end = if self.research_tree_start_index > 0 {
-                self.research_tree_start_index
+                self.research_tree_start_index.min(10000)
             } else if self.tooltip_start_index > 0 {
-                self.tooltip_start_index
+                self.tooltip_start_index.min(10000)
             } else {
-                self.ui_rects.len()
+                ui_rects_len
             };
             
             if ui_end > 0 {
@@ -3770,12 +4112,13 @@ impl GpuRenderer {
             }
             
             // 2. Рендерим иконки обычного UI - до окна дерева исследований
+            let ui_props_len = self.ui_props_instances.len().min(10000);
             let props_end = if self.research_tree_props_start_index > 0 {
-                self.research_tree_props_start_index
+                self.research_tree_props_start_index.min(10000)
             } else if self.tooltip_props_start_index > 0 {
-                self.tooltip_props_start_index
+                self.tooltip_props_start_index.min(10000)
             } else {
-                self.ui_props_instances.len()
+                ui_props_len
             };
             
             if props_end > 0 {
@@ -3797,17 +4140,18 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
                 render_pass.set_vertex_buffer(1, self.minimap_buffer.slice(..));
                 render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..6, 0, 0..self.minimap_instances.len() as u32);
+                render_pass.draw_indexed(0..6, 0, 0..(self.minimap_instances.len().min(10000)) as u32);
             }
             
             // 4. Рендерим окно дерева исследований (поверх миникарты)
-            if self.research_tree_start_index > 0 && self.research_tree_start_index < self.ui_rects.len() {
+            let ui_rects_len = self.ui_rects.len().min(10000);
+            if self.research_tree_start_index > 0 && self.research_tree_start_index < ui_rects_len {
                 let tree_end = if self.tooltip_start_index > self.research_tree_start_index {
-                    self.tooltip_start_index
+                    self.tooltip_start_index.min(10000)
                 } else {
-                    self.ui_rects.len()
+                    ui_rects_len
                 };
-                let tree_count = tree_end - self.research_tree_start_index;
+                let tree_count = (tree_end - self.research_tree_start_index).min(10000);
                 if tree_count > 0 {
                     render_pass.set_pipeline(&self.ui_rect_render_pipeline);
                     render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -3820,13 +4164,14 @@ impl GpuRenderer {
             }
             
             // 5. Рендерим иконки дерева исследований (поверх миникарты)
-            if self.research_tree_props_start_index > 0 && self.research_tree_props_start_index < self.ui_props_instances.len() {
+            let ui_props_len = self.ui_props_instances.len().min(10000);
+            if self.research_tree_props_start_index > 0 && self.research_tree_props_start_index < ui_props_len {
                 let tree_props_end = if self.tooltip_props_start_index > self.research_tree_props_start_index {
-                    self.tooltip_props_start_index
+                    self.tooltip_props_start_index.min(10000)
                 } else {
-                    self.ui_props_instances.len()
+                    ui_props_len
                 };
-                let tree_props_count = tree_props_end - self.research_tree_props_start_index;
+                let tree_props_count = (tree_props_end - self.research_tree_props_start_index).min(10000);
                 if tree_props_count > 0 {
                     if let Some(ref props_bind_group) = self.props_texture_bind_group {
                         render_pass.set_pipeline(&self.ui_props_render_pipeline);
@@ -3841,9 +4186,29 @@ impl GpuRenderer {
                 }
             }
             
-            // 6. Рендерим тултипы последними, поверх всего
-            if self.tooltip_start_index < self.ui_rects.len() {
-                let tooltip_count = self.ui_rects.len() - self.tooltip_start_index;
+            // 6. Рендерим обычный текст (font instances до тултипов) ДО тултипов
+            let font_len = self.font_instances.len().min(10000);
+            let font_end = if self.tooltip_font_start_index > 0 {
+                self.tooltip_font_start_index.min(10000)
+            } else {
+                font_len
+            };
+            if font_end > 0 {
+                if let Some(ref font_bind_group) = self.font_texture_bind_group {
+                    render_pass.set_pipeline(&self.ui_props_render_pipeline);
+                    render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                    render_pass.set_bind_group(1, font_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, self.font_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..6, 0, 0..font_end as u32);
+                }
+            }
+            
+            // 7. Рендерим тултипы поверх всего (включая обычный текст)
+            let ui_rects_len = self.ui_rects.len().min(10000);
+            if self.tooltip_start_index < ui_rects_len {
+                let tooltip_count = (ui_rects_len - self.tooltip_start_index).min(10000);
                 // Обновляем буфер для тултипов ДО начала render pass (уже сделано выше)
                 // Используем тот же буфер, но с другим offset
                 render_pass.set_pipeline(&self.ui_rect_render_pipeline);
@@ -3856,9 +4221,27 @@ impl GpuRenderer {
                 render_pass.draw_indexed(0..6, 0, 0..tooltip_count as u32);
             }
             
-            // 7. Рендерим иконки тултипов поверх тултипов
-            if self.tooltip_props_start_index < self.ui_props_instances.len() {
-                let tooltip_props_count = self.ui_props_instances.len() - self.tooltip_props_start_index;
+            // 8. Рендерим текст тултипов поверх тултипов
+            if self.tooltip_font_start_index < font_len {
+                let tooltip_font_count = (font_len - self.tooltip_font_start_index).min(10000);
+                if tooltip_font_count > 0 {
+                    if let Some(ref font_bind_group) = self.font_texture_bind_group {
+                        render_pass.set_pipeline(&self.ui_props_render_pipeline);
+                        render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
+                        render_pass.set_bind_group(1, font_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, self.tile_vertex_buffer.slice(..));
+                        let tooltip_font_offset = (std::mem::size_of::<UIPropsInstance>() * self.tooltip_font_start_index) as wgpu::BufferAddress;
+                        render_pass.set_vertex_buffer(1, self.font_instance_buffer.slice(tooltip_font_offset..));
+                        render_pass.set_index_buffer(self.tile_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        render_pass.draw_indexed(0..6, 0, 0..tooltip_font_count as u32);
+                    }
+                }
+            }
+            
+            // 8. Рендерим иконки тултипов поверх тултипов
+            let ui_props_len = self.ui_props_instances.len().min(10000);
+            if self.tooltip_props_start_index < ui_props_len {
+                let tooltip_props_count = (ui_props_len - self.tooltip_props_start_index).min(10000);
                 if let Some(ref props_bind_group) = self.props_texture_bind_group {
                     render_pass.set_pipeline(&self.ui_props_render_pipeline);
                     render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
