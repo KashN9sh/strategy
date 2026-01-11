@@ -135,8 +135,25 @@ jobs:
         chmod +x butler
         sudo mv butler /usr/local/bin/
     
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref_name }}" =~ ^v[0-9] ]]; then
+          # Используем тег, если это push тега
+          VERSION="${{ github.ref_name }}"
+        else
+          # Получаем версию из Cargo.toml
+          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          # Добавляем префикс v, если его нет
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            VERSION="v$VERSION"
+          fi
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using version: $VERSION"
+    
     - name: Push to itch.io (macOS)
       env:
         BUTLER_API_KEY: ${{ secrets.ITCH_API_KEY }}
       run: |
-        butler push "Cozy Kingdom.dmg" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:mac" --userversion "${{ github.ref_name }}"
+        butler push "Cozy Kingdom.dmg" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:mac" --userversion "${{ steps.version.outputs.version }}"

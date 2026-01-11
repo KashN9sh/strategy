@@ -86,8 +86,26 @@ jobs:
           exit 1
         }
     
+    - name: Get version
+      id: version
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref_name }}" =~ ^v[0-9] ]]; then
+          # Используем тег, если это push тега
+          VERSION="${{ github.ref_name }}"
+        else
+          # Получаем версию из Cargo.toml
+          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          # Добавляем префикс v, если его нет
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            VERSION="v$VERSION"
+          fi
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using version: $VERSION"
+    
     - name: Push to itch.io (Windows Installer)
       env:
         BUTLER_API_KEY: ${{ secrets.ITCH_API_KEY }}
       run: |
-        .\butler.exe push "Cozy Kingdom Setup.exe" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows" --userversion "${{ github.ref_name }}"
+        .\butler.exe push "Cozy Kingdom Setup.exe" "${{ secrets.ITCH_USERNAME }}/cozy-kingdom:windows" --userversion "${{ steps.version.outputs.version }}"
