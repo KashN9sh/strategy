@@ -8,6 +8,7 @@ on:
     # Игнорируем коммиты, которые созданы этим workflow (чтобы избежать бесконечного цикла)
     paths-ignore:
       - 'Cargo.toml'
+      - 'Cargo.lock'
 
 jobs:
   version-bump:
@@ -82,10 +83,18 @@ jobs:
         sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
         echo "Updated Cargo.toml to version $NEW_VERSION"
     
+    - name: Update Cargo.lock version
+      run: |
+        NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+        # Обновляем версию в Cargo.lock для пакета strategy
+        # Используем awk для более точной замены: ищем name = "strategy" и следующую строку version
+        awk -v newver="$NEW_VERSION" '/^name = "strategy"$/ {found=1; print; next} found && /^version = / {print "version = \"" newver "\""; found=0; next} {print}' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+        echo "Updated Cargo.lock to version $NEW_VERSION"
+    
     - name: Create version commit
       run: |
         NEW_VERSION="${{ steps.bump.outputs.new_version }}"
-        git add Cargo.toml
+        git add Cargo.toml Cargo.lock
         git commit -m "chore: bump version to $NEW_VERSION [skip version]" || exit 0
         git push origin HEAD:${{ github.ref_name }} || exit 0
     
