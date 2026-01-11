@@ -47,23 +47,93 @@ static MINIMAP_CELL_PX: AtomicI32 = AtomicI32::new(0);
 
 type ResolvedInput = input::ResolvedInput;
 
-fn main() -> Result<()> {
-    run()
+fn main() {
+    // Инициализируем логирование
+    // Пробуем записать логи в файл для отладки
+    let log_file = std::path::Path::new("cozy-kingdom.log");
+    let _ = std::fs::File::create(log_file); // Создаем файл, игнорируем ошибки
+    
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.filter_level(log::LevelFilter::Info);
+    
+    // Пробуем записать в файл через stderr (простой способ)
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "=== Cozy Kingdom запускается ===");
+        let _ = writeln!(file, "Текущая директория: {:?}", std::env::current_dir());
+        let _ = writeln!(file, "Путь к exe: {:?}", std::env::current_exe());
+    }
+    
+    builder.init();
+    
+    log::info!("=== Cozy Kingdom запускается ===");
+    log::info!("Текущая директория: {:?}", std::env::current_dir());
+    log::info!("Путь к exe: {:?}", std::env::current_exe());
+    
+    // Запускаем игру с обработкой ошибок
+    if let Err(e) = run() {
+        let error_msg = format!("Ошибка запуска игры:\n\n{}", e);
+        eprintln!("{}", error_msg);
+        
+        // На Windows показываем диалог с ошибкой
+        #[cfg(target_os = "windows")]
+        {
+            use std::ffi::OsStr;
+            use std::os::windows::ffi::OsStrExt;
+            use winapi::um::winuser;
+            
+            let msg: Vec<u16> = OsStr::new(&error_msg)
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            let title: Vec<u16> = OsStr::new("Cozy Kingdom - Ошибка")
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            
+            unsafe {
+                winapi::um::winuser::MessageBoxW(
+                    std::ptr::null_mut(),
+                    msg.as_ptr(),
+                    title.as_ptr(),
+                    winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
+                );
+            }
+        }
+        
+        // На других системах просто выводим в консоль
+        #[cfg(not(target_os = "windows"))]
+        {
+            eprintln!("{}", error_msg);
+        }
+        
+        std::process::exit(1);
+    }
 }
 
 fn run() -> Result<()> {
     use std::sync::Arc;
+    
+    log::info!("Создание event loop...");
     let event_loop = EventLoop::new()?;
+    
+    log::info!("Создание окна...");
     let window = Arc::new(WindowBuilder::new()
         .with_title("Cozy Kingdom")
         .with_inner_size(LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?);
 
-    env_logger::init();
+    log::info!("Инициализация GPU renderer...");
 
     let size = window.inner_size();
     let mut gpu_renderer = pollster::block_on(GpuRenderer::new(window.clone()))?;
+    log::info!("Загрузка текстур лиц...");
     gpu_renderer.load_faces_texture()?;
+    log::info!("Загрузка конфига...");
     let (config, input) = config::load_or_create("config.toml")?;
     let input = ResolvedInput::from(&input);
 
@@ -73,6 +143,7 @@ fn run() -> Result<()> {
     let mut main_menu = MainMenu::new();
     let mut pause_menu = menu::PauseMenu::new();
     
+    log::info!("Загрузка текстур...");
     // Загрузить все текстуры
     atlas::load_textures(
         &mut game_state.atlas,
@@ -83,16 +154,18 @@ fn run() -> Result<()> {
     game_state.width_i32 = size.width as i32;
     game_state.height_i32 = size.height as i32;
     
+    log::info!("Инициализация музыки...");
     // Инициализировать менеджер музыки
     match music::MusicManager::new() {
         Ok(music_manager) => {
             game_state.music_manager = Some(music_manager);
         }
         Err(e) => {
-            eprintln!("Не удалось инициализировать музыку: {}", e);
+            log::warn!("Не удалось инициализировать музыку: {}", e);
         }
     }
 
+    log::info!("Игра готова к запуску!");
     let window = window.clone();
     event_loop.run(move |event, elwt| {
         match event {

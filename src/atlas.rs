@@ -190,6 +190,7 @@ pub fn load_textures(
     // Загрузка тайлов из spritesheet.png или tiles.png
     use crate::resource_path;
     let spritesheet_path = resource_path::resource_path("assets/spritesheet.png");
+    log::info!("Попытка загрузить spritesheet: {:?}", spritesheet_path);
     if let Ok(img) = image::open(&spritesheet_path) {
         let img = img.to_rgba8();
         let (iw, ih) = img.dimensions();

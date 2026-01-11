@@ -2221,6 +2221,7 @@ dependencies = [
  "env_logger",
  "glam",
  "image",
+ "log",
  "noise",
  "pollster",
  "rand 0.9.2",
@@ -2229,6 +2230,7 @@ dependencies = [
  "serde_json",
  "toml 0.9.5",
  "wgpu",
+ "winapi",
  "winit",
 ]
 
