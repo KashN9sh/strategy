@@ -36,7 +36,7 @@ mod tutorial;
 use gpu_renderer::GpuRenderer;
 use menu::{MainMenu, MenuAction};
 use std::time::Instant;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng, Rng, thread_rng};
 use std::sync::atomic::{AtomicI32, Ordering};
 use winit::dpi::LogicalSize;
 use glam::IVec2;
@@ -139,7 +139,7 @@ fn run() -> Result<()> {
     let input = ResolvedInput::from(&input);
 
     let mut camera = camera::Camera::new(Vec2::new(0.0, 0.0), 2.0);
-    let mut rng_init = StdRng::seed_from_u64(42);
+    let mut rng_init = StdRng::seed_from_u64(thread_rng().random());
     let mut game_state = game_state::GameState::new(&mut rng_init, &config);
     let mut main_menu = MainMenu::new();
     let mut pause_menu = menu::PauseMenu::new();
@@ -184,7 +184,7 @@ fn run() -> Result<()> {
                             match action {
                                 MenuAction::NewGame => {
                                     // Создаем новую игру
-                                    let mut new_rng = StdRng::seed_from_u64(42);
+                                    let mut new_rng = StdRng::seed_from_u64(thread_rng().random());
                                     game_state = game_state::GameState::new(&mut new_rng, &config);
                                     // Используем текущий размер окна
                                     let current_size = window.inner_size();
@@ -500,7 +500,7 @@ fn run() -> Result<()> {
                                 ) {
                                     match action {
                                         MenuAction::NewGame => {
-                                            let mut new_rng = StdRng::seed_from_u64(42);
+                                            let mut new_rng = StdRng::seed_from_u64(thread_rng().random());
                                             game_state = game_state::GameState::new(&mut new_rng, &config);
                                             // Используем текущий размер окна
                                             let current_size = window.inner_size();
