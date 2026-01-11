@@ -13,6 +13,7 @@ use crate::building_production;
 use crate::citizen_state;
 use crate::research::ResearchSystem;
 use crate::notifications::{NotificationSystem, NotificationKind};
+use crate::tutorial::TutorialContext;
 
 pub const DAY_LENGTH_MS: f32 = 120_000.0;
 
@@ -106,6 +107,15 @@ pub fn update_game_state(game_state: &mut GameState, frame_ms: f32, config: &cra
         if let Err(e) = music_manager.update() {
             eprintln!("Ошибка обновления музыки: {}", e);
         }
+    }
+    
+    // Обновление туториала
+    if game_state.tutorial_system.active {
+        let tutorial_context = TutorialContext::from_game_state(
+            game_state.ui_category,
+            &game_state.buildings,
+        );
+        game_state.tutorial_system.update(frame_ms, &tutorial_context);
     }
 }
 

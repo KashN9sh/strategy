@@ -170,6 +170,7 @@ impl Command for SaveGameCommand {
             &game_state.research_system,
             &game_state.notification_system,
             &game_state.quest_system,
+            &game_state.tutorial_system,
             &game_state.citizens,
             &game_state.jobs,
             game_state.next_job_id,

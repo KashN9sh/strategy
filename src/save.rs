@@ -5,6 +5,7 @@ use crate::types::{Building, BuildingKind, Resources, Citizen, Job, WarehouseSto
 use crate::research::ResearchSystem;
 use crate::notifications::NotificationSystem;
 use crate::quests::QuestSystem;
+use crate::tutorial::TutorialSystem;
 
 #[derive(Serialize, Deserialize)]
 pub struct SaveData {
@@ -21,6 +22,8 @@ pub struct SaveData {
     pub notification_system: Option<NotificationSystem>,
     #[serde(default)]
     pub quest_system: Option<QuestSystem>,
+    #[serde(default)]
+    pub tutorial_system: Option<TutorialSystem>,
     // Расширенные данные
     #[serde(default)]
     pub citizens: Vec<Citizen>,
@@ -81,6 +84,7 @@ impl SaveData {
         research_system: &ResearchSystem,
         notification_system: &NotificationSystem,
         quest_system: &QuestSystem,
+        tutorial_system: &TutorialSystem,
         citizens: &Vec<Citizen>,
         jobs: &Vec<Job>,
         next_job_id: u64,
@@ -122,6 +126,7 @@ impl SaveData {
             research_system: Some(research_system.clone()),
             notification_system: Some(notification_system.clone()),
             quest_system: Some(quest_system.clone()),
+            tutorial_system: Some(tutorial_system.clone()),
             citizens: citizens.clone(),
             jobs: jobs.clone(),
             next_job_id,

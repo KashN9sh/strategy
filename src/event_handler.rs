@@ -93,6 +93,18 @@ pub fn handle_keyboard_input(
             }
         }
         
+        // Space: продолжить туториал (если туториал активен и ожидает нажатия)
+        if key_code == KeyCode::Space && !game_state.console.open && game_state.tutorial_system.active {
+            game_state.tutorial_system.handle_space();
+            return true;
+        }
+        
+        // Tab: пропустить туториал
+        if key_code == KeyCode::Tab && !game_state.console.open && game_state.tutorial_system.active {
+            game_state.tutorial_system.skip();
+            return true;
+        }
+        
         // Создаем менеджер команд с предустановленными командами
         let command_manager = CommandManager::create_default(input);
         

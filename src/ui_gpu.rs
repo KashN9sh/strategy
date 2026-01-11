@@ -2020,3 +2020,274 @@ pub fn draw_quests_gpu(
     }
 }
 
+/// Рисование панели туториала
+pub fn draw_tutorial_gpu(
+    gpu: &mut GpuRenderer,
+    fw: i32,
+    fh: i32,
+    tutorial: &crate::tutorial::TutorialSystem,
+    base_scale_k: f32,
+) {
+    if !tutorial.active {
+        return;
+    }
+    
+    let Some(title) = tutorial.current_title() else {
+        return;
+    };
+    let Some(message) = tutorial.current_message() else {
+        return;
+    };
+    
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    
+    // Параметры панели
+    let panel_w = (fw as f32 * 0.75).min(800.0 * scale).max(450.0 * scale);
+    let pad = (16 * s) as f32;
+    let line_height = (14 * s) as f32;
+    let title_height = (20 * s) as f32;
+    
+    // Считаем количество строк в сообщении
+    let lines: Vec<&str> = message.lines().collect();
+    let lines_count = lines.len() as f32;
+    
+    // Высота панели: заголовок + сообщение + подсказка + отступы
+    let hint_height = if tutorial.requires_space() { line_height + (8 * s) as f32 } else { 0.0 };
+    let skip_hint_height = line_height;
+    let panel_h = pad * 2.0 + title_height + (8 * s) as f32 + lines_count * line_height + hint_height + skip_hint_height + (8 * s) as f32;
+    
+    // Позиция панели - интерполируем между центром и правым верхним углом
+    let pos_t = tutorial.panel_position; // 0.0 = центр, 1.0 = правый верхний угол
+    
+    // Центральная позиция
+    let center_x = (fw as f32 - panel_w) / 2.0;
+    let center_y = fh as f32 * 0.2;
+    
+    // Уменьшаем размер панели в углу для компактности
+    let scale_factor = 1.0 - pos_t * 0.3; // Уменьшаем до 70% в углу
+    let scaled_panel_w = panel_w * scale_factor;
+    let scaled_panel_h = panel_h * scale_factor;
+    let scaled_scale = scale * scale_factor;
+    
+    // Позиция в правом верхнем углу (компактная версия)
+    let corner_pad = (12 * s) as f32;
+    let corner_x = fw as f32 - scaled_panel_w - corner_pad;
+    let corner_y = corner_pad;
+    
+    // Интерполируем позицию
+    let panel_x = center_x + (corner_x - center_x) * pos_t;
+    let panel_y = center_y + (corner_y - center_y) * pos_t;
+    
+    // Анимация появления (fade in)
+    let fade_duration = 500.0;
+    let alpha = (tutorial.message_time_ms / fade_duration).min(1.0);
+    
+    // Фон панели (деревянный стиль как в меню исследований)
+    let wood_base = [0.35, 0.25, 0.18, 0.95 * alpha];
+    let wood_border = [0.20, 0.15, 0.10, 1.0 * alpha];
+    let border_thick = (6 * s) as f32;
+    
+    // Рамка
+    gpu.add_ui_rect(panel_x - border_thick, panel_y - border_thick, 
+                    scaled_panel_w + border_thick * 2.0, scaled_panel_h + border_thick * 2.0, wood_border);
+    
+    // Внутренняя площадь
+    gpu.add_ui_rect(panel_x, panel_y, scaled_panel_w, scaled_panel_h, wood_base);
+    
+    // Текстура дерева (полосы)
+    let plank_h = (24 * s) as f32 * scale_factor;
+    let mut plank_y = panel_y;
+    let mut toggle_light = false;
+    while plank_y < panel_y + scaled_panel_h - 1.0 {
+        let h = plank_h.min(panel_y + scaled_panel_h - plank_y);
+        let color = if toggle_light { 
+            [0.40, 0.30, 0.22, 0.3 * alpha] 
+        } else { 
+            [0.30, 0.22, 0.16, 0.3 * alpha] 
+        };
+        gpu.add_ui_rect(panel_x, plank_y, scaled_panel_w, h, color);
+        plank_y += plank_h;
+        toggle_light = !toggle_light;
+    }
+    
+    // Внутренняя тень
+    let shadow = [0.0, 0.0, 0.0, 0.15 * alpha];
+    let shadow_w = (6 * s) as f32 * scale_factor;
+    gpu.add_ui_rect(panel_x, panel_y, scaled_panel_w, shadow_w, shadow);
+    gpu.add_ui_rect(panel_x, panel_y + scaled_panel_h - shadow_w, scaled_panel_w, shadow_w, shadow);
+    
+    let scaled_pad = pad * scale_factor;
+    let scaled_title_height = title_height * scale_factor;
+    let scaled_line_height = line_height * scale_factor;
+    
+    let mut text_y = panel_y + scaled_pad;
+    
+    // Заголовок (золотой цвет) - центрирован
+    let title_color = [1.0, 0.9, 0.6, alpha];
+    let title_w = title.len() as f32 * 4.0 * 2.0 * scaled_scale * 1.2;
+    let title_x = panel_x + (scaled_panel_w - title_w) / 2.0;
+    gpu.draw_text(title_x, text_y, title.as_bytes(), title_color, scaled_scale * 1.2);
+    text_y += scaled_title_height + (8 * s) as f32 * scale_factor;
+    
+    // Разделитель
+    let separator_color = [1.0, 0.9, 0.6, 0.3 * alpha];
+    gpu.add_ui_rect(panel_x + scaled_pad, text_y - (4 * s) as f32 * scale_factor, scaled_panel_w - scaled_pad * 2.0, 2.0, separator_color);
+    
+    // Сообщение (белый текст) - центрировано
+    let text_color = [1.0, 1.0, 1.0, alpha];
+    for line in lines {
+        let line_w = line.len() as f32 * 4.0 * 2.0 * scaled_scale;
+        let line_x = panel_x + (scaled_panel_w - line_w) / 2.0;
+        gpu.draw_text(line_x, text_y, line.as_bytes(), text_color, scaled_scale);
+        text_y += scaled_line_height;
+    }
+    
+    // Подсказка для продолжения
+    if tutorial.requires_space() {
+        text_y += (8 * s) as f32 * scale_factor;
+        let hint_color = [0.7, 0.9, 1.0, alpha * (0.5 + 0.5 * (tutorial.message_time_ms * 0.003).sin())];
+        let hint = "[ Press SPACE to continue ]";
+        let hint_w = hint.len() as f32 * 4.0 * 2.0 * scaled_scale * 0.8;
+        let hint_x = panel_x + (scaled_panel_w - hint_w) / 2.0;
+        gpu.draw_text(hint_x, text_y, hint.as_bytes(), hint_color, scaled_scale * 0.8);
+        text_y += scaled_line_height;
+    }
+    
+    // Подсказка для пропуска туториала
+    text_y += (4 * s) as f32 * scale_factor;
+    let skip_color = [0.6, 0.6, 0.6, alpha * 0.7];
+    let skip_hint = "[ Press TAB to skip tutorial ]";
+    let skip_w = skip_hint.len() as f32 * 4.0 * 2.0 * scaled_scale * 0.7;
+    let skip_x = panel_x + (scaled_panel_w - skip_w) / 2.0;
+    gpu.draw_text(skip_x, text_y, skip_hint.as_bytes(), skip_color, scaled_scale * 0.7);
+}
+
+/// Получить элемент для подсветки туториалом
+pub fn get_tutorial_highlight_rect(
+    tutorial: &crate::tutorial::TutorialSystem,
+    fw: i32,
+    fh: i32,
+    base_scale_k: f32,
+    ui_category: crate::ui::UICategory,
+) -> Option<(f32, f32, f32, f32)> {
+    use crate::tutorial::TutorialHighlight;
+    use crate::ui::UICategory;
+    use crate::types::BuildingKind;
+    
+    let highlight = tutorial.current_highlight()?;
+    
+    let s = ui::ui_scale(fh, base_scale_k);
+    let scale = s as f32;
+    let pad = 8.0 * scale;
+    let btn_h = 18.0 * scale;
+    let gap = 6.0 * scale;
+    
+    let bottom_panel_h = ui::bottom_panel_height(s) as f32;
+    let bottom_y = fh as f32 - bottom_panel_h;
+    
+    match highlight {
+        TutorialHighlight::Category(target_category) => {
+            // Позиция категорий (вторая строка нижней панели)
+            // ТОЧНО как в draw_ui_gpu: cat_y = tab_y + btn_h + 6.0 (константа!)
+            let tab_y = bottom_y + pad;
+            let cat_y = tab_y + btn_h + 6.0;
+            
+            let categories: &[(UICategory, &[u8])] = &[
+                (UICategory::Housing, b"Housing"),
+                (UICategory::Storage, b"Storage"),
+                (UICategory::Forestry, b"Forestry"),
+                (UICategory::Mining, b"Mining"),
+                (UICategory::Food, b"Food"),
+                (UICategory::Logistics, b"Logistics"),
+                (UICategory::Research, b"Research"),
+            ];
+            
+            let mut current_x = pad;
+            for (cat, label) in categories.iter() {
+                let btn_w = (label.len() as f32 * 4.0 * 2.0 * scale + 12.0).max(60.0);
+                if *cat == target_category {
+                    return Some((current_x - 2.0, cat_y - 2.0, btn_w + 4.0, btn_h + 4.0));
+                }
+                current_x += btn_w + gap;
+            }
+            None
+        }
+        TutorialHighlight::Building(building_kind) => {
+            // Позиция зданий (третья строка нижней панели)
+            // ТОЧНО как в draw_ui_gpu: cat_y = tab_y + btn_h + 6.0, build_y = cat_y + btn_h + 6.0
+            let tab_y = bottom_y + pad;
+            let cat_y = tab_y + btn_h + 6.0;
+            let build_y = cat_y + btn_h + 6.0;
+            
+            let buildings_for_cat: &[(BuildingKind, &[u8])] = match ui_category {
+                UICategory::Housing => &[(BuildingKind::House, b"House")],
+                UICategory::Storage => &[(BuildingKind::Warehouse, b"Warehouse")],
+                UICategory::Forestry => &[
+                    (BuildingKind::Lumberjack, b"Lumberjack"),
+                    (BuildingKind::Forester, b"Forester")
+                ],
+                UICategory::Mining => &[
+                    (BuildingKind::StoneQuarry, b"Quarry"),
+                    (BuildingKind::ClayPit, b"Clay Pit"),
+                    (BuildingKind::IronMine, b"Iron Mine"),
+                    (BuildingKind::Kiln, b"Kiln"),
+                    (BuildingKind::Smelter, b"Smelter")
+                ],
+                UICategory::Food => &[
+                    (BuildingKind::WheatField, b"Wheat Field"),
+                    (BuildingKind::Mill, b"Mill"),
+                    (BuildingKind::Bakery, b"Bakery"),
+                    (BuildingKind::Fishery, b"Fishery")
+                ],
+                UICategory::Logistics => &[],
+                UICategory::Research => &[(BuildingKind::ResearchLab, b"Research Lab")],
+            };
+            
+            let mut current_x = pad;
+            for (bk, label) in buildings_for_cat.iter() {
+                let btn_w = (label.len() as f32 * 4.0 * 2.0 * scale + 12.0).max(70.0);
+                if *bk == building_kind {
+                    return Some((current_x - 2.0, build_y - 2.0, btn_w + 4.0, btn_h + 4.0));
+                }
+                current_x += btn_w + gap;
+            }
+            None
+        }
+        TutorialHighlight::MapArea { .. } => {
+            // Для подсветки области на карте можно использовать другую логику
+            None
+        }
+    }
+}
+
+/// Рисование подсветки элемента для туториала
+pub fn draw_tutorial_highlight(
+    gpu: &mut GpuRenderer,
+    rect: (f32, f32, f32, f32),
+    time_ms: f32,
+) {
+    let (x, y, w, h) = rect;
+    
+    // Пульсирующая рамка - толще и ярче
+    let pulse = 0.5 + 0.5 * (time_ms * 0.004).sin();
+    let alpha = 0.8 + 0.2 * pulse;
+    let thickness = 3.0 + 2.0 * pulse;
+    
+    // Яркий жёлтый цвет для рамки
+    let highlight_color = [1.0, 0.85, 0.0, alpha];
+    
+    // Рамка (замкнутая)
+    // Верхняя граница
+    gpu.add_ui_rect(x - thickness, y - thickness, w + thickness * 2.0, thickness, highlight_color);
+    // Нижняя граница
+    gpu.add_ui_rect(x - thickness, y + h, w + thickness * 2.0, thickness, highlight_color);
+    // Левая граница
+    gpu.add_ui_rect(x - thickness, y - thickness, thickness, h + thickness * 2.0, highlight_color);
+    // Правая граница
+    gpu.add_ui_rect(x + w, y - thickness, thickness, h + thickness * 2.0, highlight_color);
+    
+    // Жёлтая заливка внутри - более заметная
+    let glow_color = [1.0, 0.9, 0.2, 0.25 + 0.15 * pulse];
+    gpu.add_ui_rect(x, y, w, h, glow_color);
+}

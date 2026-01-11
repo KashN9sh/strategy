@@ -1,7 +1,16 @@
 // Удалены неиспользуемые импорты (BuildingKind, FoodPolicy больше не нужны в layout функциях)
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UICategory { Housing, Storage, Forestry, Mining, Food, Logistics, Research }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum UICategory { 
+    Housing, 
+    Storage, 
+    #[default]
+    Forestry, 
+    Mining, 
+    Food, 
+    Logistics, 
+    Research 
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UITab { Build, Economy }
 

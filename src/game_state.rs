@@ -13,6 +13,7 @@ use crate::music::MusicManager;
 use crate::research::ResearchSystem;
 use crate::notifications::NotificationSystem;
 use crate::quests::QuestSystem;
+use crate::tutorial::TutorialSystem;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
 
@@ -112,6 +113,7 @@ pub struct GameState {
     pub research_system: ResearchSystem,
     pub notification_system: NotificationSystem,
     pub quest_system: QuestSystem,
+    pub tutorial_system: TutorialSystem,
     
     // === Размеры окна ===
     pub width_i32: i32,
@@ -229,6 +231,7 @@ impl GameState {
             research_system: ResearchSystem::new(),
             notification_system: NotificationSystem::new(),
             quest_system: QuestSystem::new(),
+            tutorial_system: TutorialSystem::new(),
             
             // Размеры
             width_i32: 1280,

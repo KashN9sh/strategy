@@ -32,6 +32,7 @@ mod notifications;
 mod quests;
 mod menu;
 mod resource_path;
+mod tutorial;
 use gpu_renderer::GpuRenderer;
 use menu::{MainMenu, MenuAction};
 use std::time::Instant;
@@ -290,6 +291,9 @@ fn run() -> Result<()> {
                                         if let Some(quest_system) = save.quest_system {
                                             game_state.quest_system = quest_system;
                                         }
+                                        if let Some(tutorial_system) = save.tutorial_system {
+                                            game_state.tutorial_system = tutorial_system;
+                                        }
                                         
                                         // Загружаем текстуры
                                         atlas::load_textures(
@@ -344,6 +348,7 @@ fn run() -> Result<()> {
                                         &game_state.research_system,
                                         &game_state.notification_system,
                                         &game_state.quest_system,
+                                        &game_state.tutorial_system,
                                         &game_state.citizens,
                                         &game_state.jobs,
                                         game_state.next_job_id,
@@ -446,6 +451,7 @@ fn run() -> Result<()> {
                                                 &game_state.research_system,
                                                 &game_state.notification_system,
                                                 &game_state.quest_system,
+                                                &game_state.tutorial_system,
                                                 &game_state.citizens,
                                                 &game_state.jobs,
                                                 game_state.next_job_id,
@@ -597,6 +603,9 @@ fn run() -> Result<()> {
                                                 }
                                                 if let Some(notification_system) = save.notification_system {
                                                     game_state.notification_system = notification_system;
+                                                }
+                                                if let Some(tutorial_system) = save.tutorial_system {
+                                                    game_state.tutorial_system = tutorial_system;
                                                 }
                                                 
                                                 // Загружаем текстуры
@@ -828,6 +837,33 @@ fn run() -> Result<()> {
                     &game_state.notification_system.notifications,
                     config.ui_scale_base,
                 );
+                
+                // Рендеринг туториала
+                if game_state.tutorial_system.active {
+                    // Подсветка элементов UI
+                    if let Some(rect) = ui_gpu::get_tutorial_highlight_rect(
+                        &game_state.tutorial_system,
+                        game_state.width_i32,
+                        game_state.height_i32,
+                        config.ui_scale_base,
+                        game_state.ui_category,
+                    ) {
+                        ui_gpu::draw_tutorial_highlight(
+                            &mut gpu_renderer,
+                            rect,
+                            game_state.tutorial_system.message_time_ms,
+                        );
+                    }
+                    
+                    // Панель с сообщением туториала
+                    ui_gpu::draw_tutorial_gpu(
+                        &mut gpu_renderer,
+                        game_state.width_i32,
+                        game_state.height_i32,
+                        &game_state.tutorial_system,
+                        config.ui_scale_base,
+                    );
+                }
                 
                 let t = (game_state.world_clock_ms / game_loop::DAY_LENGTH_MS).clamp(0.0, 1.0);
                 let angle = t * std::f32::consts::TAU;
